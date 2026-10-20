@@ -33,7 +33,7 @@ python -m venv .venv
 # Linux/macOS:
 . .venv/bin/activate
 # Windows PowerShell instead: .venv\Scripts\Activate.ps1
-python -m pip install ./personal_agentic_ai-0.1.0-py3-none-any.whl
+python -m pip install ./personal_agentic_ai-0.1.1-py3-none-any.whl
 python -m agent run "calculate (12 + 8) * 3"
 python -m agent web
 ```
@@ -103,6 +103,21 @@ database. Hidden/sensitive-named, binary and oversized files are skipped; a no-m
 result covers only the eligible scanned files. The safe no-follow implementation is
 Linux-tested and fails closed on unsupported OS primitives; it is not a secret detector
 or a security sandbox. See [Upstream review and exact limits](docs/UPSTREAM_ASSISTANT_REVIEW.md).
+
+### Browse and export your saved notes (development main)
+
+```sh
+python -m agent notes --limit 20
+python -m agent notes --query "école"
+python -m agent export-notes
+```
+
+The local UI also has **Browse notes** and **Next page**. Notes now support literal
+Unicode-aware case-insensitive matching, including accented/decomposed text. CLI
+browsing/export opens an existing database read-only. Export is plaintext JSONL and
+includes notes only, not drafts, approval tokens or audit history. Read the
+[notebook guide](docs/NOTEBOOK.md) for pagination, safe file redirection and limits.
+These additions are on main, not in existing release packages or the Android APK.
 
 ### Check an already-installed local model without running its plan
 

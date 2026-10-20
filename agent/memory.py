@@ -3,6 +3,7 @@ import hashlib
 import json
 import secrets
 import sqlite3
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -15,16 +16,26 @@ def digest(payload):
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def folded(text):
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFC", text).casefold())
+
+
 def now():
     return datetime.now(timezone.utc)
 
 
 class Memory:
-    def __init__(self, path):
+    def __init__(self, path, read_only=False):
         path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(path)
+        if not read_only:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) if read_only else sqlite3.connect(path)
         self.db.row_factory = sqlite3.Row
+        # SQLite lower() only handles ASCII. Literal Unicode matching stays local.
+        self.db.create_function('note_contains', 2, lambda text, query:
+                                folded(query) in folded(text), deterministic=True)
+        if read_only:
+            return
         self.db.executescript('''
         CREATE TABLE IF NOT EXISTS notes (
             id INTEGER PRIMARY KEY, text TEXT NOT NULL, created_at TEXT NOT NULL
@@ -48,9 +59,28 @@ class Memory:
         self.db.close()
 
     def search(self, query):
-        return [dict(row) for row in self.db.execute(
-            'SELECT id,text,created_at FROM notes WHERE instr(lower(text), lower(?)) > 0 ORDER BY id DESC LIMIT 20',
-            (query,))]
+        return self.list_notes(query=query)['notes']
+
+    def list_notes(self, query='', limit=20, before=None):
+        """Newest first; cursor excludes new inserts, not a frozen database snapshot."""
+        if not isinstance(query, str) or len(query) > 200:
+            raise ValueError('Note query must be text of at most 200 characters')
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError('Note page limit must be 1–100')
+        if before is not None and (type(before) is not int or not 1 <= before <= 9223372036854775807):
+            raise ValueError('Note cursor must be a positive SQLite integer ID')
+        rows = [dict(row) for row in self.db.execute(
+            'SELECT id,text,created_at FROM notes WHERE (? IS NULL OR id < ?) '
+            'AND note_contains(text, ?) ORDER BY id DESC LIMIT ?', (before, before, query, limit + 1))]
+        more = len(rows) > limit
+        notes = rows[:limit]
+        return {'notes': notes, 'next_before': notes[-1]['id'] if more else None,
+                'has_more': more, 'limit': limit}
+
+    def export_notes(self):
+        """Stream only notes in one SQLite SELECT snapshot; never approvals or audit."""
+        for row in self.db.execute('SELECT id,text,created_at FROM notes ORDER BY id ASC'):
+            yield dict(row)
 
     def add_note(self, text):
         with self.db:

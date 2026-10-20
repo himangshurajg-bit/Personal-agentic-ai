@@ -49,6 +49,13 @@ def main():
         cli('run', 'remember package smoke note')
         value = cli('run', 'find package smoke')
         assert value['results'][0]['result']['notes'][0]['text'] == 'package smoke note'
+        cli('run', 'remember École portable note')
+        notebook = cli('notes', '--query', 'école', '--limit', '1')
+        assert notebook['notes'][0]['text'] == 'École portable note'
+        exported = subprocess.run([sys.executable, '-m', 'agent', '--db', str(db), 'export-notes'],
+                                  cwd=root, check=True, text=True, capture_output=True, timeout=15)
+        rows = [json.loads(line) for line in exported.stdout.splitlines()]
+        assert len(rows) == 2 and set(rows[0]) == {'id', 'text', 'created_at'}
         draft = cli('run', 'draft nobody@example.test: package check')
         token = draft['results'][0]['proposal_id']
         approved = cli('approve', token)

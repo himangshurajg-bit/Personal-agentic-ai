@@ -89,3 +89,15 @@ Node/npm/Playwright are optional development-test tools, not runtime dependencie
 installed Chromium. Screenshots are written outside the repo. The script checks real
 controls, no overflow at 390px, reduced motion, contrast preference and browser errors;
 it does not establish physical-device compatibility or complete WCAG conformance.
+
+## Notebook panel (development main)
+
+The local notebook provides 20-note pages with a literal Unicode-aware filter and
+ID-based continuation. It renders notes as text and keeps the existing same-origin,
+Host, JSON schema and CSP checks. There is no HTTP export/download endpoint; an
+explicit notes-only JSONL export is available in the CLI. See [notebook guide](NOTEBOOK.md).
+
+Run `tests/ui/notebook.cjs` with the same optional tooling and scratch server for
+11 additional notebook checks: pagination without duplicate IDs, composed/decomposed
+Unicode filtering, literal HTML text, no-match state, mobile overflow, reduced motion
+and page errors. It creates 26 synthetic notes and does not delete them.

@@ -335,3 +335,42 @@ No model runtime/inference, cloud call, external action, emulator, deployment or
 unrelated project change was performed. No installed Ollama executable/process was
 found during this review. Real-model verification (#2) and executor design (#3)
 remain open; the latter is not enabled by this fix.
+
+## Local notebook: Unicode matching, browsing and export (#9, #10)
+
+Reviewed fresh remote main at `1849b98643ddaa43baa1948ae015039716582414` and its
+existing issues/releases before this change. SQLite's built-in `lower()` reproduced
+a real note-search miss: saved `École` was not found with `école` (#9). The fix uses
+literal NFC-normalized Unicode case folding without a model or new dependency.
+
+The independent notebook feature (#10) adds newest-first ID-cursor pagination to
+CLI and the existing glass local UI, plus an explicit streaming notes-only JSONL
+export. CLI inspection uses SQLite read-only mode; the existing UI initialization
+behavior is unchanged. There is no export HTTP endpoint, automatic upload, import,
+note deletion, new model integration or external executor. Development package
+version is `0.1.2.dev0`; existing published packages/APK remain unchanged.
+
+Verification with synthetic data on Linux:
+
+- Python 3.11.6: 134 unit tests and 11 separate loopback transport tests passed.
+- Python 3.14.7: 134 unit tests and 11 separate loopback transport tests passed.
+- Unit/HTTP coverage includes Unicode normalization/case folding, literal percent
+  and underscore, page boundaries and inserts between pages, cursor/query validation,
+  exact export fields/text, read-only/missing-database behavior, no changed review/audit
+  bytes after inspection, and existing same-origin/Host gates.
+- Chromium: 11 new notebook acceptance checks and all 19 existing UI checks passed,
+  at desktop and 390px phone-emulated widths with no page errors. Notebook tests
+  include HTML-as-text safety, no duplicate IDs across pages, decomposed Unicode,
+  no-match state, reduced motion and no horizontal overflow. Desktop/mobile notebook
+  screenshots were inspected. These are not physical-phone tests or a WCAG audit.
+- Built wheel and sdist; the wheel built from the sdist installed into fresh isolated
+  Python 3.11.6 and 3.14.7 environments. Installed CLI notes/export plus existing
+  calculator/search/preview/review-not-sent/assets/loopback UI smoke checks passed.
+- Wheel/sdist inspected for expected assets/docs/tests and exclusion of database/env
+  files. JavaScript syntax and diff whitespace checks passed. No runtime dependency
+  was added. Optional Playwright tooling stayed outside the project environment.
+
+Search scans locally rather than providing a full-text index. Keyset pages are not a
+multi-request snapshot. Export is plaintext, can hold a read lock, and excludes
+reviews/audit/approval tokens; it is not a full database backup or restore system.
+Real model inference (#2) and the external executor design (#3) remain unfinished.

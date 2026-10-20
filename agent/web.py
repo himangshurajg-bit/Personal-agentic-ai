@@ -66,7 +66,8 @@ def make_server(db_path, port=8765):
                     raise ValueError('Expected an object')
                 fields = {'/api/preview': {'request'}, '/api/run': {'request'}, '/api/pending': set(),
                           '/api/files': {'root', 'query'}, '/api/approve': {'id'}, '/api/reject': {'id'},
-                          '/api/revise': {'id', 'recipient', 'text'}}
+                          '/api/revise': {'id', 'recipient', 'text'},
+                          '/api/notes': {'query', 'before'}}
                 if self.path not in fields:
                     return self.answer({'error': 'Not found'}, 404)
                 if set(body) != fields[self.path] or any(not isinstance(v, str) for v in body.values()):
@@ -80,6 +81,11 @@ def make_server(db_path, port=8765):
                     try:
                         if self.path == '/api/run':
                             result = run(body['request'], memory, 'demo')
+                        elif self.path == '/api/notes':
+                            cursor = body['before']
+                            if cursor and (not cursor.isascii() or not cursor.isdecimal() or len(cursor) > 19):
+                                raise ValueError('Invalid note cursor')
+                            result = memory.list_notes(query=body['query'], before=int(cursor) if cursor else None)
                         elif self.path == '/api/pending':
                             result = {'pending': memory.pending()}
                         elif self.path == '/api/approve':

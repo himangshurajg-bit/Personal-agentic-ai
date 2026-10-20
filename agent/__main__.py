@@ -24,6 +24,11 @@ def main():
     web = sub.add_parser('web', help='Start local-only liquid-glass interface')
     web.add_argument('--port', type=int, default=8765)
     sub.add_parser('check-local', help='Opt-in fixed-prompt local model schema check; no tools or memory')
+    notes = sub.add_parser('notes', help='Browse/filter saved notes with ID-based pagination; no model')
+    notes.add_argument('--query', default='', help='Literal Unicode case-insensitive substring')
+    notes.add_argument('--limit', type=int, default=20, help='Page size 1–100')
+    notes.add_argument('--before', type=int, help='Use next_before from the preceding page')
+    sub.add_parser('export-notes', help='Print notes only as plaintext JSONL; no drafts or audit records')
     sub.add_parser('pending', help='Review exact pending actions; nothing executes')
     approve = sub.add_parser('approve', help='Approve one exact demo draft; DOES NOT send')
     approve.add_argument('proposal_id')
@@ -50,6 +55,15 @@ def main():
             return 0
         if args.command == 'files':
             print(json.dumps(search_files(args.root, args.query), indent=2, ensure_ascii=True))
+            return 0
+        if args.command in ('notes', 'export-notes'):
+            # Inspection/export must not initialize or chmod the source database.
+            memory = Memory(args.db, read_only=True)
+            if args.command == 'export-notes':
+                for note in memory.export_notes():
+                    print(json.dumps(note, ensure_ascii=True))
+                return 0
+            print(json.dumps(memory.list_notes(args.query, args.limit, args.before), indent=2, ensure_ascii=True))
             return 0
         memory = Memory(args.db)
         if args.command == 'run':

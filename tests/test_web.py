@@ -159,3 +159,35 @@ class WebTests(unittest.TestCase):
         self.assertNotIn('Traceback', errors.getvalue())
         self.assertFalse(Path(self.db).exists())
         self.assertEqual(self.api('preview', {'request': 'time'})[0], 200)
+
+    def test_notebook_pages_and_filters(self):
+        m = Memory(self.db)
+        try:
+            for i in range(25):
+                m.add_note('École ' + str(i))
+        finally:
+            m.close()
+        status, page = self.api('notes', {'query': 'école', 'before': ''})
+        self.assertEqual(status, 200)
+        self.assertEqual(len(page['notes']), 20)
+        self.assertEqual(page['next_before'], 6)
+        status, last = self.api('notes', {'query': 'ÉCOLE', 'before': str(page['next_before'])})
+        self.assertEqual(status, 200)
+        self.assertEqual([n['id'] for n in last['notes']], [5, 4, 3, 2, 1])
+        self.assertFalse(last['has_more'])
+
+    def test_notebook_rejects_bad_fields_and_cursors(self):
+        cases = ({'query': '', 'before': '0'}, {'query': '', 'before': '-1'},
+                 {'query': '', 'before': '1e2'}, {'query': '', 'before': '１'},
+                 {'query': '', 'before': str(2**63)}, {'query': '', 'before': 1},
+                 {'query': 'x' * 201, 'before': ''}, {'query': '', 'before': '', 'extra': ''})
+        for body in cases:
+            with self.subTest(body=body):
+                self.assertEqual(self.api('notes', body)[0], 400)
+        self.assertEqual(self.api('notes', {'query': '', 'before': ''})[0], 200)
+
+    def test_notebook_preserves_same_origin_gate(self):
+        body = {'query': '', 'before': ''}
+        self.assertEqual(self.request('/api/notes', body, origin=False)[0], 403)
+        self.assertEqual(self.request('/api/notes', body, origin='https://example.test')[0], 403)
+        self.assertEqual(self.request('/api/notes', body, host='foreign.test')[0], 403)
