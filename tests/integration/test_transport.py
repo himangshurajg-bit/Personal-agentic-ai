@@ -163,5 +163,44 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(len(requests), 1)
 
 
+class DiagnosticTransportTests(unittest.TestCase):
+    def test_check_cli_uses_one_real_request_and_no_database(self):
+        payload = json.dumps({'message': {'content': json.dumps({
+            'steps': [{'tool': 'notes.add', 'args': {'text': 'private-fixture-marker'}}]
+        })}}).encode()
+        with fixture(body=payload) as (url, requests), tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / 'absent' / 'memory.sqlite3'
+            result = subprocess.run([sys.executable, '-m', 'agent', '--db', str(db), 'check-local'],
+                                    env={**os.environ, 'LOCAL_AGENT_URL': url,
+                                         'LOCAL_AGENT_MODEL': 'fictional-model'},
+                                    text=True, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report['status'], 'schema_valid')
+            self.assertFalse(report['executed'])
+            self.assertFalse(db.parent.exists())
+            self.assertEqual(len(requests), 1)
+            path, _, raw = requests[0]
+            self.assertEqual(path, '/api/chat')
+            sent = json.loads(raw)
+            from agent.diagnostics import CHECK_REQUEST
+            self.assertEqual(sent['messages'][1]['content'], CHECK_REQUEST)
+            self.assertEqual(sent['model'], 'fictional-model')
+            self.assertNotIn('private-fixture-marker', result.stdout + result.stderr)
+
+    def test_invalid_provider_reply_fails_once_without_database(self):
+        with fixture(body=b'private-fixture-marker') as (url, requests), tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / 'absent' / 'memory.sqlite3'
+            result = subprocess.run([sys.executable, '-m', 'agent', '--db', str(db), 'check-local'],
+                                    env={**os.environ, 'LOCAL_AGENT_URL': url,
+                                         'LOCAL_AGENT_MODEL': 'fictional-model'},
+                                    text=True, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(json.loads(result.stdout)['status'], 'failed')
+            self.assertEqual(len(requests), 1)
+            self.assertFalse(db.parent.exists())
+            self.assertNotIn('private-fixture-marker', result.stdout + result.stderr)
+
+
 if __name__ == '__main__':
     unittest.main()

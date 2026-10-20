@@ -29,6 +29,28 @@ def _unique_object(pairs):
     return result
 
 
+class ProviderUnavailable(ValueError):
+    """Local/runtime transport could not be reached; no provider body is exposed."""
+
+
+def local_config():
+    endpoint = os.environ.get('LOCAL_AGENT_URL', 'http://127.0.0.1:11434').rstrip('/')
+    try:
+        parsed = urllib.parse.urlsplit(endpoint)
+        port = parsed.port
+        valid = (parsed.scheme == 'http' and parsed.hostname in ('127.0.0.1', 'localhost', '::1')
+                 and not (parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment)
+                 and (port is None or 1 <= port <= 65535))
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ValueError('Local provider must use an HTTP loopback origin, without a path or credentials')
+    model = os.environ.get('LOCAL_AGENT_MODEL', '')
+    if not model:
+        raise ValueError('Set LOCAL_AGENT_MODEL to an already installed local model')
+    return endpoint, model
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise ValueError('Provider redirects are disabled')
@@ -46,7 +68,9 @@ def post_json(url, data, headers):
         # HTTPError owns a response stream even though it is raised before the with block.
         exc.close()
         raise ValueError('Provider request failed; check model, credentials and endpoint') from None
-    except (urllib.error.URLError, OSError, http.client.HTTPException):
+    except (urllib.error.URLError, OSError):
+        raise ProviderUnavailable('Provider request failed; check model, credentials and endpoint') from None
+    except http.client.HTTPException:
         # Provider error bodies can contain private prompts; never print them.
         raise ValueError('Provider request failed; check model, credentials and endpoint') from None
     if len(raw) > 65536:
@@ -81,14 +105,7 @@ def plan_with_provider(request, provider):
                 return {'steps': []}
         return {'steps': steps}
     if provider == 'local':
-        endpoint = os.environ.get('LOCAL_AGENT_URL', 'http://127.0.0.1:11434').rstrip('/')
-        parsed = urllib.parse.urlsplit(endpoint)
-        if (parsed.scheme != 'http' or parsed.hostname not in ('127.0.0.1', 'localhost', '::1')
-                or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment):
-            raise ValueError('Local provider must use an HTTP loopback origin, without a path or credentials')
-        model = os.environ.get('LOCAL_AGENT_MODEL', '')
-        if not model:
-            raise ValueError('Set LOCAL_AGENT_MODEL to an already installed local model')
+        endpoint, model = local_config()
         payload = post_json(endpoint + '/api/chat', {
             'model': model, 'stream': False, 'format': 'json',
             'messages': [{'role': 'system', 'content': SYSTEM}, {'role': 'user', 'content': request}],

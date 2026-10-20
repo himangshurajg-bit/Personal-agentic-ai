@@ -27,8 +27,10 @@ handlers. Adding an API name to a README is not an implemented connection.
   `--provider cloud`, key/model supplied outside the repository. Protocol checked with
   mocks; no real account, charge or deployment tested.
 
-Both adapters share urllib transport now covered by seven isolated loopback fixture tests.
-These do not establish either provider's live compatibility. See [comparison and test scope](OPEN_SOURCE_REVIEW.md).
+Both adapters share urllib transport covered by isolated loopback fixture tests.
+These do not establish either provider's live compatibility. The opt-in
+[`check-local` command](LOCAL_MODEL_CHECK.md) can validate a fixed-prompt local response
+without executing its plan or opening memory. See [comparison and test scope](OPEN_SOURCE_REVIEW.md).
 
 Protocol references for future compatibility checks:
 - https://docs.ollama.com/api/chat

@@ -251,3 +251,45 @@ The prior Python release and Android test APK remain available without modificat
 
 Historic tags, Git history and already downloaded packages retain their original text.
 No license notices were removed, release assets overwritten or history rewritten.
+
+## Local-model diagnostic follow-up (issue #2)
+
+On 20 October 2026, fresh main matched `fba69d2` with a clean working tree; only
+issues #2 (real model verification) and #3 (external executor design) were open.
+The baseline passed 102 offline unit tests and nine loopback transport tests.
+No new reproduced bug justified a duplicate issue. This pass advances the existing
+#2 with `python -m agent check-local`, a one-attempt fixed-prompt schema diagnostic
+that cannot execute a returned plan, open a database or create an approval.
+
+Final regressions passed separately on Python 3.11.2 and 3.14.7:
+
+```text
+python -m unittest discover -s tests -q
+Ran 112 tests
+OK
+python -W error::ResourceWarning -m unittest discover -s tests/integration -q
+Ran 11 tests
+OK
+```
+
+New offline cases cover missing/invalid config (including bad/out-of-range ports),
+fixed prompt and one attempt, returned arguments excluded from reports, note/draft
+plans never executed, empty/invalid plans, sanitized failures, CLI exit/status handling,
+no database creation and loopback IPv6 config. Two new real-HTTP loopback fixtures
+exercise CLI output/request/no-database behavior and malformed response rejection.
+These are fixture tests, not a real runtime/model result.
+
+Built a local wheel (not a new published release), installed it into clean isolated
+Python 3.11/3.14 environments outside the checkout and ran
+`tests/packaging/check_installed.py`: both passed. Checks include installed assets,
+CLI calculation/notes/search, review/approval-not-sent, loopback UI, preview, and
+missing-model diagnostic without database creation. Compileall and diff whitespace
+checks also passed. No new runtime dependency or copied upstream source was added.
+
+The actual unconfigured command reported `skipped`, zero inference attempts. A separate
+explicit check of the default loopback origin with a diagnostic model label reported
+`skipped` after one unavailable-transport attempt; no model was downloaded or run.
+Real inference/accuracy/runtime-version verification remains open in #2. The output
+states `schema_valid`, not task success, and leaves unknown runtime version null.
+No cloud call, external executor, Android/emulator, deployment or account change was
+made. Existing Android and liquid-glass UI source files are unchanged.

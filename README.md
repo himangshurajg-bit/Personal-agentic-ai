@@ -104,6 +104,22 @@ result covers only the eligible scanned files. The safe no-follow implementation
 Linux-tested and fails closed on unsupported OS primitives; it is not a secret detector
 or a security sandbox. See [Upstream review and exact limits](docs/UPSTREAM_ASSISTANT_REVIEW.md).
 
+### Check an already-installed local model without running its plan
+
+```sh
+# Set LOCAL_AGENT_MODEL to the exact name of a model you already installed.
+python -m agent check-local
+```
+
+This opt-in command makes at most one inference request to the configured HTTP loopback
+runtime using a fixed fictional arithmetic prompt. It validates the returned plan but
+never runs tools, opens the notes database, creates approvals or sends messages. No model
+is downloaded and there is no cloud fallback. Missing setup/unreachable runtime reports
+`skipped`; invalid responses report `failed`; `schema_valid` means only that a nonempty
+plan passed the existing schema, not that the model solved the task correctly. It prints
+endpoint/model/Python metadata, not model-generated arguments or private prompts.
+See [local model check and exact limits](docs/LOCAL_MODEL_CHECK.md).
+
 ### One goal, safe work first, final review last
 
 ```sh

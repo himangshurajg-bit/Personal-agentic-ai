@@ -7,6 +7,7 @@ Uses synthetic temporary data and loopback HTTP only. No model or external sends
 import http.client
 import importlib.metadata
 import json
+import os
 from pathlib import Path
 import queue
 import subprocess
@@ -35,6 +36,11 @@ def main():
                                     cwd=root, check=True, text=True, capture_output=True, timeout=15)
             return json.loads(result.stdout)
 
+        diagnostic = subprocess.run([sys.executable, '-m', 'agent', '--db', str(db), 'check-local'],
+                                    cwd=root, env={**os.environ, 'LOCAL_AGENT_MODEL': ''},
+                                    check=True, text=True, capture_output=True, timeout=10)
+        assert json.loads(diagnostic.stdout)['status'] == 'skipped'
+        assert not db.exists(), 'Local check wrote a database'
         plan = cli('plan', 'goal: calculate 12 * 3; remember package check')
         assert plan['executed'] is False
         assert not db.exists(), 'Preview wrote a database'
