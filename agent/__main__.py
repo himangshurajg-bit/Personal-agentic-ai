@@ -3,8 +3,9 @@ import json
 import os
 import sys
 import sqlite3
-from .core import run
+from .core import preview, run
 from .memory import Memory
+from .file_search import search_files
 from .tools import validate_step
 
 
@@ -15,6 +16,13 @@ def main():
     ask = sub.add_parser('run', help='Plan and run safe preparation; prepare exact external reviews')
     ask.add_argument('request')
     ask.add_argument('--provider', choices=['demo', 'local', 'cloud'], default='demo')
+    plan = sub.add_parser('plan', help='Preview offline demo steps and risk labels; no tools, memory or network')
+    plan.add_argument('request')
+    files = sub.add_parser('files', help='Search eligible local text files; explicit root, no model or network')
+    files.add_argument('query', help='Literal case-insensitive text, not a regular expression')
+    files.add_argument('--root', required=True, help='Owner-selected directory; no default or whole-device scan')
+    web = sub.add_parser('web', help='Start local-only liquid-glass interface')
+    web.add_argument('--port', type=int, default=8765)
     sub.add_parser('pending', help='Review exact pending actions; nothing executes')
     approve = sub.add_parser('approve', help='Approve one exact demo draft; DOES NOT send')
     approve.add_argument('proposal_id')
@@ -27,6 +35,16 @@ def main():
     args = parser.parse_args()
     memory = None
     try:
+        if args.command == 'web':
+            from .web import serve
+            serve(args.db, args.port)
+            return 0
+        if args.command == 'plan':
+            print(json.dumps(preview(args.request), indent=2, ensure_ascii=True))
+            return 0
+        if args.command == 'files':
+            print(json.dumps(search_files(args.root, args.query), indent=2, ensure_ascii=True))
+            return 0
         memory = Memory(args.db)
         if args.command == 'run':
             output = run(args.request, memory, args.provider)

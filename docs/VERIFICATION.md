@@ -206,3 +206,29 @@ on both runtimes and `git diff --check` passed. The daily upstream comparison wa
 already complete and was not repeated. No live model, paid API, real connector or
 external action was used. Python 3.10, other operating systems and production security
 remain unverified; issues #2 and #3 retain their separate outstanding scope.
+
+
+## Local tools, preview and liquid-glass UI — 20 October 2026
+
+Added independently written, bounded explicit-root local text search; side-effect-free
+plan preview; and a standard-library, loopback-only browser UI. No upstream code,
+assets, compiled packages or new runtime dependencies were incorporated. Source/license
+comparison records are in MYRA_REVIEW.md and LEADING_AGENTS_REVIEW.md.
+
+Final Linux checks (ResourceWarning treated as an error):
+
+- Python 3.14.7: 102 unit tests passed in 3.092 seconds; 9 loopback tests passed in 0.493 seconds.
+- Python 3.11.2: 102 unit tests passed in 6.276 seconds; 9 loopback tests passed in 0.428 seconds.
+- compileall on both runtimes, JavaScript syntax checks and git diff --check passed.
+- Playwright/Chromium: 19 essential browser checks passed on desktop (1440×1200)
+  and touch/mobile emulation (390×844): preview, calculation, note storage/search, UTC,
+  draft preparation/edit invalidation/approval/rejection, explicit-root file search,
+  unsupported-command feedback, no horizontal overflow, reduced motion and contrast.
+- Desktop and Android-emulated screenshots were visually inspected. This is not a
+  physical Android, APK installation, accessibility audit or production-security test.
+
+The HTTP tests check loopback binding, Host/Origin checks, JSON/body bounds, CSP,
+static-path restrictions and data operations. Browser approval still records
+approved_not_sent; no external sender, account connection, paid API or deployment
+was introduced. Live-model verification and executor-design issues remain separate.
+See LOCAL_UI.md for the local-server threat model and run instructions.

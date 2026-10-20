@@ -41,6 +41,48 @@ Run these commands from this repository's root. Memory defaults to
 `.agent-data/memory.sqlite3`. Use `--db PATH` **before** the subcommand to choose another
 installation's database. It is local plaintext; do not store secrets here.
 
+### Open the liquid-glass local interface
+
+```sh
+python -m agent web
+# Open http://127.0.0.1:8765 in a browser on that same computer.
+# Ctrl+C in the terminal stops the server.
+```
+
+The visual workspace has translucent water-drop depth, soft lighting, glass edge
+highlights on panels/fields/controls and fluid tap feedback. It uses system fonts,
+readable text, visible keyboard focus and reduced-motion/high-contrast preferences.
+It works without a build tool, external fonts, JavaScript packages or network service.
+
+Try **Preview steps**, **Run locally**, **Remember**, **Find note**, **UTC time** or
+**Prepare draft**. Review, revise, reject and approve exact drafts in the sidebar;
+approval still means **not sent**. Explicit-folder text search is available on
+supported POSIX systems. Unsupported social, voice and device features are labeled,
+not represented by pretend working buttons.
+
+The server is bound to `127.0.0.1`, not your network. A phone cannot connect to this
+computer's localhost: Android here means a responsive browser layout, not an APK,
+deployment, phone file access or installation. Keep that security boundary. It is
+not a production/multi-user service. See [local UI guide and security limits](docs/LOCAL_UI.md).
+
+### Inspect before you run
+
+```sh
+python -m agent plan "goal: calculate 12 * 3; remember Practice Python; draft friend@example.test: Ready"
+python -m agent files "approval" --root ./docs
+```
+
+`plan` previews the deterministic demo steps and risk labels without executing tools,
+opening memory, contacting a model or creating an approval. A later `run` validates
+again; a preview is not authorization. No `--provider` is available for `plan`.
+
+`files` searches eligible text files only in an explicitly supplied directory, returning
+bounded matching lines. It does not use a model, write/index files or open the memory
+database. Hidden/sensitive-named, binary and oversized files are skipped; a no-match
+result covers only the eligible scanned files. The safe no-follow implementation is
+Linux-tested and fails closed on unsupported OS primitives; it is not a secret detector
+or a security sandbox. See [MYRA review and exact limits](docs/MYRA_REVIEW.md).
+
 ### One goal, safe work first, final review last
 
 ```sh
@@ -77,9 +119,9 @@ scheduler, device control, autonomous shell, deployment, or payment handler.
 | Component | Working now | Not implied |
 |---|---|---|
 | Brain | Deterministic offline planner; strict JSON model-plan validation | Human-level reasoning or unrestricted goal solving |
-| Agent loop | Up to 4 steps; safe preparation runs automatically | Infinite autonomy, retries, cross-step model replanning |
+| Agent loop | Up to 4 steps; safe preparation runs automatically; side-effect-free offline plan preview | Infinite autonomy, retries, cross-step model replanning |
 | Memory | Persistent local SQLite notes and review audit | Encrypted vault, semantic search, cloud sync |
-| Connections | Explicit allowlisted tool registry | Live email, calendar, browser, files, WhatsApp or bank access |
+| Connections | Explicit allowlisted tool registry; separate owner-rooted local text-search CLI | Model-selected filesystem access or live email, calendar, browser, WhatsApp or bank access |
 | Final review | Exact message draft, expiry, single use, edit invalidation | Sending a message after approval |
 | Offline | Complete demo works without a model or network | A downloaded LLM bundled in this repo |
 | Local LLM | Optional Ollama-style loopback adapter, mocked tests | Real model tested or installed on your device |
@@ -157,3 +199,8 @@ live-model verification is still pending. See the [open-source comparison and ch
 Optional beginner coding exercise (separate from the next maintenance priority): add a
 read-only unit-conversion tool, register its risk and schema, and write tests before enabling it. Keep side-effecting integrations out
 until they have a real permission and receipt design.
+
+## Feature comparison notes
+
+- [MYRA implementation/provenance review](docs/MYRA_REVIEW.md): why local search was independently written rather than pasting conflicting-license/compiled code.
+- [Leading agent source/license comparison](docs/LEADING_AGENTS_REVIEW.md): bounded execution, visible plans and inspect-before-execute design without heavy framework imports.

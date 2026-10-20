@@ -10,13 +10,13 @@ what is possible. There is no release date or continuous-operation guarantee.
 
 | Status | Capability and evidence |
 |---|---|
-| Implemented and locally tested | Python CLI; deterministic command planner; maximum four validated steps; calculator, UTC clock, SQLite notes/search; exact message-draft review with expiry, single-use approval and edit invalidation. The 51-test unit suite passes. |
-| Implemented adapters; mocked models, loopback-tested transport | Optional loopback local-model and cloud planner adapters. Seven isolated loopback transport tests pass; no real model or live account compatibility is established. Explicit cloud selection is required; no automatic cloud fallback. |
+| Implemented and locally tested | Python CLI; deterministic command planner; maximum four validated steps; calculator, UTC clock, SQLite notes/search; exact message-draft review with expiry, single-use approval and edit invalidation. Independent bounded local-file search, side-effect-free plan preview and a loopback-only liquid-glass browser UI are also implemented. The 102-test unit suite passes. |
+| Implemented adapters; mocked models, loopback-tested transport | Optional loopback local-model and cloud planner adapters. Nine isolated loopback transport tests pass; no real model or live account compatibility is established. Explicit cloud selection is required; no automatic cloud fallback. |
 | Proposed, not implemented | Conversational chat/voice, study tutor, web research, connected social/messaging services, media editing/generation, camera, device/app control, gaming help, coding workspace execution, native mobile UI, scheduler, cloud hosting and sync. |
 
 `approve` still returns `approved_not_sent`. No message, post, payment, destructive action
-or access change can execute. No APK, browser app, model download or always-running service
-is included. Wabi's own connected accounts and device access are **not** inherited here.
+or access change can execute. A local browser UI is included; no APK, model download or always-running service
+is included. See [local UI](LOCAL_UI.md) for setup and limitations. Wabi's own connected accounts and device access are **not** inherited here.
 See [verification](VERIFICATION.md), [architecture](ARCHITECTURE.md),
 [connections](CONNECTIONS.md), [modes](MODES.md) and [security](../SECURITY.md).
 

@@ -1,0 +1,119 @@
+import http.client
+import json
+from pathlib import Path
+import tempfile
+import threading
+import unittest
+from agent.web import make_server
+from agent.memory import Memory
+
+
+class WebTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.db = str(Path(self.temp.name) / 'memory.sqlite3')
+        self.server = make_server(self.db, 0)
+        self.host = '127.0.0.1:' + str(self.server.server_port)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join()
+        self.temp.cleanup()
+
+    def request(self, path, body=None, origin=True, host=None, raw=None, content_type='application/json'):
+        c = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=3)
+        headers = {'Host': host or self.host, 'Content-Type': content_type}
+        if origin:
+            headers['Origin'] = 'http://' + self.host if origin is True else origin
+        c.request('POST' if body is not None or raw is not None else 'GET', path,
+                  body=raw if raw is not None else json.dumps(body) if body is not None else None,
+                  headers=headers)
+        r = c.getresponse()
+        data = r.read()
+        result = r.status, dict(r.getheaders()), data
+        c.close()
+        return result
+
+    def api(self, path, body):
+        status, _, raw = self.request('/api/' + path, body)
+        return status, json.loads(raw)
+
+    def test_bound_only_to_loopback(self):
+        self.assertEqual(self.server.server_address[0], '127.0.0.1')
+
+    def test_static_assets_and_security_headers(self):
+        for path in ['/', '/style.css', '/app.js']:
+            status, headers, raw = self.request(path)
+            self.assertEqual(status, 200)
+            self.assertGreater(len(raw), 500)
+            self.assertIn("frame-ancestors 'none'", headers['Content-Security-Policy'])
+            self.assertEqual(headers['Cache-Control'], 'no-store')
+        self.assertEqual(self.request('/../../agent/memory.py')[0], 404)
+        self.assertEqual(self.request('/api/pending')[0], 404)
+
+    def test_rejects_foreign_host_origin_missing_origin_and_non_json(self):
+        for options in [dict(host='evil.test'), dict(origin=False), dict(origin='https://evil.test'),
+                        dict(content_type='text/plain')]:
+            self.assertEqual(self.request('/api/run', {'request': 'remember forbidden'}, **options)[0], 403)
+        self.assertFalse(Path(self.db).exists())
+
+    def test_preview_does_not_create_database(self):
+        status, value = self.api('preview', {'request': 'remember <script>alert(1)</script>'})
+        self.assertEqual(status, 200)
+        self.assertFalse(value['executed'])
+        self.assertFalse(Path(self.db).exists())
+
+    def test_real_local_tools_and_note_persistence(self):
+        status, value = self.api('run', {'request': 'calculate 2 + 3'})
+        self.assertEqual(value['results'][0]['result']['value'], 5)
+        self.api('run', {'request': 'remember test web note'})
+        _, value = self.api('run', {'request': 'find web note'})
+        self.assertEqual(value['results'][0]['result']['notes'][0]['text'], 'test web note')
+
+    def test_review_revise_approval_single_use_and_no_send(self):
+        _, value = self.api('run', {'request': 'draft person@example.test: original'})
+        token = value['results'][0]['proposal_id']
+        _, value = self.api('revise', {'id': token, 'recipient': 'new@example.test', 'text': 'changed'})
+        new = value['proposal_id']
+        self.assertEqual(self.api('approve', {'id': token})[0], 400)
+        _, value = self.api('approve', {'id': new})
+        self.assertEqual(value['status'], 'approved_not_sent')
+        self.assertFalse(value['sent'])
+        self.assertEqual(value['exact_action']['args']['text'], 'changed')
+        self.assertEqual(self.api('approve', {'id': new})[0], 400)
+        self.assertEqual(self.api('pending', {})[1]['pending'], [])
+
+    def test_reject_pending(self):
+        _, value = self.api('run', {'request': 'draft test@example.test: hi'})
+        token = value['results'][0]['proposal_id']
+        self.assertEqual(self.api('reject', {'id': token})[1]['status'], 'rejected')
+        self.assertEqual(self.api('approve', {'id': token})[0], 400)
+
+    def test_file_search_needs_explicit_root(self):
+        Path(self.temp.name, 'notes.txt').write_text('findable idea')
+        status, value = self.api('files', {'root': self.temp.name, 'query': 'findable'})
+        self.assertEqual(status, 200)
+        self.assertEqual(value['matches'][0]['path'], 'notes.txt')
+        self.assertEqual(self.api('files', {'query': 'findable'})[0], 400)
+
+    def test_invalid_json_and_fields_do_not_change_database(self):
+        for raw in ['{broken', '[]', 'null', '"string"']:
+            self.assertEqual(self.request('/api/run', raw=raw)[0], 400)
+        self.assertEqual(self.api('run', {'request': 'time', 'provider': 'cloud'})[0], 400)
+        self.assertFalse(Path(self.db).exists())
+
+    def test_body_size_bound(self):
+        self.assertEqual(self.request('/api/run', raw='x' * 17000)[0], 413)
+
+    def test_expired_review_cannot_be_approved(self):
+        _, value = self.api('run', {'request': 'draft person@example.test: expired'})
+        token = value['results'][0]['proposal_id']
+        memory = Memory(self.db)
+        memory.db.execute("UPDATE proposals SET expires_at='2000-01-01T00:00:00+00:00'")
+        memory.db.commit()
+        memory.close()
+        self.assertEqual(self.api('pending', {})[1]['pending'], [])
+        self.assertEqual(self.api('approve', {'id': token})[0], 400)

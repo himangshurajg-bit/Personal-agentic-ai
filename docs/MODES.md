@@ -5,7 +5,12 @@
 A Python 3.10+ interpreter and these source files are enough. The demo planner, arithmetic,
 clock, notes, drafts, review and tests require no external packages or network. This is a
 useful orchestration demo, not a language model and not a claim of general AI intelligence.
-The program writes its own local SQLite state; it does not browse arbitrary device files.
+The `run`/review commands write their own local SQLite state. The model tool registry
+cannot browse device files. Separately, the explicit `files QUERY --root PATH` CLI can
+read bounded eligible text files in an owner-selected directory; it has no model/network
+or database access and requires directory-relative no-follow OS support (Linux-tested).
+`plan REQUEST` is an offline deterministic preview that neither opens memory nor executes
+tools. Neither new command installs an LLM or a mobile app.
 
 ## Local language model — optional, not tested with a real model
 

@@ -13,10 +13,32 @@ def validate_plan(plan):
     return plan['steps']
 
 
-def run(request, memory, provider='demo'):
+def _request_plan(request, provider):
     if not isinstance(request, str) or not request.strip() or len(request) > 4000:
         raise ValueError('Request must be 1–4000 nonblank characters')
-    steps = validate_plan(plan_with_provider(request, provider))
+    return validate_plan(plan_with_provider(request, provider))
+
+
+def preview(request):
+    """Inspect an offline demo plan without reading memory or executing any step.
+
+    A preview is not an approval token, resumable checkpoint or execution result.
+    It deliberately cannot select a network-backed planner.
+    """
+    steps = _request_plan(request, 'demo')
+    return {'status': 'preview' if steps else 'unsupported', 'provider': 'demo',
+            'executed': False, 'max_steps': 4,
+            'steps': [{'position': i, 'step': step,
+                       'risk': REGISTRY[step['tool']]['risk'],
+                       'requires_review': REGISTRY[step['tool']]['risk'] == 'external_review'}
+                      for i, step in enumerate(steps, 1)],
+            'notice': 'Preview only: no tools, database or network used. No approval was created. '
+                      'A later run is validated again and requires exact review for drafts. '
+                      'Argument validation is not a guarantee that a tool will succeed.'}
+
+
+def run(request, memory, provider='demo'):
+    steps = _request_plan(request, provider)
     if not steps:
         return {'status': 'unsupported', 'help': 'Try: calculate 2 + 2, remember a note, find a word, time, or draft RECIPIENT: TEXT.'}
     results = []
