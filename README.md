@@ -125,6 +125,16 @@ Never paste a real key into code, commits, issues, or this README.
 python -m unittest discover -s tests -v
 ```
 
+Optional local transport fixtures (ephemeral loopback ports only, no real providers):
+
+```sh
+python -W error::ResourceWarning -m unittest discover -s tests/integration -v
+```
+
+These are separate from the default network-free unit suite. They exercise urllib transport,
+not a live cloud account or installed local model. The [comparison record](docs/OPEN_SOURCE_REVIEW.md)
+explains the boundary and the reproduced error-handling fix.
+
 The checked result and test scope are in [verification](docs/VERIFICATION.md).
 Tests cover local execution, approval boundaries, exact payloads, edits, expiry,
 malicious/invalid plans, bounded calculator inputs, and mocked provider protocols.
@@ -136,7 +146,8 @@ The [staged capability roadmap](docs/ROADMAP.md) covers the proposed chat/voice,
 media, social/messaging, device and background modules, with explicit status and safety
 gates. They are plans, not enabled integrations or a native app. The next small priority
 is [provider transport verification (issue #2)](https://github.com/himangshurajg-bit/Personal-agentic-ai/issues/2),
-before expanding external execution.
+before expanding external execution. The first isolated transport tests are now in place;
+live-model verification is still pending. See the [open-source comparison and change](docs/OPEN_SOURCE_REVIEW.md).
 
 - [Architecture / brain and work flow](docs/ARCHITECTURE.md)
 - [Connections and capability roadmap](docs/CONNECTIONS.md)

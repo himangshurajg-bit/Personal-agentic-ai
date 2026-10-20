@@ -10,8 +10,8 @@ what is possible. There is no release date or continuous-operation guarantee.
 
 | Status | Capability and evidence |
 |---|---|
-| Implemented and locally tested | Python CLI; deterministic command planner; maximum four validated steps; calculator, UTC clock, SQLite notes/search; exact message-draft review with expiry, single-use approval and edit invalidation. The 49-test suite passes. |
-| Implemented adapters, mock-tested only | Optional loopback local-model and cloud planner adapters. No real model, HTTP transport integration or live account compatibility is established. Explicit cloud selection is required; no automatic cloud fallback. |
+| Implemented and locally tested | Python CLI; deterministic command planner; maximum four validated steps; calculator, UTC clock, SQLite notes/search; exact message-draft review with expiry, single-use approval and edit invalidation. The 51-test unit suite passes. |
+| Implemented adapters; mocked models, loopback-tested transport | Optional loopback local-model and cloud planner adapters. Seven isolated loopback transport tests pass; no real model or live account compatibility is established. Explicit cloud selection is required; no automatic cloud fallback. |
 | Proposed, not implemented | Conversational chat/voice, study tutor, web research, connected social/messaging services, media editing/generation, camera, device/app control, gaming help, coding workspace execution, native mobile UI, scheduler, cloud hosting and sync. |
 
 `approve` still returns `approved_not_sent`. No message, post, payment, destructive action
@@ -45,14 +45,16 @@ See [verification](VERIFICATION.md), [architecture](ARCHITECTURE.md),
 ## Stage 1 — verify the existing brain before widening its powers
 
 **Next small improvement: [issue #2 — provider integration verification](https://github.com/himangshurajg-bit/Personal-agentic-ai/issues/2).**
-Start with isolated local HTTP fixture tests for the existing transport, not a new service.
+The first seven isolated HTTP fixture tests and protocol-error fix are implemented; see
+[the comparison record](OPEN_SOURCE_REVIEW.md). This advances #2 without completing its
+opt-in live-model work. Continue verifying existing transport before adding a new service.
 Test request encoding, malformed/oversized replies, redirect refusal, timeouts and sanitized
 failures. Keep ordinary tests secret-free and independent of live internet/providers.
 A local fixture may bind only loopback during explicit integration tests; distinguish those
 from the default offline unit suite. Live-model checks must be separate, opt-in and report
 missing setup as a skip, not success. No paid cloud calls as a default test dependency.
 
-Acceptance: existing 49 tests still pass; new tests fail against a reproduced transport
+Acceptance: existing unit tests still pass; new tests fail against a reproduced transport
 defect or validate a documented boundary; results identify mocks, fixtures and any actual
 live verification separately. Do not add a feature just to create a daily commit.
 

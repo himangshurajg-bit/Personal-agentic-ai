@@ -1,3 +1,4 @@
+import http.client
 import json
 import os
 from pathlib import Path
@@ -10,7 +11,7 @@ from unittest.mock import patch
 
 from agent.core import run, validate_plan
 from agent.memory import Memory
-from agent.providers import plan_with_provider, NoRedirect
+from agent.providers import plan_with_provider, NoRedirect, post_json
 from agent.tools import calculate, execute_safe, validate_step
 
 
@@ -208,6 +209,23 @@ class AgentTests(unittest.TestCase):
     def test_local_model_required(self):
         with patch.dict(os.environ, {}, clear=True), self.assertRaises(ValueError):
             plan_with_provider('hello', 'local')
+
+    def test_transport_protocol_errors_are_sanitized(self):
+        for error in (http.client.BadStatusLine('private-unit-marker'),
+                      http.client.IncompleteRead(b'private-unit-marker', 100)):
+            with self.subTest(error=type(error).__name__), patch(
+                    'urllib.request.OpenerDirector.open', side_effect=error):
+                with self.assertRaisesRegex(ValueError,
+                        '^Provider request failed; check model, credentials and endpoint$'):
+                    post_json('http://127.0.0.1:11434/api/chat', {}, {})
+
+    def test_transport_timeout_is_sanitized_and_not_retried(self):
+        with patch('urllib.request.OpenerDirector.open', side_effect=TimeoutError('private-unit-marker')) as opened:
+            with self.assertRaisesRegex(ValueError,
+                    '^Provider request failed; check model, credentials and endpoint$'):
+                post_json('http://127.0.0.1:11434/api/chat', {}, {})
+        opened.assert_called_once()
+        self.assertEqual(opened.call_args.kwargs['timeout'], 30)
 
     def test_local_mock_adapter(self):
         content = json.dumps({'steps': [{'tool': 'clock', 'args': {}}]})

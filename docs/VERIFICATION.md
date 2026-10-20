@@ -93,3 +93,36 @@ Before and after this documentation change, all 49 tests passed (final run: 0.69
 were checked against existing files. Official Android, Instagram, WhatsApp and YouTube
 references were read for the roadmap constraints. This checks documentation consistency,
 not real platform compatibility or a new feature's acceptance tests. No APK was built.
+
+
+## Open-source-informed transport follow-up (issue #2, bug #4)
+
+Read pinned source, model tests and MIT licenses in OpenAI Agents SDK for Python and
+Pydantic AI. Independently implemented a standard-library loopback transport fixture suite;
+no upstream code or dependency was copied. Sources and comparison are in
+[the open-source review](OPEN_SOURCE_REVIEW.md).
+
+The 49-test unit baseline passed. Before the fix, six of seven new loopback transport cases
+passed; malformed HTTP status produced an unsanitized `BadStatusLine` containing fictional
+response text. Now HTTP protocol exceptions are mapped to the sanitized request failure,
+and raised HTTPError response streams are explicitly closed. Redirect refusal and approval
+controls remain intact. No real provider was contacted.
+
+Final observed runs on Linux / Python 3.14.7:
+
+```text
+python -m unittest discover -s tests -q
+Ran 51 tests in 0.675s
+OK
+
+python -W error::ResourceWarning -m unittest discover -s tests/integration -v
+Ran 7 tests in 0.093s
+OK
+```
+
+Default discovery remains socket-free; transport fixtures are invoked separately and bind
+only ephemeral IPv4 loopback ports. New offline unit tests inject protocol exceptions and
+timeout errors; an actual slow-peer/30-second deadline was not tested. The underlying urllib
+transport is exercised locally, superseding the earlier untested-transport limitation, but
+real local/cloud model compatibility, credentials, live service execution, Android and
+production security are still unverified. Optional live-model checks in #2 remain open.

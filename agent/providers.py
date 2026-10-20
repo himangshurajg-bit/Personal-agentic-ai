@@ -1,4 +1,5 @@
 """Optional planners, no network access unless selected explicitly."""
+import http.client
 import json
 import os
 import urllib.error
@@ -30,7 +31,11 @@ def post_json(url, data, headers):
     try:
         with opener.open(request, timeout=30) as response:
             raw = response.read(65537)
-    except (urllib.error.URLError, OSError) as exc:
+    except urllib.error.HTTPError as exc:
+        # HTTPError owns a response stream even though it is raised before the with block.
+        exc.close()
+        raise ValueError('Provider request failed; check model, credentials and endpoint') from None
+    except (urllib.error.URLError, OSError, http.client.HTTPException):
         # Provider error bodies can contain private prompts; never print them.
         raise ValueError('Provider request failed; check model, credentials and endpoint') from None
     if len(raw) > 65536:
