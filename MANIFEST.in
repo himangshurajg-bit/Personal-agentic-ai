@@ -1,0 +1,6 @@
+include LICENSE README.md SECURITY.md
+recursive-include agent *.py *.html *.css *.js
+recursive-include docs *.md
+recursive-include examples *.txt
+recursive-include tests *.py *.cjs
+global-exclude __pycache__ *.py[cod] *.sqlite* *.db .env .env.*

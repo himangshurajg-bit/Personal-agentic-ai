@@ -23,6 +23,27 @@ auto-running calculation/search/local notes, and exact message-draft review. It 
 send a message**, even after approval. Real research and account connections are future
 work, not secretly enabled features.
 
+## Install a release package
+
+Download the `.whl` file from this repository's **Releases** page. From a terminal,
+create a virtual environment and install the downloaded file (substitute its path):
+
+```sh
+python -m venv .venv
+# Linux/macOS:
+. .venv/bin/activate
+# Windows PowerShell instead: .venv\Scripts\Activate.ps1
+python -m pip install ./personal_agentic_ai-0.1.0-py3-none-any.whl
+python -m agent run "calculate (12 + 8) * 3"
+python -m agent web
+```
+
+Open `http://127.0.0.1:8765` on that same computer. The wheel includes the local UI
+assets and has no runtime dependencies; there is no need to run from a source checkout.
+The `.tar.gz` source distribution can also be installed with pip, but building it
+needs build tooling (and usually internet). Packages are release downloads, not a
+PyPI or GitHub Packages registry publication. See [release verification](docs/RELEASE.md).
+
 ## Start in two minutes
 
 Requires Python 3.10+ on a computer or compatible terminal. No dependencies, API keys,
