@@ -53,3 +53,28 @@ was not included in the repository.
 - Security against a hostile local OS user, formal correctness or production readiness.
 
 These limits are deliberate, not claims of features waiting behind a hidden switch.
+
+## Follow-up: expired pending-review listing (issue #1)
+
+On 20 October 2026, the original 46-test suite passed before the change. Three new
+regression tests reproduced the listing bug (four failing assertions/subtests): reviews
+were still listed exactly at expiry, after expiry, and after refused approval, including
+an equivalent timestamp expressed with a non-UTC offset.
+
+`Memory.pending()` now compares parsed expiry instants against one current-time snapshot
+and returns only unexpired pending reviews. Expired database rows, payloads and original
+expiry timestamps remain unchanged; listing never renews or approves them. The existing
+approval-time expiry check remains authoritative when an action is approved.
+
+After the fix:
+
+```text
+python -m unittest discover -s tests -v
+Ran 49 tests in 0.608s
+OK
+```
+
+`python -m compileall -q agent tests` and `git diff --check` also passed. Regression
+coverage checks before/at/after expiry, history preservation, listing after a refused
+expired approval, and timezone-offset equivalence. No live providers or external actions
+were used. All previously documented verification limits still apply.

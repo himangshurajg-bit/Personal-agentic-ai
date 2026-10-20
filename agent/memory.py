@@ -71,8 +71,11 @@ class Memory:
             return self._insert_proposal(step)
 
     def pending(self):
+        """List actionable reviews; retain expired rows unchanged as history."""
+        current = now()
         return [dict(row) for row in self.db.execute(
-            "SELECT id,payload,payload_hash,expires_at FROM proposals WHERE status='pending' ORDER BY rowid DESC")]
+            "SELECT id,payload,payload_hash,expires_at FROM proposals WHERE status='pending' ORDER BY rowid DESC")
+            if datetime.fromisoformat(row['expires_at']) > current]
 
     def reject(self, token):
         with self.db:

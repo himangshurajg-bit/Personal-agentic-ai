@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 import subprocess
 import sys
 import tempfile
@@ -81,6 +82,38 @@ class AgentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.memory.approve_review(token, validate_step)
         self.assertEqual(self.memory.search(''), [])
+
+    def test_pending_excludes_expired_without_removing_history(self):
+        token = self.proposal()
+        original = dict(self.memory.db.execute(
+            'SELECT * FROM proposals WHERE id=?', (token,)).fetchone())
+        expiry = datetime.fromisoformat(original['expires_at'])
+        for offset, expected in ((-1, [token]), (0, []), (1, [])):
+            with self.subTest(seconds_from_expiry=offset), patch(
+                    'agent.memory.now', return_value=expiry + timedelta(seconds=offset)):
+                self.assertEqual([row['id'] for row in self.memory.pending()], expected)
+        self.assertEqual(dict(self.memory.db.execute(
+            'SELECT * FROM proposals WHERE id=?', (token,)).fetchone()), original)
+
+    def test_pending_excludes_expired_after_refused_approval(self):
+        token = self.proposal()
+        self.memory.db.execute('UPDATE proposals SET expires_at=? WHERE id=?',
+                               ('2000-01-01T00:00:00+00:00', token))
+        self.memory.db.commit()
+        with self.assertRaisesRegex(ValueError, 'Proposal expired'):
+            self.memory.approve_review(token, validate_step)
+        self.assertEqual(self.memory.pending(), [])
+        self.assertEqual(self.memory.db.execute(
+            'SELECT expires_at FROM proposals WHERE id=?', (token,)).fetchone()[0],
+            '2000-01-01T00:00:00+00:00')
+
+    def test_pending_compares_expiry_instants_not_timestamp_strings(self):
+        token = self.proposal()
+        expiry = '2030-01-01T06:00:00+05:30'
+        self.memory.db.execute('UPDATE proposals SET expires_at=? WHERE id=?', (expiry, token))
+        self.memory.db.commit()
+        with patch('agent.memory.now', return_value=datetime(2030, 1, 1, 1, tzinfo=timezone.utc)):
+            self.assertEqual(self.memory.pending(), [])
 
     def test_rejection(self):
         token = self.proposal()
