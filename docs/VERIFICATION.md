@@ -213,7 +213,7 @@ remain unverified; issues #2 and #3 retain their separate outstanding scope.
 Added independently written, bounded explicit-root local text search; side-effect-free
 plan preview; and a standard-library, loopback-only browser UI. No upstream code,
 assets, compiled packages or new runtime dependencies were incorporated. Source/license
-comparison records are in MYRA_REVIEW.md and LEADING_AGENTS_REVIEW.md.
+comparison records are in UPSTREAM_ASSISTANT_REVIEW.md and LEADING_AGENTS_REVIEW.md.
 
 Final Linux checks (ResourceWarning treated as an error):
 
@@ -232,3 +232,22 @@ static-path restrictions and data operations. Browser approval still records
 approved_not_sent; no external sender, account connection, paid API or deployment
 was introduced. Live-model verification and executor-design issues remain separate.
 See LOCAL_UI.md for the local-server threat model and run instructions.
+
+
+## Documentation-cleanup package patch (20 October 2026)
+
+Version 0.1.1 changes project wording, neutral upstream comparison references and the
+package version only. Runtime behavior and the existing MIT license are unchanged.
+The prior Python release and Android test APK remain available without modification.
+
+- 102 unit tests and nine loopback tests passed on Python 3.11.6 and 3.14.7.
+- Wheel and source distribution installed cleanly on both versions; the installed
+  package smoke check passed for all four combinations from outside the checkout.
+- Package contents and current source/filenames were checked for the requested naming
+  cleanup; local Markdown links resolve after the upstream review document rename.
+- Python compilation, JavaScript syntax and diff whitespace checks passed.
+- The unchanged published Android test APK was inspected for matching text; it did not
+  require a rebuild. This adds no Android install, launch or physical-device verification.
+
+Historic tags, Git history and already downloaded packages retain their original text.
+No license notices were removed, release assets overwritten or history rewritten.

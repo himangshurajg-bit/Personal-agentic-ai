@@ -1,8 +1,9 @@
 # Functions and connections
 
-Nothing in this repository imports the owner's Wabi connections. Connecting an account
-in Wabi does not connect this independent project. No account credentials, personal
-records, chat history, contact details or tokens were copied into this repository.
+This independent project does not inherit account connections from another assistant
+or service. Accounts must be connected separately through a future supported integration.
+No account credentials, personal records, chat history, contact details or tokens were
+copied into this repository.
 
 ## Implemented functions
 

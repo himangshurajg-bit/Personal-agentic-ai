@@ -102,7 +102,7 @@ bounded matching lines. It does not use a model, write/index files or open the m
 database. Hidden/sensitive-named, binary and oversized files are skipped; a no-match
 result covers only the eligible scanned files. The safe no-follow implementation is
 Linux-tested and fails closed on unsupported OS primitives; it is not a secret detector
-or a security sandbox. See [MYRA review and exact limits](docs/MYRA_REVIEW.md).
+or a security sandbox. See [Upstream review and exact limits](docs/UPSTREAM_ASSISTANT_REVIEW.md).
 
 ### One goal, safe work first, final review last
 
@@ -223,7 +223,7 @@ until they have a real permission and receipt design.
 
 ## Feature comparison notes
 
-- [MYRA implementation/provenance review](docs/MYRA_REVIEW.md): why local search was independently written rather than pasting conflicting-license/compiled code.
+- [Upstream implementation/provenance review](docs/UPSTREAM_ASSISTANT_REVIEW.md): why local search was independently written rather than pasting conflicting-license/compiled code.
 - [Leading agent source/license comparison](docs/LEADING_AGENTS_REVIEW.md): bounded execution, visible plans and inspect-before-execute design without heavy framework imports.
 
 ## Native Android test build

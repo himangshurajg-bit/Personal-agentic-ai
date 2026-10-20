@@ -4,13 +4,22 @@ The first published release is `v0.1.0`; the existing project version was alread
 `0.1.0` and no earlier tags/releases existed. Its wheel and source distribution are
 GitHub Release downloads, not a PyPI/GitHub Packages registry publication.
 
+## Documentation cleanup patch: v0.1.1
+
+Version `0.1.1` removes third-party product/assistant naming from current project prose
+and renames the upstream comparison document while retaining numeric source identity,
+pinned commit/artifact evidence, licensing observations and the unchanged MIT notice.
+No third-party code or assets were imported; behavior is unchanged. The earlier
+`v0.1.0` packages/tags and Android test artifact are not overwritten. Old downloads
+and Git history still contain their original text; current documentation is in main.
+
 ## Install
 
 Requires Python 3.10+. Download the wheel from the Releases page, create/activate a
 virtual environment, then run:
 
 ```sh
-python -m pip install ./personal_agentic_ai-0.1.0-py3-none-any.whl
+python -m pip install ./personal_agentic_ai-0.1.1-py3-none-any.whl
 python -m agent run "calculate 12 * 3"
 python -m agent web
 ```

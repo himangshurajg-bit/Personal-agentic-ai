@@ -79,7 +79,7 @@ are standard-library code written for this project. The target MIT LICENSE is un
 the pinned links credit the compared designs. Future substantial copying must preserve
 its applicable notices and any component-specific obligations.
 
-See [MYRA_REVIEW.md](MYRA_REVIEW.md) for the independently written opt-in local file
-search and the MYRA licensing/provenance limitation, and [VERIFICATION.md](VERIFICATION.md)
+See [UPSTREAM_ASSISTANT_REVIEW.md](UPSTREAM_ASSISTANT_REVIEW.md) for the independently written opt-in local file
+search and the reviewed upstream licensing/provenance limitation, and [VERIFICATION.md](VERIFICATION.md)
 for the executed test receipts. No framework's entire suite, live model or Android device
 was tested by this review.

@@ -16,7 +16,7 @@ what is possible. There is no release date or continuous-operation guarantee.
 
 `approve` still returns `approved_not_sent`. No message, post, payment, destructive action
 or access change can execute. A local browser UI and a separate limited native Android test app are included (see `android/README.md`); no model download or always-running service
-is included. See [local UI](LOCAL_UI.md) for setup and limitations. Wabi's own connected accounts and device access are **not** inherited here.
+is included. See [local UI](LOCAL_UI.md) for setup and limitations. Another assistant's connected accounts and device access are **not** inherited here.
 See [verification](VERIFICATION.md), [architecture](ARCHITECTURE.md),
 [connections](CONNECTIONS.md), [modes](MODES.md) and [security](../SECURITY.md).
 

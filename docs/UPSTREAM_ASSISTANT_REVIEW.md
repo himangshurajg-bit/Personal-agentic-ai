@@ -1,39 +1,42 @@
-# MYRA comparison and bounded local file search
+# Upstream assistant comparison and bounded local file search
 
-Reviewed 20 October 2026 for the requested MYRA feature adaptation. The target remains
+Reviewed 20 October 2026 for the requested upstream-assistant feature adaptation. The target remains
 Personal-agentic-ai; this is not a wholesale import, Windows assistant install or APK.
 
 ## Source identity and what was actually inspectable
 
-- Repository: <https://github.com/codeninjavik/MYRA-AI-ASSISTANT->
+- Source repository identity: GitHub repository ID `1258466758`, owned by
+  `codeninjavik`. Its API record is
+  <https://api.github.com/repositories/1258466758>. This stable numeric reference
+  preserves the reviewed source identity without using its product name.
 - Main inspected at `4f8cd94385274dde8b8eea02834b93ae08471b5e`.
   Its complete tree contained README, LICENSE, .gitignore and five images, not the
   Python modules/project structure illustrated in the README.
 - The other listed branch, `terminal_output`, at
   `cc9d80d9060c808a78a15b4ca885867110ee9f62`, also contained documentation/images only.
   The GitHub releases API returned no releases at review time.
-- The repository's documented installation points to the `myra-ai-assistant` PyPI
-  distribution. Inspected its published 0.3.3 wheel as a ZIP, without installing,
-  importing, executing or decompiling it:
-  <https://pypi.org/project/myra-ai-assistant/0.3.3/>.
+- The repository's documented installation points to its related PyPI distribution.
+  Inspected its published version 0.3.3 wheel as a ZIP, without installing,
+  importing, executing or decompiling it. The artifact is identified by the digest
+  below; the package's product name is omitted from this comparison.
   The wheel SHA-256, computed locally and matched against PyPI metadata, was
   `a1c68b27e3d978dec7ed4e4306d30110a25680a0fd37c3d41b2477921afd99aa`.
 - That artifact is `cp311-cp311-win_amd64`: the desktop/voice/vision modules are
   compiled Windows Python 3.11 extensions. Their behavior was **not** verified.
-  The artifact also bundles inspectable JavaScript under `myra_coder/dist/`.
+  The artifact also bundles inspectable JavaScript in its bundled coding-tool distribution directory.
   This is a related published artifact, not code present in the GitHub main tree.
 
 ## License/provenance issue: no direct code or asset copying
 
 The GitHub LICENSE contains GNU GPL version 3 and GitHub detects GPL-3.0, while its
 README says MIT. The PyPI wheel carries a modified MIT-style notice requiring creator
-attribution, and the bundled MYRA Coder package identifies HunterCode as its upstream
+attribution, and the bundled coding-tool package identifies HunterCode as its upstream
 and declares MIT. These observations are not a resolved unified licensing/provenance
 chain. GPL code is not inherently unusable, but its obligations cannot be ignored or
 silently represented as this target's MIT-only code. The desktop source was also absent
 from the inspected GitHub branches.
 
-No MYRA/HunterCode source, binaries, images, fonts, data or dependencies are included in
+No reviewed upstream source, binaries, images, fonts, data or dependencies are included in
 this change. The target LICENSE is unchanged. The implemented feature below is written
 independently for this project's needs; sources are credited for the comparison, not
 presented as a transferred implementation. Direct copying would first require the exact
@@ -42,12 +45,15 @@ was bypassed.
 
 ## Comparison against actual bundled JavaScript
 
+Component paths below are relative to the bundled coding-tool distribution directory;
+its product-named directory prefix is omitted. This is a comparison, not copied code.
+
 | Inspected component | Observed implementation | Decision for this starter |
 |---|---|---|
-| `myra_coder/dist/tools/grep.js` | Recursive, case-insensitive JavaScript regex search; line-numbered matches, 200-result cap, binary NUL skip and ignored build dirs | Useful idea: local text search. Independently implement literal matching with explicit root and byte/entry/depth limits; no regex, model path selection or shell. |
-| `myra_coder/dist/tools/list_files.js` | Recursive directory listing; 500-entry and depth-5 limits; shared ignored-directory set | Use bounded traversal as a design requirement, not copied code. Do not add a separate browser/indexing service. |
-| `myra_coder/dist/tools/read_file.js` | Reads a whole UTF-8 file then slices numbered lines | Do not import unrestricted path reads or full-file loading; return bounded matching excerpts only. |
-| `myra_coder/dist/tools/run_bash.js` | Shell subprocesses; a destructive-command pattern list invokes confirmation | Do not import a general shell or pattern-based safety gate. Existing exact-action reviews and lack of an external executor remain intact. |
+| `tools/grep.js` | Recursive, case-insensitive JavaScript regex search; line-numbered matches, 200-result cap, binary NUL skip and ignored build dirs | Useful idea: local text search. Independently implement literal matching with explicit root and byte/entry/depth limits; no regex, model path selection or shell. |
+| `tools/list_files.js` | Recursive directory listing; 500-entry and depth-5 limits; shared ignored-directory set | Use bounded traversal as a design requirement, not copied code. Do not add a separate browser/indexing service. |
+| `tools/read_file.js` | Reads a whole UTF-8 file then slices numbered lines | Do not import unrestricted path reads or full-file loading; return bounded matching excerpts only. |
+| `tools/run_bash.js` | Shell subprocesses; a destructive-command pattern list invokes confirmation | Do not import a general shell or pattern-based safety gate. Existing exact-action reviews and lack of an external executor remain intact. |
 | Desktop voice, device controls, messaging and vision | README claims and compiled module names; no inspectable desktop implementation verified | Not ported or advertised as working here. No microphone, camera, accounts or background autostart enabled. |
 
 The distribution lists broad dependencies for Qt/WebEngine, audio, camera, Windows
