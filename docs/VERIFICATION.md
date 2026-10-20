@@ -169,3 +169,40 @@ runtimes and `git diff --check` passed. Default unit discovery remains socket-fr
 separate transport suite uses only temporary databases and ephemeral loopback listeners.
 Python 3.10, other operating systems, live models and real external execution remain
 unverified; no provider keys, paid calls, dependencies or service connections were used.
+
+## Maintenance follow-up: ambiguous duplicate JSON names (bug #6)
+
+At `a901115`, the fresh remote matched the clean working tree. The baseline 53 unit
+and eight loopback tests passed. A mocked local plan with two `text` names in one
+`notes.add` argument object silently kept the last value and saved it. This is an
+ambiguous-input validation gap, not evidence of an approval bypass or external send.
+
+The two provider JSON decode boundaries now reject duplicate names at every object
+level, including equivalent escaped names. They retain the existing sanitized errors,
+size limits and no-retry behavior. Repeated names in different objects remain valid;
+a positive test executes two independent note steps through both decoding layers.
+No memory schema, review lifecycle, tools, dependencies or external capabilities changed.
+
+Before the fix, the new regressions produced five unit failures and two loopback/CLI
+failures. Final checks on Linux, with ResourceWarning treated as an error:
+
+```text
+Python 3.14.7:
+python -W error::ResourceWarning -m unittest discover -s tests -q
+Ran 56 tests in 0.671s — OK
+python -W error::ResourceWarning -m unittest discover -s tests/integration -v
+Ran 9 tests in 0.480s — OK
+
+Python 3.11.2 (same commands with /usr/bin/python3):
+Ran 56 tests in 0.690s — OK
+Ran 9 tests in 0.399s — OK
+```
+
+Socket-free regressions cover duplicate root, tool, note text and draft recipient names
+for both local and mocked cloud adapters, plus nested/escaped names in transport JSON.
+Actual loopback/CLI cases check outer and inner duplicates, one request, structured
+errors without fixture text, and no notes/proposals/audit writes. `compileall` passed
+on both runtimes and `git diff --check` passed. The daily upstream comparison was
+already complete and was not repeated. No live model, paid API, real connector or
+external action was used. Python 3.10, other operating systems and production security
+remain unverified; issues #2 and #3 retain their separate outstanding scope.

@@ -128,6 +128,34 @@ class TransportTests(unittest.TestCase):
                     for table in ('notes', 'proposals', 'audit'):
                         self.assertEqual(db.execute('SELECT count(*) FROM ' + table).fetchone()[0], 0)
 
+    def test_duplicate_json_cli_rejected_before_effects(self):
+        plan = '{"steps":[{"tool":"notes.add","args":{"text":"first","text":"private-fixture-marker"}}]}'
+        valid_response = json.dumps({'message': {'content': json.dumps({
+            'steps': [{'tool': 'notes.add', 'args': {'text': 'private-fixture-marker'}}]})}})
+        cases = {
+            'outer_response': (b'{"message":{},' + valid_response[1:].encode(),
+                               'Provider returned invalid JSON'),
+            'planner_content': (json.dumps({'message': {'content': plan}}).encode(),
+                                'Planner content must be strict JSON'),
+        }
+        for boundary, (body, expected_error) in cases.items():
+            with self.subTest(boundary=boundary), tempfile.TemporaryDirectory() as tmp:
+                database = Path(tmp) / 'memory.sqlite3'
+                with fixture(body=body) as (url, requests):
+                    result = subprocess.run(
+                        [sys.executable, '-m', 'agent', '--db', str(database), 'run',
+                         'prepare a note', '--provider', 'local'],
+                        env={**os.environ, 'LOCAL_AGENT_URL': url, 'LOCAL_AGENT_MODEL': 'fixture'},
+                        capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(result.stdout, '')
+                self.assertEqual(json.loads(result.stderr), {'error': expected_error})
+                self.assertNotIn('private-fixture-marker', result.stderr)
+                self.assertEqual(len(requests), 1)
+                with closing(sqlite3.connect(database)) as db:
+                    for table in ('notes', 'proposals', 'audit'):
+                        self.assertEqual(db.execute('SELECT count(*) FROM ' + table).fetchone()[0], 0)
+
     def test_malformed_http_status_is_sanitized(self):
         with fixture(raw_status=True) as (url, requests):
             with self.assertRaisesRegex(ValueError, '^Provider request failed; check model, credentials and endpoint$'):

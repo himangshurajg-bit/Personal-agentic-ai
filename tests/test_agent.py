@@ -259,6 +259,54 @@ class AgentTests(unittest.TestCase):
                 self.assertEqual(self.memory.pending(), [])
                 self.assertEqual(self.memory.db.execute('SELECT count(*) FROM audit').fetchone()[0], 0)
 
+    def test_transport_duplicate_keys_are_rejected(self):
+        cases = (b'{"message":{},"message":{}}',
+                 b'{"nested":{"text":"first","text":"private-unit-marker"}}',
+                 b'{"text":"first","te\\u0078t":"second"}')
+        for raw in cases:
+            with self.subTest(raw=raw), patch('urllib.request.OpenerDirector.open') as opened:
+                opened.return_value.__enter__.return_value.read.return_value = raw
+                with self.assertRaisesRegex(ValueError, '^Provider returned invalid JSON$'):
+                    post_json('http://127.0.0.1:11434/api/chat', {}, {})
+                opened.assert_called_once()
+
+    def test_planner_duplicate_keys_fail_before_effects(self):
+        contents = (
+            '{"steps":[],"steps":[{"tool":"notes.add","args":{"text":"shadowed"}}]}',
+            '{"steps":[{"tool":"notes.add","args":{"text":"first","text":"shadowed"}}]}',
+            '{"steps":[{"tool":"clock","tool":"notes.add","args":{"text":"shadowed"}}]}',
+            '{"steps":[{"tool":"message.prepare","args":{"recipient":"first@example.test",'
+            '"recipient":"second@example.test","text":"fictional"}}]}',
+            '{"steps":[{"tool":"notes.add","args":{"text":"first","te\\u0078t":"shadowed"}}]}',
+        )
+        config = {'LOCAL_AGENT_MODEL': 'fixture', 'CLOUD_AGENT_MODEL': 'fixture',
+                  'OPENAI_API_KEY': 'fake-test-key'}
+        for provider in ('local', 'cloud'):
+            for content in contents:
+                response = ({'message': {'content': content}} if provider == 'local' else
+                            {'choices': [{'message': {'content': content}}]})
+                with self.subTest(provider=provider, content=content), patch.dict(
+                        os.environ, config, clear=True), patch(
+                        'agent.providers.post_json', return_value=response) as post:
+                    with self.assertRaisesRegex(ValueError, '^Planner content must be strict JSON$'):
+                        run('prepare a note', self.memory, provider)
+                    post.assert_called_once()
+                for table in ('notes', 'proposals', 'audit'):
+                    self.assertEqual(self.memory.db.execute('SELECT count(*) FROM ' + table).fetchone()[0], 0)
+
+    def test_repeated_keys_in_separate_objects_remain_valid(self):
+        plan = {'steps': [{'tool': 'notes.add', 'args': {'text': 'fictional one'}},
+                          {'tool': 'notes.add', 'args': {'text': 'fictional two'}}]}
+        response = {'message': {'content': json.dumps(plan)}}
+        with patch.dict(os.environ, {'LOCAL_AGENT_MODEL': 'fixture'}, clear=True), patch(
+                'urllib.request.OpenerDirector.open') as opened:
+            opened.return_value.__enter__.return_value.read.return_value = json.dumps(response).encode()
+            result = run('prepare two notes', self.memory, 'local')
+        opened.assert_called_once()
+        self.assertEqual([row['status'] for row in result['results']], ['completed', 'completed'])
+        self.assertEqual([row['text'] for row in self.memory.search('fictional')],
+                         ['fictional two', 'fictional one'])
+
     def test_local_mock_adapter(self):
         content = json.dumps({'steps': [{'tool': 'clock', 'args': {}}]})
         with patch.dict(os.environ, {'LOCAL_AGENT_MODEL': 'test'}, clear=True), patch('agent.providers.post_json', return_value={'message': {'content': content}}) as post:
