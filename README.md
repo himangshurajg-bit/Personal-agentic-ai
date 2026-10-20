@@ -132,11 +132,17 @@ They do not establish production security, real-model accuracy, or Android compa
 
 ## Read and build next
 
+The [staged capability roadmap](docs/ROADMAP.md) covers the proposed chat/voice, study,
+media, social/messaging, device and background modules, with explicit status and safety
+gates. They are plans, not enabled integrations or a native app. The next small priority
+is [provider transport verification (issue #2)](https://github.com/himangshurajg-bit/Personal-agentic-ai/issues/2),
+before expanding external execution.
+
 - [Architecture / brain and work flow](docs/ARCHITECTURE.md)
 - [Connections and capability roadmap](docs/CONNECTIONS.md)
 - [Cloud, local and on-device modes](docs/MODES.md)
 - [Security model and limits](SECURITY.md)
 
-Suggested first coding exercise: add a read-only unit-conversion tool, register its risk
-and schema, and write tests before enabling it. Keep side-effecting integrations out
+Optional beginner coding exercise (separate from the next maintenance priority): add a
+read-only unit-conversion tool, register its risk and schema, and write tests before enabling it. Keep side-effecting integrations out
 until they have a real permission and receipt design.

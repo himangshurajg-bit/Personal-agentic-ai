@@ -35,6 +35,11 @@ model was freshly verified. Provider APIs and eligible models may change.
 
 ## Planned connection order
 
+Before adding connections, verify the existing provider transport in
+[issue #2](https://github.com/himangshurajg-bit/Personal-agentic-ai/issues/2). The broader
+[staged roadmap](ROADMAP.md) distinguishes proposed social, messaging, device, media and
+background capabilities from implemented code, and gives their acceptance gates.
+
 1. Add public read-only research with source URLs, timestamps, bounded response sizes,
    SSRF protections, content-as-data handling and no automatic credential use.
 2. Add one read-only account integration using least-privilege OAuth and explicit owner

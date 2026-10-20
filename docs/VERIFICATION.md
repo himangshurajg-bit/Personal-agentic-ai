@@ -78,3 +78,18 @@ OK
 coverage checks before/at/after expiry, history preservation, listing after a refused
 expired approval, and timezone-offset equivalence. No live providers or external actions
 were used. All previously documented verification limits still apply.
+
+## Documentation follow-up: staged capability roadmap
+
+On 20 October 2026, reviewed the existing code, tests, documentation and issues before
+adding `docs/ROADMAP.md` and linking it from README/connections. No runtime behavior,
+dependencies, model calls, service connections, device permissions or deployments changed.
+The roadmap labels implemented local functions, mock-tested model adapters and proposed
+modules separately. Existing issues #2 and #3 retain the transport-first/fake-executor
+priorities; broad desired capabilities are not represented as completed code.
+
+Before and after this documentation change, all 49 tests passed (final run: 0.695s).
+`python -m compileall -q agent tests` and `git diff --check` passed. Local Markdown links
+were checked against existing files. Official Android, Instagram, WhatsApp and YouTube
+references were read for the roadmap constraints. This checks documentation consistency,
+not real platform compatibility or a new feature's acceptance tests. No APK was built.
