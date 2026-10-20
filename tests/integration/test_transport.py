@@ -4,9 +4,15 @@ Run: python -m unittest discover -s tests/integration -v
 Not part of the default offline unit discovery (directory intentionally not a package).
 """
 import json
+import os
+from pathlib import Path
+import sqlite3
+import subprocess
+import sys
+import tempfile
 import threading
 import unittest
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
@@ -93,6 +99,34 @@ class TransportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, '^Provider request failed; check model, credentials and endpoint$'):
                 post_json(url, {}, {})
         self.assertEqual(len(requests), 1)
+
+    def test_deep_json_cli_fails_cleanly_without_local_effects(self):
+        # Python 3.11's decoder raises RecursionError; newer decoders may parse it.
+        # Either path must fail safely before any tool or review is performed.
+        nested = '[' * 2000 + '0' + ']' * 2000
+        cases = {
+            'outer_response': nested.encode(),
+            'planner_content': json.dumps({'message': {'content': nested}}).encode(),
+        }
+        for boundary, body in cases.items():
+            with self.subTest(boundary=boundary), tempfile.TemporaryDirectory() as tmp:
+                database = Path(tmp) / 'memory.sqlite3'
+                with fixture(body=body) as (url, requests):
+                    result = subprocess.run(
+                        [sys.executable, '-m', 'agent', '--db', str(database), 'run',
+                         'remember Must not be saved', '--provider', 'local'],
+                        env={**os.environ, 'LOCAL_AGENT_URL': url, 'LOCAL_AGENT_MODEL': 'fixture'},
+                        capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(result.stdout, '')
+                error = json.loads(result.stderr)
+                self.assertEqual(set(error), {'error'})
+                self.assertNotIn('Traceback', result.stderr)
+                self.assertNotIn('Must not be saved', result.stderr)
+                self.assertEqual(len(requests), 1)
+                with closing(sqlite3.connect(database)) as db:
+                    for table in ('notes', 'proposals', 'audit'):
+                        self.assertEqual(db.execute('SELECT count(*) FROM ' + table).fetchone()[0], 0)
 
     def test_malformed_http_status_is_sanitized(self):
         with fixture(raw_status=True) as (url, requests):

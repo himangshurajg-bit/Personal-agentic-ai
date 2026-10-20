@@ -42,7 +42,8 @@ def post_json(url, data, headers):
         raise ValueError('Provider response too large')
     try:
         return json.loads(raw)
-    except (UnicodeError, json.JSONDecodeError):
+    except (ValueError, RecursionError):
+        # Decoder limits differ by Python version (nesting, integer digits, encoding).
         raise ValueError('Provider returned invalid JSON') from None
 
 
@@ -105,5 +106,6 @@ def plan_with_provider(request, provider):
         raise ValueError('Invalid planner content')
     try:
         return json.loads(content)
-    except json.JSONDecodeError:
+    except (ValueError, RecursionError):
+        # Keep decoder implementation errors inside the same safe planner boundary.
         raise ValueError('Planner content must be strict JSON') from None

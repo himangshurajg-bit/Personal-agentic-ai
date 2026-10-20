@@ -227,6 +227,38 @@ class AgentTests(unittest.TestCase):
         opened.assert_called_once()
         self.assertEqual(opened.call_args.kwargs['timeout'], 30)
 
+    def test_transport_decoder_failures_are_sanitized(self):
+        for error in (RecursionError('private-unit-marker'),
+                      ValueError('private-unit-marker')):
+            with self.subTest(error=type(error).__name__), patch(
+                    'urllib.request.OpenerDirector.open') as opened, patch(
+                    'agent.providers.json.loads', side_effect=error):
+                opened.return_value.__enter__.return_value.read.return_value = b'{}'
+                with self.assertRaisesRegex(ValueError, '^Provider returned invalid JSON$'):
+                    post_json('http://127.0.0.1:11434/api/chat', {}, {})
+                opened.assert_called_once()
+
+    def test_planner_decoder_failures_have_no_effects(self):
+        responses = {
+            'local': {'message': {'content': '{}'}},
+            'cloud': {'choices': [{'message': {'content': '{}'}}]},
+        }
+        config = {'LOCAL_AGENT_MODEL': 'fixture', 'CLOUD_AGENT_MODEL': 'fixture',
+                  'OPENAI_API_KEY': 'fake-test-key'}
+        for provider, response in responses.items():
+            for error in (RecursionError('private-unit-marker'),
+                          ValueError('private-unit-marker')):
+                with self.subTest(provider=provider, error=type(error).__name__), patch.dict(
+                        os.environ, config, clear=True), patch(
+                        'agent.providers.post_json', return_value=response) as post, patch(
+                        'agent.providers.json.loads', side_effect=error):
+                    with self.assertRaisesRegex(ValueError, '^Planner content must be strict JSON$'):
+                        run('remember Must not be saved', self.memory, provider)
+                    post.assert_called_once()
+                self.assertEqual(self.memory.search(''), [])
+                self.assertEqual(self.memory.pending(), [])
+                self.assertEqual(self.memory.db.execute('SELECT count(*) FROM audit').fetchone()[0], 0)
+
     def test_local_mock_adapter(self):
         content = json.dumps({'steps': [{'tool': 'clock', 'args': {}}]})
         with patch.dict(os.environ, {'LOCAL_AGENT_MODEL': 'test'}, clear=True), patch('agent.providers.post_json', return_value={'message': {'content': content}}) as post:
