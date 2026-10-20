@@ -15,7 +15,7 @@ what is possible. There is no release date or continuous-operation guarantee.
 | Proposed, not implemented | Conversational chat/voice, study tutor, web research, connected social/messaging services, media editing/generation, camera, device/app control, gaming help, coding workspace execution, native mobile UI, scheduler, cloud hosting and sync. |
 
 `approve` still returns `approved_not_sent`. No message, post, payment, destructive action
-or access change can execute. A local browser UI is included; no APK, model download or always-running service
+or access change can execute. A local browser UI and a separate limited native Android test app are included (see `android/README.md`); no model download or always-running service
 is included. See [local UI](LOCAL_UI.md) for setup and limitations. Wabi's own connected accounts and device access are **not** inherited here.
 See [verification](VERIFICATION.md), [architecture](ARCHITECTURE.md),
 [connections](CONNECTIONS.md), [modes](MODES.md) and [security](../SECURITY.md).
@@ -110,7 +110,7 @@ next step. Do not evade restrictions through hidden UI automation or alternate a
 
 ## Stage 4 — native device bridge and bounded background work
 
-**Design only; no native device code, APK or deployment is created by this roadmap.**
+**Device-control features remain design only. The separate native Android offline test app does not implement these controls, and this roadmap creates no deployment.**
 
 - Launch supported app activities through documented Android intents/deep links; handle
   missing apps and OS restrictions. Opening an app is not permission to control its UI,

@@ -82,7 +82,7 @@ supported POSIX systems. Unsupported social, voice and device features are label
 not represented by pretend working buttons.
 
 The server is bound to `127.0.0.1`, not your network. A phone cannot connect to this
-computer's localhost: Android here means a responsive browser layout, not an APK,
+computer's localhost: Android for this browser interface means a responsive layout, not an APK,
 deployment, phone file access or installation. Keep that security boundary. It is
 not a production/multi-user service. See [local UI guide and security limits](docs/LOCAL_UI.md).
 
@@ -225,3 +225,7 @@ until they have a real permission and receipt design.
 
 - [MYRA implementation/provenance review](docs/MYRA_REVIEW.md): why local search was independently written rather than pasting conflicting-license/compiled code.
 - [Leading agent source/license comparison](docs/LEADING_AGENTS_REVIEW.md): bounded execution, visible plans and inspect-before-execute design without heavy framework imports.
+
+## Native Android test build
+
+A separate standalone native Android offline app now lives in [`android/`](android/README.md). It offers a calculator, local notes, deterministic plan previews and local draft review (approval never sends), with liquid-glass-inspired controls. It does not include a model, Python runtime, desktop file search, social/device controls or background work. See its README and verification report for installation, test-signing and platform limits. Python package release `v0.1.0` remains separate.

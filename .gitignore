@@ -14,3 +14,8 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+
+# Native Android test build
+android/build/
+*.keystore
+*.jks
