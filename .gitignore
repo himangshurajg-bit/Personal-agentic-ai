@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+.agent-data/
+*.sqlite*
+*.db
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.DS_Store

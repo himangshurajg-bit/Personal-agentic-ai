@@ -1,0 +1,9 @@
+# Fictional examples. Run from the repository root.
+python -m agent run "calculate (7 + 5) * 3"
+python -m agent run "remember Learn Python for 20 minutes"
+python -m agent run "find Python"
+python -m agent run "goal: calculate 12 * 3; remember Practice Python; find Python; draft friend@example.test: Ready to discuss"
+python -m agent pending
+# Replace PROPOSAL_ID with an actual displayed ID after reading exact_action.
+python -m agent approve PROPOSAL_ID
+# approved_not_sent, sent: false — no real connector exists.

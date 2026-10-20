@@ -1,0 +1,9 @@
+[project]
+name = "personal-agentic-ai"
+version = "0.1.0"
+description = "A local-first bounded agent starter with explicit approvals"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.ruff]
+line-length = 110
