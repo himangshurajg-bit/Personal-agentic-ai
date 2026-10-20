@@ -53,6 +53,8 @@ machine running Python, so a separate phone cannot access that computer's local 
 
 The standard-library server listens only on `127.0.0.1`. Host checks reject other
 hostnames; POST requires matching Origin and JSON with bounded body/exact field sets.
+Repeated JSON names (including escaped equivalents) and decoder nesting failures are
+rejected before database/review access rather than selecting the last value.
 Only three named static assets are served. There is no directory/download endpoint,
 CORS allowance, telemetry, external font or script dependency. A Content Security
 Policy restricts scripts/connections to this origin and prohibits framing. Results

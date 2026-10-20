@@ -293,3 +293,45 @@ Real inference/accuracy/runtime-version verification remains open in #2. The out
 states `schema_valid`, not task success, and leaves unknown runtime version null.
 No cloud call, external executor, Android/emulator, deployment or account change was
 made. Existing Android and liquid-glass UI source files are unchanged.
+
+## Local UI JSON boundary follow-up (bug #8)
+
+Fresh remote main matched `3c105217a6e994d89ac50086db5837f83f3dc559`; the working
+checkout was clean and no open pull requests existed. The baseline passed 112 unit
+and 11 separate transport tests on Python 3.14.7. Today's upstream comparison was
+already complete and was not repeated.
+
+Real local HTTP regressions reproduced two decoding gaps in the UI endpoint:
+repeated JSON names silently selected the last value (including escaped-equivalent
+names), and Python 3.11.2's decoder raised an uncaught RecursionError for a 4,001-byte
+body of 2,000 nested arrays. The latter closed that request without a JSON response;
+the server process remained running. Python 3.14.7 parses that fixture and rejects
+its type normally. Duplicate `id` fields could select the last pending demo draft
+for `approved_not_sent`; no message was sent and no external executor exists.
+Existing loopback, Host, Origin and content-type checks were required by these tests;
+this is not evidence of a remote-origin exploit.
+
+The UI now reuses the provider decoder's duplicate-name rejection and maps decoder
+ValueError/RecursionError to the ordinary safe 400 response before database or review
+access. Body limits, schemas, approval payload binding, expiry, single-use rules,
+assets, Android source and dependencies are unchanged. HTTP regression coverage checks
+root/nested/escaped duplicates, two pending review IDs remaining pending with no
+approval audit event, no database creation on invalid input, safe deep-JSON errors
+and a successful following preview request. Test clients now close connections even
+when a response fails.
+
+Final Linux runs with ResourceWarning treated as an error:
+
+- Python 3.14.7: 115 unit tests (6.950s) and 11 transport tests (0.658s) passed.
+- Python 3.11.2: 115 unit tests (6.234s) and 11 transport tests (0.530s) passed.
+- A local verification wheel installed into fresh isolated environments on both
+  versions; installed CLI/assets/notes/approval-not-sent/loopback UI smoke checks passed.
+  This is not a new published package or release, and existing downloads are unchanged.
+- All 14 UI HTTP tests, including the new regressions, also passed against the installed
+  wheel from outside the checkout on both versions. Compilation on both Python versions,
+  JavaScript syntax checking and diff whitespace checking passed.
+
+No model runtime/inference, cloud call, external action, emulator, deployment or
+unrelated project change was performed. No installed Ollama executable/process was
+found during this review. Real-model verification (#2) and executor design (#3)
+remain open; the latter is not enabled by this fix.

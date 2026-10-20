@@ -7,6 +7,7 @@ from .core import preview, run
 from .file_search import search_files
 from .memory import Memory
 from .tools import validate_step
+from .providers import _unique_object
 
 ASSETS = Path(__file__).with_name('web_assets')
 MAX_BODY = 16384
@@ -56,7 +57,11 @@ def make_server(db_path, port=8765):
                 size = int(self.headers.get('Content-Length', '0'))
                 if size <= 0 or size > MAX_BODY:
                     return self.answer({'error': 'Request too large or empty'}, 413)
-                body = json.loads(self.rfile.read(size))
+                try:
+                    body = json.loads(self.rfile.read(size), object_pairs_hook=_unique_object)
+                except (ValueError, RecursionError):
+                    # Reject ambiguous objects and runtime-specific decoder limits before effects.
+                    raise ValueError('Invalid request JSON') from None
                 if not isinstance(body, dict):
                     raise ValueError('Expected an object')
                 fields = {'/api/preview': {'request'}, '/api/run': {'request'}, '/api/pending': set(),

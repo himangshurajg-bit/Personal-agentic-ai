@@ -1,9 +1,11 @@
 import http.client
+import io
 import json
 from pathlib import Path
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from agent.web import make_server
 from agent.memory import Memory
 
@@ -28,14 +30,15 @@ class WebTests(unittest.TestCase):
         headers = {'Host': host or self.host, 'Content-Type': content_type}
         if origin:
             headers['Origin'] = 'http://' + self.host if origin is True else origin
-        c.request('POST' if body is not None or raw is not None else 'GET', path,
-                  body=raw if raw is not None else json.dumps(body) if body is not None else None,
-                  headers=headers)
-        r = c.getresponse()
-        data = r.read()
-        result = r.status, dict(r.getheaders()), data
-        c.close()
-        return result
+        try:
+            c.request('POST' if body is not None or raw is not None else 'GET', path,
+                      body=raw if raw is not None else json.dumps(body) if body is not None else None,
+                      headers=headers)
+            r = c.getresponse()
+            data = r.read()
+            return r.status, dict(r.getheaders()), data
+        finally:
+            c.close()
 
     def api(self, path, body):
         status, _, raw = self.request('/api/' + path, body)
@@ -117,3 +120,42 @@ class WebTests(unittest.TestCase):
         memory.close()
         self.assertEqual(self.api('pending', {})[1]['pending'], [])
         self.assertEqual(self.api('approve', {'id': token})[0], 400)
+
+    def test_duplicate_json_names_are_rejected_before_database_access(self):
+        bodies = [
+            r'{"request":"time","request":"remember must not be saved"}',
+            r'{"request":"time","reque\u0073t":"remember must not be saved"}',
+            r'{"request":{"nested":"first","nested":"second"}}',
+        ]
+        for raw in bodies:
+            with self.subTest(raw=raw):
+                status, _, value = self.request('/api/run', raw=raw)
+                self.assertEqual(status, 400)
+                self.assertNotIn(b'must not be saved', value)
+                self.assertFalse(Path(self.db).exists())
+        self.assertEqual(self.api('preview', {'request': 'calculate 2 + 2'})[0], 200)
+
+    def test_duplicate_review_id_cannot_select_last_draft(self):
+        tokens = []
+        for text in ['first', 'second']:
+            _, value = self.api('run', {'request': 'draft person@example.test: ' + text})
+            tokens.append(value['results'][0]['proposal_id'])
+        raw = '{"id":' + json.dumps(tokens[0]) + ',"id":' + json.dumps(tokens[1]) + '}'
+        self.assertEqual(self.request('/api/approve', raw=raw)[0], 400)
+        _, pending = self.api('pending', {})
+        self.assertEqual({item['id'] for item in pending['pending']}, set(tokens))
+        memory = Memory(self.db)
+        try:
+            self.assertEqual(memory.db.execute("SELECT count(*) FROM audit WHERE event='review.approve'").fetchone()[0], 0)
+        finally:
+            memory.close()
+
+    def test_deep_json_returns_safe_error_and_server_keeps_serving(self):
+        raw = '[' * 2000 + '0' + ']' * 2000
+        with patch('sys.stderr', new_callable=io.StringIO) as errors:
+            status, _, value = self.request('/api/run', raw=raw)
+        self.assertEqual(status, 400)
+        self.assertEqual(json.loads(value), {'error': 'Input rejected. Check the command, fields or review expiry.'})
+        self.assertNotIn('Traceback', errors.getvalue())
+        self.assertFalse(Path(self.db).exists())
+        self.assertEqual(self.api('preview', {'request': 'time'})[0], 200)
