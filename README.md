@@ -260,3 +260,7 @@ until they have a real permission and receipt design.
 ## Native Android test build
 
 A separate standalone native Android offline app now lives in [`android/`](android/README.md). It offers a calculator, local notes, deterministic plan previews and local draft review (approval never sends), with liquid-glass-inspired controls. It does not include a model, Python runtime, desktop file search, social/device controls or background work. See its README and verification report for installation, test-signing and platform limits. Python package release `v0.1.0` remains separate.
+
+## Flutter + FastAPI private preview
+
+The requested new phone client is in [`mobile/`](mobile/README.md), with its authenticated streaming backend in [`service/`](service/README.md). It adds typed/voice chat UI, explicit scoped memory management, themes, an offline notebook, and reviewed Android reminders/allowlisted app-opening. It is separate from the old `android/` package and preserves the CLI/web notebook. Chat needs your separately configured local model on the service computer; no model or hosted endpoint is bundled. Speech recognition may use the Android provider's network service. See [actual verification and remaining limits](docs/FLUTTER_TEST_STATUS.md), including signing and missing physical-device qualification and the limited local-model smoke test. Existing release assets have not been replaced.

@@ -1,0 +1,29 @@
+{
+  "runtime": {
+    "version": "0.40.7"
+  },
+  "model": "qwen2.5:0.5b",
+  "details": {
+    "parent_model": "",
+    "format": "gguf",
+    "family": "qwen2",
+    "families": [
+      "qwen2"
+    ],
+    "parameter_size": "494.03M",
+    "quantization_level": "Q4_K_M"
+  },
+  "with_saved_fact": {
+    "text": "blue",
+    "done": true,
+    "seconds": 3.55
+  },
+  "after_forget_and_history_delete": {
+    "text": "unknown",
+    "done": true,
+    "seconds": 0.5
+  },
+  "positive_recall_pass": true,
+  "forget_pass": true,
+  "scope": "synthetic temporary database; no personal data; not broad model-quality or device qualification"
+}
