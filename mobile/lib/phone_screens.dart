@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import 'assistant_state.dart';
+import 'phone_data.dart';
 import 'main.dart' show Shell, Glass, notice, Home;
 
 /// Exact per-send disclosure. Unselected memories, notes and past chats stay local.
@@ -202,6 +203,500 @@ class _PhoneLibraryState extends State<PhoneLibrary> {
   );
 }
 
+class _StudyTextDialog extends StatefulWidget {
+  final String title;
+  final String label;
+  final String initial;
+  final int maxLength;
+  final int maxLines;
+  const _StudyTextDialog({
+    required this.title,
+    required this.label,
+    required this.initial,
+    required this.maxLength,
+    required this.maxLines,
+  });
+
+  @override
+  State<_StudyTextDialog> createState() => _StudyTextDialogState();
+}
+
+class _StudyTextDialogState extends State<_StudyTextDialog> {
+  late final TextEditingController controller;
+  @override
+  void initState() {
+    super.initState();
+    controller = TextEditingController(text: widget.initial);
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.title),
+    content: TextField(
+      controller: controller,
+      autofocus: true,
+      maxLength: widget.maxLength,
+      minLines: widget.maxLines > 1 ? 2 : 1,
+      maxLines: widget.maxLines,
+      decoration: InputDecoration(labelText: widget.label),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.pop(context, controller.text),
+        child: const Text('Save'),
+      ),
+    ],
+  );
+}
+
+class _FlashcardDialog extends StatefulWidget {
+  final Map<String, dynamic>? card;
+  const _FlashcardDialog({required this.card});
+
+  @override
+  State<_FlashcardDialog> createState() => _FlashcardDialogState();
+}
+
+class _FlashcardDialogState extends State<_FlashcardDialog> {
+  late final TextEditingController front;
+  late final TextEditingController back;
+
+  @override
+  void initState() {
+    super.initState();
+    front = TextEditingController(text: widget.card?['front'] ?? '');
+    back = TextEditingController(text: widget.card?['back'] ?? '');
+  }
+
+  @override
+  void dispose() {
+    front.dispose();
+    back.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.card == null ? 'New flashcard' : 'Edit flashcard'),
+    scrollable: true,
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextField(
+          controller: front,
+          autofocus: widget.card == null,
+          maxLength: 2000,
+          minLines: 2,
+          maxLines: 6,
+          decoration: const InputDecoration(labelText: 'Front'),
+        ),
+        TextField(
+          controller: back,
+          maxLength: 4000,
+          minLines: 2,
+          maxLines: 8,
+          decoration: const InputDecoration(labelText: 'Back'),
+        ),
+      ],
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.pop(context, [front.text, back.text]),
+        child: const Text('Save card'),
+      ),
+    ],
+  );
+}
+
+class LocalFlashcards extends StatefulWidget {
+  final PhoneData data;
+  const LocalFlashcards({super.key, required this.data});
+
+  @override
+  State<LocalFlashcards> createState() => _LocalFlashcardsState();
+}
+
+class _LocalFlashcardsState extends State<LocalFlashcards> {
+  List<Map<String, dynamic>> queue = [];
+  bool revealed = false;
+  bool reviewing = false;
+
+  Future<String?> _textDialog({
+    required String title,
+    required String label,
+    String initial = '',
+    int maxLength = 100,
+    int maxLines = 1,
+  }) => showDialog<String>(
+    context: context,
+    builder: (_) => _StudyTextDialog(
+      title: title,
+      label: label,
+      initial: initial,
+      maxLength: maxLength,
+      maxLines: maxLines,
+    ),
+  );
+
+  Future<List<String>?> _cardDialog({Map<String, dynamic>? card}) =>
+      showDialog<List<String>>(
+        context: context,
+        builder: (_) => _FlashcardDialog(card: card),
+      );
+
+  Future<bool> _confirm(String title, String message) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Keep'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+
+  Future<void> _createDeck() async {
+    final title = await _textDialog(title: 'New deck', label: 'Deck name');
+    if (title == null || !mounted) return;
+    try {
+      await widget.data.createStudyDeck(title);
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) notice(context, e);
+    }
+  }
+
+  Future<void> _editDeck(Map<String, dynamic> deck) async {
+    final title = await _textDialog(
+      title: 'Rename deck',
+      label: 'Deck name',
+      initial: deck['title'],
+    );
+    if (title == null || !mounted) return;
+    try {
+      await widget.data.updateStudyDeck(deck['id'], title);
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) notice(context, e);
+    }
+  }
+
+  Future<void> _deleteDeck(Map<String, dynamic> deck) async {
+    if (!await _confirm(
+      'Delete deck?',
+      'This also deletes its flashcards. Past review records remain in progress totals.',
+    )) {
+      return;
+    }
+    try {
+      await widget.data.deleteStudyDeck(deck['id']);
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) notice(context, e);
+    }
+  }
+
+  Future<void> _addCard(String deckId) async {
+    final values = await _cardDialog();
+    if (values == null || !mounted) return;
+    try {
+      await widget.data.createFlashcard(deckId, values[0], values[1]);
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) notice(context, e);
+    }
+  }
+
+  Future<void> _editCard(Map<String, dynamic> card) async {
+    final values = await _cardDialog(card: card);
+    if (values == null || !mounted) return;
+    try {
+      await widget.data.updateFlashcard(card['id'], values[0], values[1]);
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) notice(context, e);
+    }
+  }
+
+  Future<void> _deleteCard(Map<String, dynamic> card) async {
+    if (!await _confirm(
+      'Delete flashcard?',
+      'This removes the card from its deck. Past review totals remain.',
+    )) {
+      return;
+    }
+    try {
+      await widget.data.deleteFlashcard(card['id']);
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) notice(context, e);
+    }
+  }
+
+  void _startReview({String? deckId}) {
+    final due = widget.data.dueFlashcards(deckId: deckId);
+    if (due.isEmpty) {
+      notice(context, 'No cards are due right now.');
+      return;
+    }
+    setState(() {
+      queue = due;
+      reviewing = true;
+      revealed = false;
+    });
+  }
+
+  Future<void> _rate(String rating) async {
+    if (queue.isEmpty) return;
+    try {
+      await widget.data.reviewFlashcard(queue.first['id'], rating);
+      if (!mounted) return;
+      setState(() {
+        queue = queue.skip(1).toList();
+        revealed = false;
+        if (queue.isEmpty) reviewing = false;
+      });
+      if (queue.isEmpty) notice(context, 'Review session complete.');
+    } catch (e) {
+      if (mounted) notice(context, e);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final decks = widget.data.studyDecks;
+    final allCards = widget.data.rows('flashcards');
+    final due = widget.data.dueFlashcards();
+    final reviews = widget.data.rows('study_reviews');
+    if (reviewing && queue.isNotEmpty) {
+      final card = queue.first;
+      final remaining = queue.length;
+      return Glass(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Review · $remaining left',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => setState(() {
+                    reviewing = false;
+                    queue = [];
+                  }),
+                  child: const Text('Exit'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              card['front'],
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            if (revealed) ...[
+              const Divider(height: 28),
+              Text(card['back'], style: Theme.of(context).textTheme.bodyLarge),
+              const SizedBox(height: 16),
+              const Text('How did you recall it?'),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton(
+                    onPressed: () => _rate('again'),
+                    child: const Text('Again · 10 min'),
+                  ),
+                  OutlinedButton(
+                    onPressed: () => _rate('hard'),
+                    child: const Text('Hard'),
+                  ),
+                  FilledButton.tonal(
+                    onPressed: () => _rate('good'),
+                    child: const Text('Good'),
+                  ),
+                  FilledButton(
+                    onPressed: () => _rate('easy'),
+                    child: const Text('Easy'),
+                  ),
+                ],
+              ),
+            ] else ...[
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: () => setState(() => revealed = true),
+                child: const Text('Show answer'),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Glass(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Flashcards', style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 8),
+              Text(
+                '${due.length} due · ${widget.data.reviewedToday()} reviewed today · ${reviews.length} total reviews',
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: due.isEmpty ? null : () => _startReview(),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Review due cards'),
+              ),
+            ],
+          ),
+        ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Your decks',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            FilledButton.tonalIcon(
+              onPressed: _createDeck,
+              icon: const Icon(Icons.add),
+              label: const Text('New deck'),
+            ),
+          ],
+        ),
+        if (decks.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Text('No decks yet. Add a deck, then write your own cards.'),
+          ),
+        for (final deck in decks) ...[
+          Builder(
+            builder: (context) {
+              final cards = allCards
+                  .where((card) => card['deck_id'] == deck['id'])
+                  .toList();
+              final deckDue = due
+                  .where((card) => card['deck_id'] == deck['id'])
+                  .length;
+              return Card(
+                child: ExpansionTile(
+                  key: PageStorageKey<String>('deck-${deck['id']}'),
+                  title: Text(deck['title']),
+                  subtitle: Text('${cards.length} cards · $deckDue due'),
+                  trailing: PopupMenuButton<String>(
+                    tooltip: 'Deck options',
+                    onSelected: (value) {
+                      if (value == 'rename') _editDeck(deck);
+                      if (value == 'delete') _deleteDeck(deck);
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(
+                        value: 'rename',
+                        child: Text('Rename deck'),
+                      ),
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: Text('Delete deck'),
+                      ),
+                    ],
+                  ),
+                  children: [
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Wrap(
+                          spacing: 8,
+                          children: [
+                            FilledButton.tonalIcon(
+                              onPressed: () => _addCard(deck['id']),
+                              icon: const Icon(Icons.add),
+                              label: const Text('Add card'),
+                            ),
+                            if (deckDue > 0)
+                              OutlinedButton.icon(
+                                onPressed: () =>
+                                    _startReview(deckId: deck['id']),
+                                icon: const Icon(Icons.play_arrow),
+                                label: Text('Review $deckDue'),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (cards.isEmpty)
+                      const ListTile(title: Text('No cards in this deck yet.')),
+                    for (final card in cards)
+                      ListTile(
+                        title: Text(
+                          card['front'],
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          'Reviewed ${card['review_count']} times · due ${DateTime.fromMillisecondsSinceEpoch(card['due_at'], isUtc: true).toLocal()}',
+                        ),
+                        trailing: PopupMenuButton<String>(
+                          tooltip: 'Card options',
+                          onSelected: (value) {
+                            if (value == 'edit') _editCard(card);
+                            if (value == 'delete') _deleteCard(card);
+                          },
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(
+                              value: 'edit',
+                              child: Text('Edit card'),
+                            ),
+                            PopupMenuItem(
+                              value: 'delete',
+                              child: Text('Delete card'),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class StudyScreen extends StatefulWidget {
   final AssistantState state;
   const StudyScreen({super.key, required this.state});
@@ -229,9 +724,11 @@ class _StudyScreenState extends State<StudyScreen> {
     child: ListView(
       padding: const EdgeInsets.all(20),
       children: [
+        LocalFlashcards(data: widget.state.local),
+        const SizedBox(height: 24),
         const Glass(
           child: Text(
-            'Write practice attempts and track actual records on this phone, offline. AI explanations and quiz generation require a configured engine. Model answers are not automatically verified.',
+            'Practice cards and review progress stay on this phone. Tutor prompts and quiz generation require a configured engine; model answers are not automatically verified.',
           ),
         ),
         TextField(

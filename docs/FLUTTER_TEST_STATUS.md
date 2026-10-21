@@ -2,6 +2,14 @@
 
 ## Current scope and measured evidence
 
+## Offline flashcards slice — local checks passed, API36 pending
+
+The study screen now includes on-device user-authored decks and cards with rename/edit/delete, a due queue, reveal-before-rating, and deterministic Again/Hard/Good/Easy review intervals. Deck/card content and review events are additive fields in the existing secure local-data record; older records migrate without losing previous data. Review totals count explicit rating actions only, including historical reviews retained after a card or deck is deleted. No generated content, mastery claim, network, AI or provider setup is involved.
+
+- `flutter analyze`: clean; `flutter test`: **27 passed**, including legacy-data migration, interval/due behavior, actual-review-only counts, deletion/history retention, reload/export and a widget-level create/review flow.
+- Android API36 integration now seeds a synthetic deck/card, reviews it, and verifies the persisted record both after app-state reload and after the separate restart phase. The new integration checks have not yet run on the hosted emulator in this revision; do not claim Android16 flashcard qualification until the current run finishes.
+- This is still part of private development preview `0.3.0` (build code 4); no replacement APK has been built or delivered yet.
+
 Source preserves the earlier CLI/web/Android and optional FastAPI implementation. Phone-local features now include approved memory CRUD/export, notebook, keyword history search, tasks, practice-attempt records and typed approved native actions. Five primary destinations, display-name setting, per-send online disclosure and separate offline/online speech routing are implemented. Offline LLM, semantic retrieval, automatic summaries, PDF/OCR/vision, advanced automations and the broader staged scope are not complete. See ANDROID_ROADMAP.md and mobile/README.md.
 
 - Final local Flutter analyzer: no issues.

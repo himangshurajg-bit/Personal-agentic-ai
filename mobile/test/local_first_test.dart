@@ -10,6 +10,7 @@ import 'package:personal_assistant/assistant_state.dart';
 import 'package:personal_assistant/engines.dart';
 import 'package:personal_assistant/phone_data.dart';
 import 'package:personal_assistant/main.dart';
+import 'package:personal_assistant/phone_screens.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -42,6 +43,140 @@ void main() {
       expect(restored.rows('memories'), hasLength(1));
     },
   );
+  test(
+    'flashcards migrate old local records and schedule only actual reviews',
+    () async {
+      const secure = FlutterSecureStorage();
+      await secure.write(
+        key: 'phone_data_v1',
+        value: jsonEncode({
+          'chats': {
+            'older': [
+              {'role': 'user', 'text': 'keep me'},
+            ],
+          },
+          'memories': [],
+          'tasks': [],
+          'attempts': [],
+          'actions': [],
+        }),
+      );
+      final data = PhoneData(secure);
+      await data.load();
+      expect(data.chat('older').single['text'], 'keep me');
+      expect(data.studyDecks, isEmpty);
+      expect(data.rows('flashcards'), isEmpty);
+
+      final deck = await data.createStudyDeck('  Algebra  ');
+      final card = await data.createFlashcard(deck, '  2 + 2? ', '  4  ');
+      expect(data.studyDecks.single['title'], 'Algebra');
+      expect(data.dueFlashcards().single['id'], card);
+      expect(data.rows('study_reviews'), isEmpty);
+      final t = DateTime.fromMillisecondsSinceEpoch(
+        data.rows('flashcards').single['due_at'],
+        isUtc: true,
+      ).add(const Duration(seconds: 1));
+      await data.reviewFlashcard(card, 'good', reviewedAt: t);
+      final first = data.rows('flashcards').single;
+      expect(first['review_count'], 1);
+      expect(first['repetitions'], 1);
+      expect(
+        first['due_at'],
+        t.add(const Duration(days: 1)).millisecondsSinceEpoch,
+      );
+      expect(
+        data.dueFlashcards(now: t.add(const Duration(hours: 23))),
+        isEmpty,
+      );
+      expect(
+        data.dueFlashcards(now: t.add(const Duration(days: 1))),
+        hasLength(1),
+      );
+
+      final next = DateTime.fromMillisecondsSinceEpoch(
+        first['due_at'],
+        isUtc: true,
+      );
+      await data.reviewFlashcard(card, 'again', reviewedAt: next);
+      final second = data.rows('flashcards').single;
+      expect(second['review_count'], 2); // both real reviews remain counted
+      expect(second['repetitions'], 0); // Again restarts the scheduling streak
+      expect(
+        second['due_at'],
+        next.add(const Duration(minutes: 10)).millisecondsSinceEpoch,
+      );
+      expect(data.rows('study_reviews'), hasLength(2));
+      expect(
+        data.dueFlashcards(now: next.add(const Duration(minutes: 9))),
+        isEmpty,
+      );
+      expect(
+        data.dueFlashcards(now: next.add(const Duration(minutes: 10))),
+        hasLength(1),
+      );
+
+      await data.updateFlashcard(card, 'Updated front', 'Updated back');
+      await data.updateStudyDeck(deck, 'Updated deck');
+      final restored = PhoneData(secure);
+      await restored.load();
+      expect(restored.studyDecks.single['title'], 'Updated deck');
+      expect(restored.rows('flashcards').single['front'], 'Updated front');
+      expect(jsonDecode(restored.export())['study_reviews'], hasLength(2));
+      await restored.deleteFlashcard(card);
+      expect(restored.rows('flashcards'), isEmpty);
+      await restored.deleteStudyDeck(deck);
+      expect(restored.studyDecks, isEmpty);
+      expect(restored.rows('study_reviews'), hasLength(2));
+      expect(restored.chat('older').single['text'], 'keep me');
+    },
+  );
+
+  testWidgets('flashcard flow creates and reviews a user-authored card', (
+    tester,
+  ) async {
+    const secure = FlutterSecureStorage();
+    final data = PhoneData(secure);
+    await data.load();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(child: LocalFlashcards(data: data)),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('New deck'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'Biology');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Biology'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add card'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), 'What is a cell?');
+    await tester.enterText(
+      find.byType(TextField).at(1),
+      'The basic unit of life.',
+    );
+    await tester.tap(find.text('Save card'));
+    await tester.pumpAndSettle();
+    expect(find.text('What is a cell?'), findsOneWidget);
+
+    await tester.tap(find.text('Review due cards'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Show answer'));
+    await tester.pumpAndSettle();
+    expect(find.text('The basic unit of life.'), findsOneWidget);
+    await tester.tap(find.text('Good'));
+    await tester.pumpAndSettle();
+    expect(data.rows('study_reviews'), hasLength(1));
+    expect(
+      find.textContaining('1 reviewed today · 1 total reviews'),
+      findsOneWidget,
+    );
+  });
+
   test('memory scope applies and only relevant approved facts selected; no implicit capture', () async {
     final s = AssistantState();
     await s.initialize();

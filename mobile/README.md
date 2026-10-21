@@ -7,7 +7,7 @@ This Flutter app is a private, development-signed increment, not the completed a
 1. Obtain the private ARM64 `personal-agentic-ai-0.3.0-private-arm64.apk` supplied for this build. There is no public APK release/tag for this increment.
 2. Open the APK on the phone. If Android blocks installation, allow installation from that specific browser/file app only if you trust this build; turn that allowance off afterward. The app is labeled **Personal assistant (test)**. It uses an Android Debug/development certificate, not a production identity. Do not uninstall an older copy merely to bypass a signer mismatch: export local data first and inspect the mismatch.
 3. Complete onboarding and optionally choose the assistant display name. This changes UI and quoted self-introduction context, not package identity or wake recognition.
-4. Leave AI set to **Offline · model not installed** to use local notes, approved memories, tasks, chat search/history, study-attempt records, JSON exports and reviewed native actions without a server. The app never makes up an AI reply when no model is installed.
+4. Leave AI set to **Offline · model not installed** to use local notes, approved memories, tasks, chat search/history, user-authored flashcard decks/cards with local due reviews and study-attempt records, JSON exports and reviewed native actions without a server. The app never makes up an AI reply when no model is installed.
 5. Local actions: Home offers a reminder or a supported app launch. Review the exact payload and tap approval. Notification permission is asked for only when first needed. Android accepts an approximate alarm, not guaranteed exact delivery. HyperOS/battery restrictions can delay it. Removing app data removes reminders. Force-stopping can prevent delivery until Android allows the app to run again.
 
 Navigation is Home, Chat, Automations, Memory & Library, Settings. Study and selected files are within those destinations, not separate primary tabs. Automations currently contains individual reviewed actions and receipts, **not** a workflow engine.
@@ -16,7 +16,7 @@ Navigation is Home, Chat, Automations, Memory & Library, Settings. Study and sel
 
 - Device-owned conversation retention/reopening and case-insensitive keyword search. This is lexical search, not embeddings/semantic search.
 - Explicitly approved preference/project/summary memories, with current/all-conversation scope, edit/delete/export. Chat retention does not automatically approve facts for long-term memory. Relevant retrieval is lexical top-five matching.
-- Private notebook; local task completion; actual practice answers/feedback/results recorded by the owner. Counts reflect records, not inferred mastery. AI tutor prompts/quiz generation require a configured capable engine; generated answers are not independently verified.
+- Private notebook; local task completion; actual practice answers/feedback/results recorded by the owner. Counts reflect records, not inferred mastery. Study includes user-authored decks/cards, editable/deletable content, a due queue and deterministic Again/Hard/Good/Easy intervals; only completed review actions affect review totals. All flashcard data stays in phone-local secure storage and works without AI or network. Tutor prompts/quiz generation still require a configured capable engine; generated answers are not independently verified.
 - Android document picker for a specific text/JSON/image/PDF. UTF-8 text preview (200 KB cap) and PNG/JPEG preview (2 MB cap). PDF extraction, OCR, diagram/image AI and camera are **not implemented**. Selected contents are data, never action authority. Text summarization shows exact payload before online sending; images are not submitted to a text-only model.
 - Strict local reminder/app-launch approval ledger: five-minute single-use approval consumed before the native effect, explicit denied/failed/unknown receipts, no automatic replay after an uncertain result. Four package targets are supported: Settings, Chrome, YouTube, Google Calculator, when installed. No arbitrary intents, shell, messages or purchases.
 - Markdown display and streaming protocol adapters, cancellation/interrupted-response labels and explicit connection/timeout/rate-limit errors. Actual online generation needs setup below. No offline inference runtime/model is bundled.
@@ -77,9 +77,10 @@ On a disposable API36 emulator only (tests deliberately clear app secure data an
 
 ```sh
 adb shell pm grant dev.personalagent.personal_assistant android.permission.POST_NOTIFICATIONS
-flutter test integration_test/android16_test.dart -d emulator-5554
+flutter test --no-uninstall integration_test/android16_test.dart -d emulator-5554
+adb shell pm path dev.personalagent.personal_assistant # verify it remains installed
 adb shell am force-stop dev.personalagent.personal_assistant
-flutter test integration_test/rehydrate_test.dart -d emulator-5554
+flutter test --no-uninstall integration_test/rehydrate_test.dart -d emulator-5554
 ```
 
 [API36 workflow](../.github/workflows/android16.yml) uses an accelerated GitHub-hosted emulator, synthetic data and no provider secrets. Check its actual run before claiming a pass. Native emulator tests do not establish physical Redmi/HyperOS behavior, offline model quality, successful speech, battery-delayed notification delivery, picker workflows or every Android16 restriction. Current evidence is in [test status](../docs/FLUTTER_TEST_STATUS.md). Complete staged scope is in [roadmap](../docs/ANDROID_ROADMAP.md).

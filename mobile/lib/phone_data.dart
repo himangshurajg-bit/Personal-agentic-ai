@@ -11,6 +11,9 @@ class PhoneData {
     'tasks': [],
     'attempts': [],
     'actions': [],
+    'study_decks': [],
+    'flashcards': [],
+    'study_reviews': [],
   };
   bool _loadFailed = false;
   Future<void> _tail = Future.value();
@@ -28,6 +31,15 @@ class PhoneData {
               'actions',
             ].every((k) => parsed[k] is List)) {
           throw const FormatException('Invalid local data');
+        }
+        // Additive migration for installs created before local flashcards.
+        parsed.putIfAbsent('study_decks', () => <dynamic>[]);
+        parsed.putIfAbsent('flashcards', () => <dynamic>[]);
+        parsed.putIfAbsent('study_reviews', () => <dynamic>[]);
+        if (parsed['study_decks'] is! List ||
+            parsed['flashcards'] is! List ||
+            parsed['study_reviews'] is! List) {
+          throw const FormatException('Invalid local study data');
         }
         _data = parsed;
       }
@@ -173,5 +185,218 @@ class PhoneData {
       'at': DateTime.now().toUtc().toIso8601String(),
     }),
   );
+
+  List<Map<String, dynamic>> get studyDecks => rows('study_decks');
+
+  List<Map<String, dynamic>> cardsForDeck(String deckId) =>
+      rows('flashcards').where((card) => card['deck_id'] == deckId).toList();
+
+  List<Map<String, dynamic>> dueFlashcards({String? deckId, DateTime? now}) {
+    final at = (now ?? DateTime.now()).toUtc().millisecondsSinceEpoch;
+    final due = rows('flashcards').where((card) {
+      return (deckId == null || card['deck_id'] == deckId) &&
+          (card['due_at'] as int? ?? 0) <= at;
+    }).toList();
+    due.sort((a, b) {
+      final time = (a['due_at'] as int? ?? 0).compareTo(
+        b['due_at'] as int? ?? 0,
+      );
+      return time != 0
+          ? time
+          : (a['created_at'] as int).compareTo(b['created_at'] as int);
+    });
+    return due;
+  }
+
+  Future<String> createStudyDeck(String title) async {
+    final clean = title.trim();
+    if (clean.isEmpty || clean.length > 100) {
+      throw ArgumentError('Deck name must be 1–100 characters.');
+    }
+    final deckId = id();
+    await change(
+      (d) => (d['study_decks'] as List).add({
+        'id': deckId,
+        'title': clean,
+        'created_at': DateTime.now().toUtc().millisecondsSinceEpoch,
+      }),
+    );
+    return deckId;
+  }
+
+  Future<void> updateStudyDeck(String deckId, String title) async {
+    final clean = title.trim();
+    if (clean.isEmpty || clean.length > 100) {
+      throw ArgumentError('Deck name must be 1–100 characters.');
+    }
+    await change((d) {
+      final decks = d['study_decks'] as List;
+      final index = decks.indexWhere((deck) => deck['id'] == deckId);
+      if (index < 0) throw StateError('Deck no longer exists.');
+      decks[index]['title'] = clean;
+    });
+  }
+
+  Future<void> deleteStudyDeck(String deckId) => change((d) {
+    final decks = d['study_decks'] as List;
+    if (!decks.any((deck) => deck['id'] == deckId)) {
+      throw StateError('Deck no longer exists.');
+    }
+    decks.removeWhere((deck) => deck['id'] == deckId);
+    (d['flashcards'] as List).removeWhere((card) => card['deck_id'] == deckId);
+  });
+
+  Future<String> createFlashcard(
+    String deckId,
+    String front,
+    String back,
+  ) async {
+    final cleanFront = front.trim();
+    final cleanBack = back.trim();
+    if (cleanFront.isEmpty ||
+        cleanBack.isEmpty ||
+        cleanFront.length > 2000 ||
+        cleanBack.length > 4000) {
+      throw ArgumentError(
+        'Enter a front (1–2,000 characters) and back (1–4,000 characters).',
+      );
+    }
+    final cardId = id();
+    final created = DateTime.now().toUtc().millisecondsSinceEpoch;
+    await change((d) {
+      if (!(d['study_decks'] as List).any((deck) => deck['id'] == deckId)) {
+        throw StateError('Deck no longer exists.');
+      }
+      (d['flashcards'] as List).add({
+        'id': cardId,
+        'deck_id': deckId,
+        'front': cleanFront,
+        'back': cleanBack,
+        'created_at': created,
+        'due_at': created,
+        'interval_days': 0,
+        'review_count': 0,
+        'repetitions': 0,
+        'last_reviewed_at': null,
+      });
+    });
+    return cardId;
+  }
+
+  Future<void> updateFlashcard(String cardId, String front, String back) async {
+    final cleanFront = front.trim();
+    final cleanBack = back.trim();
+    if (cleanFront.isEmpty ||
+        cleanBack.isEmpty ||
+        cleanFront.length > 2000 ||
+        cleanBack.length > 4000) {
+      throw ArgumentError(
+        'Enter a front (1–2,000 characters) and back (1–4,000 characters).',
+      );
+    }
+    await change((d) {
+      final cards = d['flashcards'] as List;
+      final index = cards.indexWhere((card) => card['id'] == cardId);
+      if (index < 0) throw StateError('Flashcard no longer exists.');
+      cards[index]['front'] = cleanFront;
+      cards[index]['back'] = cleanBack;
+    });
+  }
+
+  Future<void> deleteFlashcard(String cardId) => change((d) {
+    final cards = d['flashcards'] as List;
+    if (!cards.any((card) => card['id'] == cardId)) {
+      throw StateError('Flashcard no longer exists.');
+    }
+    cards.removeWhere((card) => card['id'] == cardId);
+  });
+
+  /// Applies a deterministic local schedule only after an actual review action.
+  Future<void> reviewFlashcard(
+    String cardId,
+    String rating, {
+    DateTime? reviewedAt,
+  }) async {
+    const ratings = {'again', 'hard', 'good', 'easy'};
+    if (!ratings.contains(rating)) {
+      throw ArgumentError('Choose a review rating.');
+    }
+    final now = (reviewedAt ?? DateTime.now()).toUtc();
+    await change((d) {
+      final cards = d['flashcards'] as List;
+      final index = cards.indexWhere((card) => card['id'] == cardId);
+      if (index < 0) throw StateError('Flashcard no longer exists.');
+      final card = Map<String, dynamic>.from(cards[index]);
+      final oldDue = card['due_at'] as int? ?? 0;
+      final nowMs = now.millisecondsSinceEpoch;
+      if (oldDue > nowMs) throw StateError('This card is not due yet.');
+      final oldCount = card['review_count'] as int? ?? 0;
+      final repetitions = card['repetitions'] as int? ?? 0;
+      final oldInterval = card['interval_days'] as int? ?? 0;
+      int days;
+      switch (rating) {
+        case 'again':
+          days = 0;
+          card['repetitions'] = 0;
+          card['review_count'] = oldCount + 1;
+          break;
+        case 'hard':
+          days = repetitions == 0
+              ? 1
+              : (oldInterval * 1.2).ceil().clamp(1, 3650).toInt();
+          card['repetitions'] = repetitions + 1;
+          card['review_count'] = oldCount + 1;
+          break;
+        case 'good':
+          days = repetitions == 0
+              ? 1
+              : repetitions == 1
+              ? 3
+              : (oldInterval * 2).round().clamp(1, 3650).toInt();
+          card['repetitions'] = repetitions + 1;
+          card['review_count'] = oldCount + 1;
+          break;
+        default:
+          days = repetitions == 0
+              ? 3
+              : (oldInterval * 2.5).round().clamp(2, 3650).toInt();
+          card['repetitions'] = repetitions + 1;
+          card['review_count'] = oldCount + 1;
+      }
+      final delay = rating == 'again'
+          ? const Duration(minutes: 10).inMilliseconds
+          : Duration(days: days).inMilliseconds;
+      card['interval_days'] = days;
+      card['last_reviewed_at'] = nowMs;
+      card['due_at'] = nowMs + delay;
+      cards[index] = card;
+      (d['study_reviews'] as List).add({
+        'card_id': cardId,
+        'deck_id': card['deck_id'],
+        'rating': rating,
+        'reviewed_at': nowMs,
+        'next_due_at': nowMs + delay,
+      });
+    });
+  }
+
+  int reviewedToday({DateTime? now}) {
+    final local = now ?? DateTime.now();
+    final start = DateTime(
+      local.year,
+      local.month,
+      local.day,
+    ).toUtc().millisecondsSinceEpoch;
+    final end = DateTime(
+      local.year,
+      local.month,
+      local.day + 1,
+    ).toUtc().millisecondsSinceEpoch;
+    return rows('study_reviews').where((review) {
+      final at = review['reviewed_at'] as int;
+      return at >= start && at < end;
+    }).length;
+  }
+
   String export() => const JsonEncoder.withIndent('  ').convert(snapshot);
 }

@@ -34,6 +34,13 @@ void main() {
         'feedback': 'synthetic',
         'result': 'not checked',
       });
+      final deckId = await s.local.createStudyDeck('Synthetic API36 deck');
+      final cardId = await s.local.createFlashcard(
+        deckId,
+        'Synthetic question',
+        'Synthetic answer',
+      );
+      await s.local.reviewFlashcard(cardId, 'good');
       final restored = AssistantState();
       await restored.initialize();
       expect(restored.note, 'Synthetic local-only note');
@@ -44,6 +51,9 @@ void main() {
       expect(restored.local.rows('memories'), hasLength(1));
       expect(restored.local.rows('tasks'), hasLength(1));
       expect(restored.local.rows('attempts'), hasLength(1));
+      expect(restored.local.studyDecks.single['title'], 'Synthetic API36 deck');
+      expect(restored.local.cardsForDeck(deckId).single['review_count'], 1);
+      expect(restored.local.rows('study_reviews'), hasLength(1));
       final status = await AssistantState.device.invokeMapMethod(
         'device_status',
       );
