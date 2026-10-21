@@ -1074,6 +1074,7 @@ class _SettingsState extends State<Settings> {
           child: Column(
             children: [
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 initialValue: speechMode,
                 decoration: const InputDecoration(
                   labelText: 'Speech recognition — independent of AI',
@@ -1101,6 +1102,7 @@ class _SettingsState extends State<Settings> {
                 ),
               ),
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 initialValue: engine,
                 decoration: const InputDecoration(labelText: 'AI engine'),
                 items: [
@@ -1118,6 +1120,7 @@ class _SettingsState extends State<Settings> {
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 initialValue: language,
                 decoration: const InputDecoration(
                   labelText: 'Conversation / voice language',
@@ -1159,6 +1162,7 @@ class _SettingsState extends State<Settings> {
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 initialValue: theme,
                 decoration: const InputDecoration(labelText: 'Appearance'),
                 items: [
@@ -1294,7 +1298,11 @@ class _MemoriesState extends State<Memories> {
   @override
   void initState() {
     super.initState();
-    refresh();
+    // Local loading notifies the app-level ListenableBuilder synchronously.
+    // Wait until the route has finished building before publishing that update.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) refresh();
+    });
   }
 
   Future<void> refresh() async {
