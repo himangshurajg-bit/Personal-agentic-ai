@@ -4,7 +4,7 @@ This Flutter app is a private, development-signed increment, not the completed a
 
 ## Install on a phone (no computer required for local tools)
 
-1. Obtain the private ARM64 `personal-agentic-ai-0.3.0-private-arm64.apk` supplied for this build. There is no public APK release/tag for this increment.
+1. Obtain the private ARM64 `personal-agentic-ai-0.3.0-build5-private-arm64.apk` supplied for this build (0.3.0, build 5). There is no public APK release/tag for this increment.
 2. Open the APK on the phone. If Android blocks installation, allow installation from that specific browser/file app only if you trust this build; turn that allowance off afterward. The app is labeled **Personal assistant (test)**. It uses an Android Debug/development certificate, not a production identity. Do not uninstall an older copy merely to bypass a signer mismatch: export local data first and inspect the mismatch.
 3. Complete onboarding and optionally choose the assistant display name. This changes UI and quoted self-introduction context, not package identity or wake recognition.
 4. Leave AI set to **Offline · model not installed** to use local notes, approved memories, tasks, chat search/history, user-authored flashcard decks/cards with local due reviews and study-attempt records, JSON exports and reviewed native actions without a server. The app never makes up an AI reply when no model is installed.
