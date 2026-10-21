@@ -344,6 +344,7 @@ void main() {
       );
       final s = AssistantState()
         ..ready = true
+        ..appLockConfigurationReady = true
         ..onboarded = true;
       await tester.pumpWidget(AssistantApp(state: s));
       await tester.tap(find.text('Chat').last);
@@ -390,6 +391,7 @@ void main() {
       );
       final s = AssistantState()
         ..ready = true
+        ..appLockConfigurationReady = true
         ..onboarded = true
         ..speechMode = 'online';
       await tester.pumpWidget(AssistantApp(state: s));

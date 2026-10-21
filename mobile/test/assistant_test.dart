@@ -256,7 +256,9 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
-      final state = AssistantState()..ready = true;
+      final state = AssistantState()
+        ..ready = true
+        ..appLockConfigurationReady = true;
       await tester.pumpWidget(
         RepaintBoundary(
           key: const ValueKey('capture'),
@@ -291,6 +293,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final state = AssistantState()
       ..ready = true
+      ..appLockConfigurationReady = true
       ..onboarded = true
       ..theme = 'dark';
     await tester.pumpWidget(
@@ -349,6 +352,7 @@ void main() {
       });
       final state = stateWith(MockClient((_) async => http.Response('[]', 200)))
         ..ready = true
+        ..appLockConfigurationReady = true
         ..onboarded = true;
       await tester.pumpWidget(AssistantApp(state: state));
       await tester.tap(find.text('Chat').last);
@@ -419,6 +423,7 @@ void main() {
               }),
             )
             ..ready = true
+            ..appLockConfigurationReady = true
             ..onboarded = true;
       await tester.pumpWidget(AssistantApp(state: state));
       final home = tester.widget<Home>(find.byType(Home));

@@ -15,14 +15,46 @@ void main() {
   runApp(AssistantApp(state: AssistantState()..initialize()));
 }
 
-class AssistantApp extends StatelessWidget {
+class AssistantApp extends StatefulWidget {
   final AssistantState state;
   const AssistantApp({super.key, required this.state});
+
+  @override
+  State<AssistantApp> createState() => _AssistantAppState();
+}
+
+class _AssistantAppState extends State<AssistantApp>
+    with WidgetsBindingObserver {
+  bool _leftForeground = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      _leftForeground = true;
+      widget.state.lockApp();
+    } else if (_leftForeground) {
+      _leftForeground = false;
+      widget.state.lockApp();
+    }
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: state,
+    listenable: widget.state,
     builder: (context, _) => MaterialApp(
-      title: state.assistantName,
+      title: widget.state.assistantName,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff5267a6)),
@@ -36,28 +68,140 @@ class AssistantApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xff101827),
         useMaterial3: true,
       ),
-      themeMode: state.theme == 'dark'
+      themeMode: widget.state.theme == 'dark'
           ? ThemeMode.dark
-          : state.theme == 'light'
+          : widget.state.theme == 'light'
           ? ThemeMode.light
           : ThemeMode.system,
-      home: !state.ready
+      builder: (context, child) => _AppLockGate(
+        state: widget.state,
+        child: child ?? const SizedBox.shrink(),
+      ),
+      home: !widget.state.ready
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
-          : state.onboarded
-          ? Home(state: state)
-          : Onboarding(state: state),
+          : widget.state.onboarded
+          ? Home(state: widget.state)
+          : Onboarding(state: widget.state),
       routes: {
-        '/home': (_) => Home(state: state),
-        '/chat': (_) => ChatScreen(state: state),
-        '/settings': (_) => Settings(state: state),
-        '/memory': (_) => Memories(state: state),
-        '/library': (_) => PhoneLibrary(state: state),
-        '/study': (_) => StudyScreen(state: state),
-        '/files': (_) => SelectedFiles(state: state),
-        '/automations': (_) => ActionHistory(state: state),
+        '/home': (_) => Home(state: widget.state),
+        '/chat': (_) => ChatScreen(state: widget.state),
+        '/settings': (_) => Settings(state: widget.state),
+        '/memory': (_) => Memories(state: widget.state),
+        '/library': (_) => PhoneLibrary(state: widget.state),
+        '/study': (_) => StudyScreen(state: widget.state),
+        '/files': (_) => SelectedFiles(state: widget.state),
+        '/automations': (_) => ActionHistory(state: widget.state),
       },
     ),
   );
+}
+
+class _AppLockGate extends StatelessWidget {
+  final AssistantState state;
+  final Widget child;
+  const _AppLockGate({required this.state, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final blocked = state.appLockGateVisible;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Offstage(
+          offstage: blocked,
+          child: ExcludeSemantics(
+            excluding: blocked,
+            child: IgnorePointer(ignoring: blocked, child: child),
+          ),
+        ),
+        if (blocked) _LockScreen(state: state),
+      ],
+    );
+  }
+}
+
+class _LockScreen extends StatefulWidget {
+  final AssistantState state;
+  const _LockScreen({required this.state});
+
+  @override
+  State<_LockScreen> createState() => _LockScreenState();
+}
+
+class _LockScreenState extends State<_LockScreen> {
+  String message = '';
+
+  Future<void> _unlock() async {
+    setState(() => message = '');
+    final ok = await widget.state.unlockApp();
+    if (!mounted) return;
+    if (!ok && widget.state.appLockConfigurationReady) {
+      setState(
+        () => message = 'Authentication was cancelled or unavailable. Your app stays locked.',
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canUnlock = widget.state.appLockConfigurationReady;
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.lock_outline, size: 56),
+                const SizedBox(height: 20),
+                Text(
+                  canUnlock
+                      ? 'Your assistant is locked'
+                      : 'Secure settings unavailable',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  canUnlock
+                      ? 'Unlock with your phone’s biometric or screen lock.'
+                      : 'App content is hidden until secure settings can be read.',
+                  textAlign: TextAlign.center,
+                ),
+                if (message.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text(message, textAlign: TextAlign.center),
+                ],
+                const SizedBox(height: 20),
+                FilledButton.icon(
+                  onPressed: widget.state.appLockBusy
+                      ? null
+                      : canUnlock
+                      ? _unlock
+                      : widget.state.retryInitialization,
+                  icon: widget.state.appLockBusy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(canUnlock ? Icons.fingerprint : Icons.refresh),
+                  label: Text(
+                    widget.state.appLockBusy
+                        ? 'Checking…'
+                        : canUnlock
+                        ? 'Unlock'
+                        : 'Try again',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class Shell extends StatelessWidget {
@@ -1051,7 +1195,18 @@ class _SettingsState extends State<Settings> {
   late final model = TextEditingController(text: widget.state.model);
   late final name = TextEditingController(text: widget.state.assistantName);
   @override
+  void initState() {
+    super.initState();
+    widget.state.addListener(_stateChanged);
+  }
+
+  void _stateChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   void dispose() {
+    widget.state.removeListener(_stateChanged);
     url.dispose();
     token.dispose();
     model.dispose();
@@ -1068,6 +1223,34 @@ class _SettingsState extends State<Settings> {
         const Glass(
           child: Text(
             'Your chats, approved memories, notes, tasks and study records stay on this phone. AI is optional: offline inference is not installed; online requests require an explicit payload review. The private FastAPI adapter remains optional, not a requirement for local tools.',
+          ),
+        ),
+        Glass(
+          child: SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: widget.state.appLockEnabled,
+            onChanged: widget.state.appLockBusy
+                ? null
+                : (enabled) async {
+                    final saved = await widget.state.setAppLockEnabled(enabled);
+                    if (!context.mounted) return;
+                    if (saved) {
+                      notice(
+                        context,
+                        enabled ? 'App lock enabled.' : 'App lock disabled.',
+                      );
+                    } else {
+                      notice(
+                        context,
+                        'Device authentication did not succeed. App lock was not changed.',
+                      );
+                    }
+                  },
+            secondary: const Icon(Icons.lock_outline),
+            title: const Text('App lock'),
+            subtitle: const Text(
+              'Require your phone’s biometric or screen lock when opening or returning to the app.',
+            ),
           ),
         ),
         Glass(
@@ -1237,7 +1420,7 @@ class _SettingsState extends State<Settings> {
         ),
         const Glass(
           child: Text(
-            'Privacy & permissions\n\nMicrophone access is requested only when starting voice input. Notification permission is requested when scheduling your first reminder. Neither is needed for typed chat. Android speech providers may send audio to their service. There is no background microphone or wake phrase.\n\nReminders use approximate alarms and are lost if this private test app is removed. Battery settings can delay them.',
+            'Privacy & permissions\n\nOptional app lock uses Android device authentication (biometrics or screen lock where supported). No PIN or authentication secret is created or stored. The lock is checked when enabled and gates the app on launch and return from the background.\n\nMicrophone access is requested only when starting voice input. Notification permission is requested when scheduling your first reminder. Neither is needed for typed chat. Android speech providers may send audio to their service. There is no background microphone or wake phrase.\n\nReminders use approximate alarms and are lost if this private test app is removed. Battery settings can delay them.',
           ),
         ),
         TextButton(

@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 import 'phone_data.dart';
+import 'app_lock.dart';
 import 'engines.dart';
 
 class ServiceException implements Exception {
@@ -41,10 +42,13 @@ Uri checkedEndpoint(String raw) {
 class AssistantState extends ChangeNotifier {
   final FlutterSecureStorage storage;
   final http.Client Function() clientFactory;
+  final DeviceAuthenticator authenticator;
   AssistantState({
     this.storage = const FlutterSecureStorage(),
     http.Client Function()? clientFactory,
-  }) : clientFactory = clientFactory ?? http.Client.new;
+    DeviceAuthenticator? authenticator,
+  }) : clientFactory = clientFactory ?? http.Client.new,
+       authenticator = authenticator ?? LocalAuthDeviceAuthenticator();
   late final PhoneData local = PhoneData(storage);
   String speechMode = 'offline';
   String assistantName = 'Personal assistant';
@@ -59,12 +63,20 @@ class AssistantState extends ChangeNotifier {
   bool shareMemories = false, shareHistory = false;
   Map<String, dynamic>? selectedFile;
   bool ready = false, onboarded = false, busy = false, speakReplies = false;
+  bool appLockConfigurationReady = false,
+      appLockEnabled = false,
+      appLocked = false,
+      appLockBusy = false;
   List<Map<String, dynamic>> messages = [], memories = [];
   http.Client? _stream;
   int _generation = 0;
   static const device = MethodChannel('personal_assistant/device');
   Future<void> initialize() async {
     try {
+      final savedLock = await storage.read(key: 'app_lock_enabled');
+      appLockConfigurationReady = true;
+      appLockEnabled = savedLock == 'yes';
+      appLocked = appLockEnabled;
       await local.load();
       assistantName =
           await storage.read(key: 'assistant_name') ?? 'Personal assistant';
@@ -79,10 +91,80 @@ class AssistantState extends ChangeNotifier {
       onboarded = await storage.read(key: 'onboarded') == 'yes';
       note = await storage.read(key: 'note') ?? '';
     } catch (_) {
+      if (!appLockConfigurationReady) {
+        error =
+            'Secure settings could not be checked. App content remains locked.';
+        ready = true;
+        notifyListeners();
+        return;
+      }
       error = 'Secure storage could not be opened. Settings were not loaded.';
     }
     ready = true;
     notifyListeners();
+  }
+
+  bool get appLockGateVisible => !appLockConfigurationReady || appLocked;
+
+  Future<void> retryInitialization() async {
+    ready = false;
+    notifyListeners();
+    await initialize();
+  }
+
+  /// Enable or disable the lock only after the OS reports successful authentication.
+  Future<bool> setAppLockEnabled(bool enabled) async {
+    if (!appLockConfigurationReady || appLockBusy) return false;
+    if (enabled == appLockEnabled) return true;
+    appLockBusy = true;
+    notifyListeners();
+    var authenticated = false;
+    try {
+      authenticated = await authenticator.authenticate();
+      if (!authenticated) return false;
+      if (enabled) {
+        await storage.write(key: 'app_lock_enabled', value: 'yes');
+      } else {
+        await storage.delete(key: 'app_lock_enabled');
+      }
+      appLockEnabled = enabled;
+      appLocked = false;
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      appLockBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> unlockApp() async {
+    if (!appLockConfigurationReady ||
+        !appLockEnabled ||
+        !appLocked ||
+        appLockBusy) {
+      return false;
+    }
+    appLockBusy = true;
+    notifyListeners();
+    try {
+      final authenticated = await authenticator.authenticate();
+      if (!authenticated) return false;
+      appLocked = false;
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      appLockBusy = false;
+      notifyListeners();
+    }
+  }
+
+  void lockApp() {
+    if (appLockConfigurationReady && appLockEnabled && !appLocked) {
+      appLocked = true;
+      notifyListeners();
+    }
   }
 
   Future<void> finishOnboarding() async {

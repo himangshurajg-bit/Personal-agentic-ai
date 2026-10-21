@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:local_auth/local_auth.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:personal_assistant/assistant_state.dart';
@@ -59,6 +60,8 @@ void main() {
       );
       expect(status!['sdk'], 36);
       expect(status['microphone_granted'], false);
+      // Exercise the registered native local_auth bridge without prompting for enrollment.
+      expect(await LocalAuthentication().isDeviceSupported(), isA<bool>());
       await expectLater(
         AssistantState.device.invokeMethod('voice_start', {
           'mode': 'online',

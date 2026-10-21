@@ -2,6 +2,17 @@
 
 ## Current scope and measured evidence
 
+## Optional device-auth app lock — implementation and Flutter checks passed
+
+The Flutter app now supports an optional Android device-auth lock. A successful OS authentication is required to enable or disable it; when enabled, protected app content is gated at launch and after returning from the background. Authentication cancellation/failure does not unlock the app, and unreadable secure lock settings keep content hidden. No app PIN or biometric/device credential is created or persisted.
+
+- Focused injected-auth Flutter tests cover successful/cancelled/unavailable setting changes, persisted opt-in, locked relaunch, cancellation-safe unlock, successful unlock and lifecycle return with inaccessible underlying UI.
+- Android API36 instrumentation now calls the native local-auth plugin's noninteractive `isDeviceSupported()` bridge and asserts a boolean response; this does not prove an enrolled biometric or device-credential prompt works.
+- Current checks: `flutter analyze` clean; full Flutter suite **31 passed**, including four focused lock tests and fail-closed initialization retry. The hosted API36 native-plugin check is not yet run. The ARM64 release build was attempted but stopped at Android resource merging with `No space left on device`; no APK for this source state exists.
+- Physical-device prompt/lifecycle, Redmi Note 14 Pro 5G/HyperOS, compromised-device behavior, and exports/third-party data protection remain unqualified. The lock does not encrypt exported JSON or establish a complete security audit.
+
+## Previous 0.3.0 code 4 evidence — offline flashcards slice
+
 ## Offline flashcards slice — local and API36 checks passed
 
 The study screen now includes on-device user-authored decks and cards with rename/edit/delete, a due queue, reveal-before-rating, and deterministic Again/Hard/Good/Easy review intervals. Deck/card content and review events are additive fields in the existing secure local-data record; older records migrate without losing previous data. Review totals count explicit rating actions only, including historical reviews retained after a card or deck is deleted. No generated content, mastery claim, network, AI or provider setup is involved.
@@ -34,7 +45,7 @@ A second candidate, `Qwen_Qwen3.5-2B-Q4_K_M.gguf` (about 1.4 GB; SHA-256 `57a108
 
 No Flutter/Android inference runtime, model downloader, storage preflight, checksum install flow or on-device generation is implemented. The 4B file is only a development probe outside Git and is not bundled in the APK. The next gate is to find a model that passes representative English, Assamese, arithmetic and concise study prompts, then verify runtime, memory, latency, heat and cancellation on API36 and the actual phone before enabling offline chat. The app must measure free space before a user-started model download; 128 GB total capacity is not free-space evidence. Until those gates pass, Online remains an explicit separate choice and Offline remains unavailable without network fallback.
 
-This is development/debug signing reused for private testing, not a production identity. No public APK tag/release, hosted backend, cloud account, paid API or insecure tunnel is created. Exports are plaintext; native reminder metadata is private but plaintext; secure-storage API usage is not a complete security audit/app lock. No exact alarm delivery promise. Refer to setup for separate local, optional online and speech privacy boundaries.
+This is development/debug signing reused for private testing, not a production identity. No public APK tag/release, hosted backend, cloud account, paid API or insecure tunnel is created. Exports are plaintext; native reminder metadata is private but plaintext; secure-storage API usage is not a complete security audit; the optional app lock does not encrypt exports or guarantee protection from a compromised device. No exact alarm delivery promise. Refer to setup for separate local, optional online and speech privacy boundaries.
 
 ---
 
