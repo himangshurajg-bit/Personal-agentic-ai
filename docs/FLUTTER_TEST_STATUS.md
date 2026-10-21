@@ -2,13 +2,13 @@
 
 ## Current scope and measured evidence
 
-## Offline flashcards slice — local checks passed, API36 pending
+## Offline flashcards slice — local and API36 checks passed
 
 The study screen now includes on-device user-authored decks and cards with rename/edit/delete, a due queue, reveal-before-rating, and deterministic Again/Hard/Good/Easy review intervals. Deck/card content and review events are additive fields in the existing secure local-data record; older records migrate without losing previous data. Review totals count explicit rating actions only, including historical reviews retained after a card or deck is deleted. No generated content, mastery claim, network, AI or provider setup is involved.
 
 - `flutter analyze`: clean; `flutter test`: **27 passed**, including legacy-data migration, interval/due behavior, actual-review-only counts, deletion/history retention, reload/export and a widget-level create/review flow.
-- Android API36 integration now seeds a synthetic deck/card, reviews it, and verifies the persisted record both after app-state reload and after the separate restart phase. The new integration checks have not yet run on the hosted emulator in this revision; do not claim Android16 flashcard qualification until the current run finishes.
-- This is still part of private development preview `0.3.0` (build code 4); no replacement APK has been built or delivered yet.
+- Android API36 integration now seeds a synthetic deck/card, reviews it, and verifies the persisted record both after app-state reload and after the separate restart phase. The hosted API36 emulator passed the full integration flow: deck/card creation, review scheduling and persisted local state across reload and restart. This qualifies the implemented slice on the configured Android16 emulator, not on a physical Redmi/HyperOS device.
+- A private ARM64 APK was rebuilt from main commit `debbe964d58ba8e3bb7eda557d55257627d13e4b`: versionName `0.3.0`, versionCode `4`, 19,942,422 bytes, SHA-256 `d8c1b6718d7ccccf92a45cea3b9be241d7dbfea5ab8ef24f7222123badf1408a`. APK Signature Scheme v2 verifies; its Android Debug development certificate SHA-256 is `4e4911d0e0cf7b0c312b9bcc6ad431bec9cd9cb64420e6a3a9fc4fa1c50c9603`, matching the retained code-3 candidate signer. This is a private test artifact, not a public release.
 
 Source preserves the earlier CLI/web/Android and optional FastAPI implementation. Phone-local features now include approved memory CRUD/export, notebook, keyword history search, tasks, practice-attempt records and typed approved native actions. Five primary destinations, display-name setting, per-send online disclosure and separate offline/online speech routing are implemented. Offline LLM, semantic retrieval, automatic summaries, PDF/OCR/vision, advanced automations and the broader staged scope are not complete. See ANDROID_ROADMAP.md and mobile/README.md.
 
@@ -88,3 +88,6 @@ No connected Android device was available (`adb devices` empty). This computer h
 SQLite messages/memories are plaintext on the service computer; use a private encrypted disk. Secure token storage and disabled Android backups are not comprehensive device security. Only a single authenticated owner is supported. Lexical top-five retrieval is deliberately simple, not semantic memory reasoning. Reminder delivery is approximate, subject to Android battery limits. Android STT may send audio through the installed provider's network service; offline recognition is not guaranteed.
 
 Dependency locks and Flutter's built-in license view retain package notices. `flutter_tts` produces a future Built-in Kotlin migration warning; it did not fail this build. No general zero-vulnerability claim is made. Existing external-executor and legacy provider-verification issues remain open; this new local device/client service does not silently satisfy their separate acceptance criteria.
+
+
+The current flashcard Android16 integration qualification is run [39580662913](https://github.com/himangshurajg-bit/Personal-agentic-ai/actions/runs/39580662913), API36 emulator. Both native integration tests passed: `API36 native storage, safe modes, navigation and action boundary` and `API36 restart retains local state without provider`. In addition to the broader app gates, this run exercised study records and review persistence through reload/restart. This is emulator evidence only; actual Redmi Note 14 Pro 5G / HyperOS behavior remains untested. The earlier defect and harness runs are retained below as history.
