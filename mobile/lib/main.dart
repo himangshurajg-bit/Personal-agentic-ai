@@ -3,9 +3,12 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
-import 'package:speech_to_text/speech_to_text.dart';
+import 'package:flutter/services.dart';
 
 import 'assistant_state.dart';
+import 'phone_screens.dart';
+
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,7 +22,7 @@ class AssistantApp extends StatelessWidget {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: state,
     builder: (context, _) => MaterialApp(
-      title: 'Personal assistant',
+      title: state.assistantName,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff5267a6)),
@@ -48,6 +51,10 @@ class AssistantApp extends StatelessWidget {
         '/chat': (_) => ChatScreen(state: state),
         '/settings': (_) => Settings(state: state),
         '/memory': (_) => Memories(state: state),
+        '/library': (_) => PhoneLibrary(state: state),
+        '/study': (_) => StudyScreen(state: state),
+        '/files': (_) => SelectedFiles(state: state),
+        '/automations': (_) => ActionHistory(state: state),
       },
     ),
   );
@@ -57,14 +64,61 @@ class Shell extends StatelessWidget {
   final String title;
   final Widget child;
   final List<Widget>? actions;
+  final bool primaryNavigation;
   const Shell({
     super.key,
     required this.title,
     required this.child,
     this.actions,
+    this.primaryNavigation = true,
   });
   @override
   Widget build(BuildContext context) => Scaffold(
+    bottomNavigationBar: !primaryNavigation
+        ? null
+        : NavigationBar(
+            selectedIndex: switch (ModalRoute.of(context)?.settings.name) {
+              '/chat' => 1,
+              '/study' => 1,
+              '/files' => 1,
+              '/automations' => 2,
+              '/memory' => 3,
+              '/library' => 3,
+              '/settings' => 4,
+              _ => 0,
+            },
+            onDestinationSelected: (i) {
+              final route = [
+                '/home',
+                '/chat',
+                '/automations',
+                '/memory',
+                '/settings',
+              ][i];
+              if (ModalRoute.of(context)?.settings.name != route) {
+                Navigator.pushReplacementNamed(context, route);
+              }
+            },
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.home_outlined),
+                label: 'Home',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.chat_bubble_outline),
+                label: 'Chat',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.bolt_outlined),
+                label: 'Automations',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.library_books_outlined),
+                label: 'Memory & Library',
+              ),
+              NavigationDestination(icon: Icon(Icons.tune), label: 'Settings'),
+            ],
+          ),
     appBar: AppBar(
       title: Text(title),
       actions: actions,
@@ -133,7 +187,8 @@ class Onboarding extends StatelessWidget {
   const Onboarding({super.key, required this.state});
   @override
   Widget build(BuildContext context) => Shell(
-    title: 'Personal assistant',
+    title: state.assistantName,
+    primaryNavigation: false,
     child: ListView(
       padding: const EdgeInsets.all(24),
       children: [
@@ -152,7 +207,7 @@ class Onboarding extends StatelessWidget {
               Text('Your words. Your choices.', style: TextStyle(fontSize: 22)),
               SizedBox(height: 12),
               Text(
-                'Chat with your own AI service, keep chosen memories, and prepare small actions. AI needs a configured model; there are no pretend replies.',
+                'Keep notes, memories, tasks and study progress on your phone. Choose an online AI service or offline mode. No offline model is installed yet; there are no pretend AI replies.',
               ),
             ],
           ),
@@ -161,6 +216,10 @@ class Onboarding extends StatelessWidget {
           child: Text(
             'Voice starts only when you tap the microphone. Android speech recognition may use its provider’s network service. You can always type instead. Reminders ask for notification permission only when needed. No always-listening mode.',
           ),
+        ),
+        TextButton(
+          onPressed: () => editAssistantName(context, state),
+          child: const Text('Choose your assistant’s name'),
         ),
         FilledButton(
           onPressed: () async {
@@ -184,9 +243,7 @@ class Home extends StatelessWidget {
   const Home({super.key, required this.state});
   Future<void> action(BuildContext context, Map<String, dynamic> action) async {
     try {
-      final draft = await state.request('POST', '/actions/prepare', {
-        'action': action,
-      });
+      final draft = await state.prepareAction(action);
       if (!context.mounted) {
         return;
       }
@@ -213,39 +270,8 @@ class Home extends StatelessWidget {
       if (approved != true) {
         return;
       }
-      // Single use: if approval reply is lost, do not execute or automatically retry.
-      final admitted = await state.request(
-        'POST',
-        '/actions/${draft['id']}/approve',
-        {'token': draft['approval_token']},
-      );
-      Map result;
-      try {
-        result =
-            await AssistantState.device.invokeMapMethod(
-              'execute',
-              Map<String, dynamic>.from(admitted['action']),
-            ) ??
-            {
-              'result': 'unknown',
-              'detail': 'No device result; do not repeat blindly.',
-            };
-      } catch (_) {
-        result = {
-          'result': 'unknown',
-          'detail':
-              'Device action could not be verified. Do not repeat blindly.',
-        };
-      }
-      String report = result['detail'].toString();
-      try {
-        await state.request('POST', '/actions/${draft['id']}/receipt', {
-          'result': result['result'],
-          'detail': report,
-        });
-      } catch (_) {
-        report += ' The service did not receive the result; do not repeat the action blindly.';
-      }
+      final result = await state.executeApproved(draft['id']);
+      final report = result['detail'].toString();
       if (context.mounted) {
         notice(context, report);
       }
@@ -358,7 +384,7 @@ class Home extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Shell(
-    title: 'Your space',
+    title: state.assistantName,
     actions: [
       IconButton(
         tooltip: 'Settings',
@@ -369,6 +395,7 @@ class Home extends StatelessWidget {
     child: ListView(
       padding: const EdgeInsets.all(20),
       children: [
+        Center(child: AssistantOrb(busy: state.busy)),
         const SizedBox(height: 12),
         Text(
           'A clearer day,\none thought at a time.',
@@ -384,6 +411,39 @@ class Home extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Text(
+                'Your local overview',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              Text(
+                '${state.local.rows('tasks').where((r) => !r['done']).length} open tasks · ${state.local.rows('attempts').length} recorded study attempts',
+              ),
+              for (final task
+                  in state.local.rows('tasks').where((r) => !r['done']).take(3))
+                Text('— ${task['title']}'),
+              for (final reminder
+                  in state.local
+                      .rows('actions')
+                      .where(
+                        (r) =>
+                            r['status'] == 'scheduled' &&
+                            r['action']['at_ms'] >
+                                DateTime.now().millisecondsSinceEpoch,
+                      )
+                      .take(3))
+                Text(
+                  'Reminder: ${reminder['action']['title']} · ${DateTime.fromMillisecondsSinceEpoch(reminder['action']['at_ms'])}',
+                ),
+              const Text(
+                'Only actual local records. Calendar and automatic briefings are not connected.',
+              ),
+            ],
+          ),
+        ),
+        Glass(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
               const Icon(Icons.auto_awesome_outlined, size: 36),
               const SizedBox(height: 16),
               Text(
@@ -392,9 +452,7 @@ class Home extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                state.token.isEmpty
-                    ? 'Connect your private AI service in Settings. Your offline notebook is ready now.'
-                    : 'Chat uses your configured private service. Only explicitly saved facts become memories.',
+                '${state.config.description}. Local notes, memory, tasks and progress work without a server. Online sends always need review.',
               ),
               const SizedBox(height: 18),
               FilledButton.icon(
@@ -419,8 +477,32 @@ class Home extends StatelessWidget {
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.psychology_outlined),
                 title: const Text('Chosen memories'),
-                subtitle: const Text('Inspect, save, export or forget'),
+                subtitle: const Text('Local · inspect, edit, export or forget'),
                 onTap: () => Navigator.pushNamed(context, '/memory'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.checklist),
+                title: const Text('Tasks & history'),
+                subtitle: const Text(
+                  'Local tasks, chat search and data export',
+                ),
+                onTap: () => Navigator.pushNamed(context, '/library'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.school_outlined),
+                title: const Text('Study mode'),
+                subtitle: const Text(
+                  'Tutoring prompts and recorded practice attempts',
+                ),
+                onTap: () => Navigator.pushNamed(context, '/study'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.description_outlined),
+                title: const Text('Selected files'),
+                subtitle: const Text(
+                  'Open only a file you choose; no broad storage access',
+                ),
+                onTap: () => Navigator.pushNamed(context, '/files'),
               ),
               ListTile(
                 contentPadding: EdgeInsets.zero,
@@ -484,7 +566,7 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final input = TextEditingController();
-  final speech = SpeechToText();
+  static const voiceEvents = MethodChannel('personal_assistant/voice');
   final tts = FlutterTts();
   bool listening = false, speaking = false;
   double level = 0;
@@ -492,13 +574,45 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    widget.state.loadHistory();
+    tts.setStartHandler(() {
+      if (mounted) setState(() => speaking = true);
+    });
+    tts.setCompletionHandler(() {
+      if (mounted) setState(() => speaking = false);
+    });
+    tts.setCancelHandler(() {
+      if (mounted) setState(() => speaking = false);
+    });
+    tts.setErrorHandler((_) {
+      if (mounted) setState(() => speaking = false);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.state.loadHistory();
+    });
+    voiceEvents.setMethodCallHandler((call) async {
+      if (!mounted || call.method != 'voice_event') return;
+      final event = Map<String, dynamic>.from(call.arguments);
+      if (event['kind'] == 'text' || event['kind'] == 'partial') {
+        input.text = event['value'] as String;
+      }
+      setState(() {
+        if (event['kind'] == 'listening') listening = true;
+        if (event['kind'] == 'level') {
+          level = (event['value'] as num).toDouble();
+        }
+        if (event['kind'] == 'stopped' || event['kind'] == 'error') {
+          listening = false;
+          level = 0;
+        }
+      });
+      if (event['kind'] == 'error') notice(context, event['value'].toString());
+    });
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
-      speech.cancel();
+      AssistantState.device.invokeMethod('voice_cancel');
       tts.stop();
       widget.state.stop();
       if (mounted) {
@@ -512,7 +626,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> stopAll() async {
     widget.state.stop();
-    await speech.cancel();
+    await AssistantState.device.invokeMethod('voice_cancel');
     await tts.stop();
     if (mounted) {
       setState(() {
@@ -525,59 +639,45 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> listen() async {
     if (listening) {
-      await speech.stop();
-      if (mounted) {
-        setState(() => listening = false);
-      }
+      await stopAll();
       return;
     }
     await stopAll();
+    if (!mounted) return;
+    var approved = false;
+    if (widget.state.speechMode == 'online') {
+      approved =
+          await showDialog<bool>(
+            context: context,
+            builder: (c) => AlertDialog(
+              title: const Text('Use online speech recognition?'),
+              content: Text(
+                'Your Android recognition service may send microphone audio to its provider for ${widget.state.language}. This is independent of the AI engine. No offline fallback or automatic retry.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(c, false),
+                  child: const Text('Keep typing'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(c, true),
+                  child: const Text('Start online microphone'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+      if (!approved) return;
+    }
     try {
-      final available = await speech.initialize(
-        onError: (error) {
-          if (mounted) {
-            setState(() => listening = false);
-            notice(
-              context,
-              'Voice is unavailable or permission was denied. You can type instead.',
-            );
-          }
-        },
-        onStatus: (status) {
-          if (mounted && (status == 'done' || status == 'notListening')) {
-            setState(() => listening = false);
-          }
-        },
-      );
-      if (!available) {
-        if (mounted) {
-          notice(
-            context,
-            'No speech recognizer or microphone permission. Typing still works.',
-          );
-        }
-        return;
-      }
+      await AssistantState.device.invokeMethod('voice_start', {
+        'mode': widget.state.speechMode,
+        'locale': widget.state.language,
+        'approved_online': approved,
+      });
+    } on PlatformException catch (e) {
       if (mounted) {
-        setState(() => listening = true);
-      }
-      await speech.listen(
-        onResult: (r) {
-          input.text = r.recognizedWords;
-        },
-        onSoundLevelChange: (l) {
-          if (mounted) {
-            setState(() => level = l);
-          }
-        },
-        listenOptions: SpeechListenOptions(
-          listenFor: const Duration(seconds: 45),
-        ),
-      );
-    } catch (_) {
-      if (mounted) {
-        setState(() => listening = false);
-        notice(context, 'Voice could not start. Type your message instead.');
+        notice(context, e.message ?? 'Speech unavailable; type instead.');
       }
     }
   }
@@ -587,13 +687,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (text.trim().isEmpty) {
       return;
     }
-    await speech.stop();
+    await AssistantState.device.invokeMethod('voice_cancel');
     await tts.stop();
     if (mounted) {
       setState(() => listening = false);
     }
+    if (!mounted) return;
+    final payload = await reviewOnline(context, widget.state, text);
+    if (!payload) return;
     input.clear();
-    await widget.state.send(text);
+    await widget.state.send(
+      text,
+      approvedOnline: true,
+      shareMemories: widget.state.shareMemories,
+      shareHistory: widget.state.shareHistory,
+    );
     if (widget.state.speakReplies &&
         widget.state.error.isEmpty &&
         widget.state.messages.isNotEmpty &&
@@ -601,14 +709,36 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final last = widget.state.messages.last;
       if (last['role'] == 'assistant' && last['state'] == 'complete') {
         try {
-          setState(() => speaking = true);
+          if (await tts.isLanguageAvailable(widget.state.language) != true) {
+            throw StateError('Selected speech language is unavailable');
+          }
+          final voices = await tts.getVoices as List;
+          final localVoice = voices
+              .cast<Map>()
+              .where(
+                (v) =>
+                    v['locale'].toString().replaceAll('_', '-').toLowerCase() ==
+                        widget.state.language.toLowerCase() &&
+                    v['network_required'].toString() == '0',
+              )
+              .firstOrNull;
+          if (localVoice == null) {
+            throw StateError(
+              'No verified offline voice installed for this language',
+            );
+          }
+          await tts.setLanguage(widget.state.language);
+          await tts.setVoice({
+            'name': localVoice['name'].toString(),
+            'locale': localVoice['locale'].toString(),
+          });
           await tts.awaitSpeakCompletion(true);
           await tts.speak(last['text']);
         } catch (_) {
           if (mounted) {
             notice(
               context,
-              'Speech playback unavailable. The reply remains readable.',
+              'No installed offline voice for the selected language, or playback unavailable. The reply remains readable; no network voice was substituted.',
             );
           }
         }
@@ -622,9 +752,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    speech.cancel();
+    voiceEvents.setMethodCallHandler(null);
+    AssistantState.device.invokeMethod('voice_cancel');
     tts.stop();
-    widget.state.stop();
+    widget.state.stop(notify: false);
     input.dispose();
     super.dispose();
   }
@@ -635,7 +766,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     builder: (context, _) {
       final state = widget.state;
       return Shell(
-        title: 'Conversation',
+        title: state.assistantName,
         actions: [
           IconButton(
             tooltip: 'Read replies aloud',
@@ -649,9 +780,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ? null
                 : () async {
                     try {
-                      final rows = List<Map<String, dynamic>>.from(
-                        await state.request('GET', '/conversations'),
-                      );
+                      final rows = await state.conversations();
                       if (!context.mounted) return;
                       final selected = await showDialog<String>(
                         context: context,
@@ -683,7 +812,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ),
                       );
                       if (selected != null) {
-                        await speech.stop();
+                        await AssistantState.device.invokeMethod(
+                          'voice_cancel',
+                        );
                         await tts.stop();
                         if (mounted) {
                           setState(() {
@@ -705,7 +836,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ? null
                 : () async {
                     try {
-                      await speech.stop();
+                      await AssistantState.device.invokeMethod('voice_cancel');
                       await tts.stop();
                       if (mounted) {
                         setState(() {
@@ -729,7 +860,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
               child: Text(
-                'Model replies need your service. Voice is tap-to-start; recognized words stay editable. Memory scope: ${state.conversation}',
+                '${state.config.description} · ${state.language} · ${state.specialist}. No automatic online fallback. Memory scope: ${state.conversation}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
@@ -755,11 +886,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                m['role'] == 'user' ? 'YOU' : 'ASSISTANT',
+                                m['role'] == 'user'
+                                    ? 'YOU'
+                                    : state.assistantName,
                                 style: Theme.of(context).textTheme.labelSmall,
                               ),
                               const SizedBox(height: 6),
-                              SelectableText(m['text'] as String),
+                              MarkdownBody(
+                                data: m['text'] as String,
+                                selectable: true,
+                                imageBuilder: (_, _, _) => const Text(
+                                  '[Remote image blocked — no automatic network fetch]',
+                                ),
+                                onTapLink: (_, _, _) => notice(
+                                  context,
+                                  'Links are not opened automatically. Review and copy the destination if needed.',
+                                ),
+                              ),
                               if (m['state'] != 'complete')
                                 const Text(
                                   'Interrupted • not a completed reply',
@@ -878,9 +1021,7 @@ class WavePainter extends CustomPainter {
     for (var i = 0; i < 24; i++) {
       final h =
           3 +
-          (level.abs().clamp(0, 20) / 20) *
-              20 *
-              (.3 + .7 * math.sin(i * .8).abs());
+          (level.clamp(0, 20) / 20) * 20 * (.3 + .7 * math.sin(i * .8).abs());
       canvas.drawLine(
         Offset(i * 7.5, (size.height - h) / 2),
         Offset(i * 7.5, (size.height + h) / 2),
@@ -904,11 +1045,17 @@ class Settings extends StatefulWidget {
 class _SettingsState extends State<Settings> {
   late final url = TextEditingController(text: widget.state.endpoint);
   late final token = TextEditingController(text: widget.state.token);
+  late String speechMode = widget.state.speechMode;
   late String theme = widget.state.theme;
+  late String engine = widget.state.engine, language = widget.state.language;
+  late final model = TextEditingController(text: widget.state.model);
+  late final name = TextEditingController(text: widget.state.assistantName);
   @override
   void dispose() {
     url.dispose();
     token.dispose();
+    model.dispose();
+    name.dispose();
     super.dispose();
   }
 
@@ -920,12 +1067,81 @@ class _SettingsState extends State<Settings> {
       children: [
         const Glass(
           child: Text(
-            'Private service connection\n\nRun the FastAPI service on your computer. Use USB port forwarding for plain loopback HTTP, or trusted HTTPS. No provider keys are embedded in the app. A local model is configured on the service, not here.',
+            'Your chats, approved memories, notes, tasks and study records stay on this phone. AI is optional: offline inference is not installed; online requests require an explicit payload review. The private FastAPI adapter remains optional, not a requirement for local tools.',
           ),
         ),
         Glass(
           child: Column(
             children: [
+              DropdownButtonFormField<String>(
+                initialValue: speechMode,
+                decoration: const InputDecoration(
+                  labelText: 'Speech recognition — independent of AI',
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'offline',
+                    child: Text('Offline · installed on-device service'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'online',
+                    child: Text('Online · Android recognition provider'),
+                  ),
+                ],
+                onChanged: (v) => setState(() => speechMode = v!),
+              ),
+              const Text(
+                'Offline requires a verified installed language on Android 13+. Unsupported devices/languages stay unavailable. Online asks before microphone use. No silent network fallback.',
+              ),
+              TextField(
+                controller: name,
+                maxLength: 40,
+                decoration: const InputDecoration(
+                  labelText: 'Assistant display name',
+                ),
+              ),
+              DropdownButtonFormField<String>(
+                initialValue: engine,
+                decoration: const InputDecoration(labelText: 'AI engine'),
+                items: [
+                  for (final item in {
+                    'offline': 'Offline · model not installed',
+                    'compatible': 'Online · OpenAI-compatible',
+                    'private_service': 'Online · private FastAPI',
+                  }.entries)
+                    DropdownMenuItem(value: item.key, child: Text(item.value)),
+                ],
+                onChanged: (v) => setState(() {
+                  engine = v!;
+                  token.clear();
+                }),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                initialValue: language,
+                decoration: const InputDecoration(
+                  labelText: 'Conversation / voice language',
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'en-IN', child: Text('English')),
+                  DropdownMenuItem(
+                    value: 'as-IN',
+                    child: Text('অসমীয়া · Assamese'),
+                  ),
+                ],
+                onChanged: (v) => setState(() => language = v!),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: model,
+                decoration: const InputDecoration(
+                  labelText: 'Model identifier (compatible provider)',
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Online providers may retain submitted content and charge your account. Configure only your own authorized service. No provider key is bundled. Offline never falls back online.',
+              ),
               TextField(
                 controller: url,
                 decoration: const InputDecoration(labelText: 'Service origin'),
@@ -938,7 +1154,7 @@ class _SettingsState extends State<Settings> {
                 autocorrect: false,
                 enableSuggestions: false,
                 decoration: const InputDecoration(
-                  labelText: 'Private service token',
+                  labelText: 'Provider / private-service token',
                 ),
               ),
               const SizedBox(height: 16),
@@ -960,6 +1176,9 @@ class _SettingsState extends State<Settings> {
                       token.text,
                       theme,
                     );
+                    await widget.state.setAssistantName(name.text);
+                    await widget.state.saveSpeechMode(speechMode);
+                    await widget.state.saveEngine(engine, model.text, language);
                     if (context.mounted) {
                       notice(context, 'Settings saved on this device.');
                     }
@@ -989,10 +1208,28 @@ class _SettingsState extends State<Settings> {
                     }
                   }
                 },
-                child: const Text('Test saved connection'),
+                child: const Text('Test private FastAPI connection'),
               ),
             ],
           ),
+        ),
+        TextButton(
+          onPressed: () async {
+            try {
+              final info = await AssistantState.device.invokeMapMethod(
+                'device_status',
+              );
+              if (context.mounted) {
+                notice(
+                  context,
+                  'Android API ${info?['sdk']} · installed on-device recognizer: ${info?['on_device_recognizer']} · system recognizer: ${info?['system_recognizer']}. These flags do not verify Assamese or installed language models.',
+                );
+              }
+            } catch (e) {
+              if (context.mounted) notice(context, e);
+            }
+          },
+          child: const Text('Check device speech capabilities'),
         ),
         const Glass(
           child: Text(
@@ -1006,7 +1243,7 @@ class _SettingsState extends State<Settings> {
               builder: (c) => AlertDialog(
                 title: const Text('Delete current chat history?'),
                 content: Text(
-                  'Delete service history for ${widget.state.conversation}. Saved memories remain until you forget them separately.',
+                  'Delete on-phone history for ${widget.state.conversation}. Saved memories and any provider/service copies remain separate.',
                 ),
                 actions: [
                   TextButton(
@@ -1022,13 +1259,13 @@ class _SettingsState extends State<Settings> {
             );
             if (yes == true) {
               try {
-                await widget.state.request(
-                  'DELETE',
-                  '/conversations/${widget.state.conversation}',
-                );
+                await widget.state.deleteHistory();
                 widget.state.messages = [];
                 if (context.mounted) {
-                  notice(context, 'Current service history deleted.');
+                  notice(
+                    context,
+                    'Current on-phone history deleted. Provider/service copies were not deleted.',
+                  );
                 }
               } catch (e) {
                 if (context.mounted) {
@@ -1072,19 +1309,61 @@ class _MemoriesState extends State<Memories> {
     }
   }
 
-  Future<void> add() async {
-    final fact = TextEditingController();
+  Future<void> add([Map<String, dynamic>? existing]) async {
+    final fact = TextEditingController(text: existing?['fact']);
+    String type = existing?['type'] ?? 'preference',
+        scope = existing?['conversation'] ?? widget.state.conversation;
     final value = await showDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('Save a fact'),
-        content: TextField(
-          controller: fact,
-          maxLength: 1000,
-          minLines: 2,
-          maxLines: 5,
-          decoration: InputDecoration(
-            hintText: 'A fact to use in ${widget.state.conversation}',
+        title: Text(
+          existing == null ? 'Approve a memory' : 'Edit approved memory',
+        ),
+        content: SizedBox(
+          width: 400,
+          child: StatefulBuilder(
+            builder: (c, set) => Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: type,
+                  items: [
+                    for (final v in [
+                      'preference',
+                      'project',
+                      'approved_summary',
+                    ])
+                      DropdownMenuItem(value: v, child: Text(v)),
+                  ],
+                  onChanged: (v) => set(() => type = v!),
+                ),
+                DropdownButtonFormField<String>(
+                  initialValue: scope,
+                  items: [
+                    DropdownMenuItem(
+                      value: widget.state.conversation,
+                      child: const Text('This conversation'),
+                    ),
+                    if (scope != widget.state.conversation && scope != 'all')
+                      DropdownMenuItem(value: scope, child: Text(scope)),
+                    const DropdownMenuItem(
+                      value: 'all',
+                      child: Text('All conversations'),
+                    ),
+                  ],
+                  onChanged: (v) => set(() => scope = v!),
+                ),
+                TextField(
+                  controller: fact,
+                  maxLength: 1000,
+                  minLines: 2,
+                  maxLines: 5,
+                  decoration: InputDecoration(
+                    hintText: 'Exact approved text, not automatic chat capture',
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
         actions: [
@@ -1104,7 +1383,16 @@ class _MemoriesState extends State<Memories> {
       return;
     }
     try {
-      await widget.state.remember(value);
+      if (existing == null) {
+        await widget.state.remember(value, type: type, scope: scope);
+      } else {
+        await widget.state.editMemory(
+          existing['id'],
+          value,
+          type: type,
+          scope: scope,
+        );
+      }
       await refresh();
     } catch (e) {
       if (mounted) {
@@ -1115,7 +1403,7 @@ class _MemoriesState extends State<Memories> {
 
   @override
   Widget build(BuildContext context) => Shell(
-    title: 'Chosen memories',
+    title: 'Memory & Library',
     actions: [
       IconButton(
         tooltip: 'Refresh memories',
@@ -1128,11 +1416,26 @@ class _MemoriesState extends State<Memories> {
       children: [
         const Glass(
           child: Text(
-            'Only facts you explicitly save appear here. The service retrieves a small relevant subset from the current conversation, not your entire memory list. Memory text is data, not permission to act.',
+            'Only entries you explicitly approve are kept here on your phone. Chat history is separate. Relevant memory stays local unless you include it in an online send. Memory is data, not permission to act.',
           ),
         ),
+        TextButton.icon(
+          onPressed: () => Navigator.pushNamed(context, '/library'),
+          icon: const Icon(Icons.search),
+          label: const Text('Search local conversations & tasks'),
+        ),
+        TextButton.icon(
+          onPressed: () => Home(state: widget.state).notebook(context),
+          icon: const Icon(Icons.book_outlined),
+          label: const Text('Private local note'),
+        ),
+        TextButton.icon(
+          onPressed: () => Navigator.pushNamed(context, '/files'),
+          icon: const Icon(Icons.description_outlined),
+          label: const Text('Open a selected document'),
+        ),
         FilledButton.icon(
-          onPressed: add,
+          onPressed: () => add(),
           icon: const Icon(Icons.add),
           label: const Text('Save a fact'),
         ),
@@ -1150,6 +1453,10 @@ class _MemoriesState extends State<Memories> {
                 ),
                 const SizedBox(height: 8),
                 SelectableText(memory['fact']),
+                TextButton(
+                  onPressed: () => add(memory),
+                  child: const Text('Edit memory'),
+                ),
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton.icon(

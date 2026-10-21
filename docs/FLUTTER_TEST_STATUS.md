@@ -1,4 +1,25 @@
-# Flutter + FastAPI private test — 21 October 2026
+# Android16 local-first private increment — 0.3.0
+
+## Current scope and measured evidence
+
+Source preserves the earlier CLI/web/Android and optional FastAPI implementation. Phone-local features now include approved memory CRUD/export, notebook, keyword history search, tasks, practice-attempt records and typed approved native actions. Five primary destinations, display-name setting, per-send online disclosure and separate offline/online speech routing are implemented. Offline LLM, semantic retrieval, automatic summaries, PDF/OCR/vision, advanced automations and the broader staged scope are not complete. See ANDROID_ROADMAP.md and mobile/README.md.
+
+- Final local Flutter analyzer: no issues.
+- Final Flutter suite: 24 passed (phone storage/search/approval editing/deletion, failure-preserving persistence, exact online disclosure/context, synthetic SSE/error/rate-limit/cancel behavior, no silent offline/online fallback, speech routing/microphone denial/online consent/network failure, display name and small-screen navigation/layout).
+- Service regressions: 17 passed. Service implementation unchanged in this increment.
+- Existing Python regressions: 145 passed and 96 subtests passed. Existing legacy source unchanged.
+- ARM64 release rebuild, signature/package inspection and attachment delivery are tracked in the final parent report; no success is inferred from a running command.
+- Hosted API36 integration workflow is added; installation/runtime test outcome is pending until an actual run finishes. SDK36 target/build success alone does not qualify Android16 behavior.
+
+Synthetic tests are not successful speech/model/vision/device-operation tests. The instrumented disposable-emulator checks cover API36 identity, initial microphone denial, native secure-storage persistence/restart, UI navigation, blocked unapproved speech, invalid locale, denied arbitrary action and accepted approximate reminder scheduling/single-use receipts. They do not test actual notification arrival or Assamese recognition. The workflow must pass those assertions before being described as evidence.
+
+No attached physical device, no local emulator or /dev/kvm is available on this build computer. User reports Redmi Note 14 Pro 5G with 8GB RAM, 128GB total storage, Android16/HyperOS4; those are not compatibility results. Free storage remains unknown. No on-phone model/runtime was selected/downloaded; online provider/account/model remains unset. Previous Ollama smoke below ran on a computer and does not qualify offline phone inference.
+
+This is development/debug signing reused for private testing, not a production identity. No public APK tag/release, hosted backend, cloud account, paid API or insecure tunnel is created. Exports are plaintext; native reminder metadata is private but plaintext; secure-storage API usage is not a complete security audit/app lock. No exact alarm delivery promise. Refer to setup for separate local, optional online and speech privacy boundaries.
+
+---
+
+# Previous 0.2.0 verification — retained historical evidence
 
 ## Delivered scope and non-goals
 

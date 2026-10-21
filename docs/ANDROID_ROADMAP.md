@@ -1,0 +1,55 @@
+# Android assistant roadmap and capability ledger
+
+Primary target: Android16/API36. Current phone-only priority means no computer is required for local functions; it does not forbid optional internet. The user selected both offline and online inference, and independent offline/online recognition. Repository/package identity stays Personal-agentic-ai. The assistant display name is editable; HIRAKI is not a hardcoded identity requirement.
+
+This ledger captures the full undertaking, not a claim that every feature ships in 0.3.0. New integrations, cloud disclosure, credentials, paid use, device permissions and production deployment need their own explicit setup/authority. Imports, files, memories and model output are data, not execution permission.
+
+## Working increment / still requires configuration
+
+| Area | 0.3.0 scope | Qualification/dependency |
+|---|---|---|
+| Navigation | Home, Chat, Automations, Memory & Library, Settings; onboarding entry | Widget checks plus separately recorded API36 run; no sixth main study tab |
+| Local data | Native secure-storage API for chat/history, approved memories, note, tasks, attempts; JSON export; keyword chat search | Capacity bound; reminders have separate plaintext private storage; no security-audit claim |
+| Memory | Explicit owner-approved preferences, project entries and summaries, scope/edit/delete/export; lexical relevance | History is not approval to extract memory; no semantic embeddings yet |
+| Study | Tutor/hint/step-by-step/quiz prompts, local actual attempts and self-checked outcomes | Generation needs configured capable model; no fake mastery or automatic solution verification |
+| AI adapters | Private FastAPI and HTTPS OpenAI-compatible text SSE, Markdown, cancellation/errors and exact per-send context review | Private service's prior synthetic real-model evidence is narrow; compatible provider not live-qualified/configured here |
+| Offline AI | Selectable boundary with explicit unavailable state, no network fallback | Runtime/model not installed; free storage, variant/runtime and real hardware/language benchmarks needed |
+| Speech | True on-device recognizer route with API33+ installed-language checks; separate online recognition disclosure; real RMS callbacks; installed offline TTS voice or readable fallback | Actual recognizer/locale/TTS/device tests separate; no Assamese quality guarantee |
+| Native actions | Local typed approved reminder/app-launch flows, expiring/single-use ledger, consumed-before-effect unknown state, receipts | Approximate Android alarms; restricted package allowlist; no unqualified delivery/completion claims |
+| Selected materials | Scoped document picker, local UTF-8 text/JSON and PNG/JPEG preview; explicit online text-summary review | No PDF extraction, OCR, vision/camera model or arbitrary file access |
+| Living UI | Glass design/themes, editable name, modest stateful orb; reduced-motion support | No simulated audio measurement, no microphone permission for appearance; broader avatar/3D customizations pending |
+
+## Stage 2 — quality and inference completion
+
+- Actual device install/lifecycle/permission and Android16 edge-to-edge checks, including Redmi/HyperOS battery restrictions, app intents, picker export/readback, notification delivery, weak-network handling. Owner-supplied OS/hardware is planning context, not test evidence.
+- Eligible on-device LLM runtime/model, license/disk/RAM/heat/latency measurements, explicit install/removal and no automatic network fallback. Compare Assamese/English everyday language, code-switching, tutoring assumptions/units and independent numerical fixtures. Tiny computer models are not automatically qualified phone tutors.
+- Multi-provider profiles and routing by task/capability/cost/latency within configured user budgets; clear tokens/context/cost exposure. No paid auto-routing without approval. Actual model capability gates for images, long context and tools.
+- Real local semantic embeddings and semantic past-conversation retrieval, distinct from current keyword search. Embeddings remain local unless remote processing is explicitly chosen. Automatic long-chat summaries may compact retained history, but never silently become approved memory. Relevance/provenance/edit/corrections and uncertainty-aware answers, not invented confidence scores.
+- Selectable personalities/response styles, deeper planning/multi-step reasoning, real web retrieval/fact-checking with source citations. No fabricated web results or sources; no execution merely because a plan says so.
+- Voice qualification for English and Assamese separately: push-to-talk, foreground hands-free, streaming/interruption, adjustable voice/speed/language, summaries, noise handling, automatic language detection and earphones. Optional wake phrase remains experimental and unimplemented; it does not authorize an always-on microphone. No silently substituted language/network service.
+
+## Stage 3 — Android and multimodal tools
+
+- Broader supported installed-app discovery/intents, alarms/calendar/task management, explicitly permitted selected notification access, share text/links, selected-file search, shortcuts, quick tile/widget and floating views where OS/owner permissions allow. No accessibility/overlay/notification blanket access.
+- Selected photos/screenshots/diagrams, local OCR/PDF/doc/notes extraction, voice+image interaction, explicitly started camera, provider image generation. Engine must actually support input/output; no text-only “vision” claim, fabricated extraction or silent upload. Extracted text is untrusted data.
+- Offline saved study materials/PDF notes, real quizzes/answer keys/explanations, flashcards/spaced repetition/timetable, writing/grammar and recorded progress. Deterministic answer checks where applicable; LLM solutions do not verify themselves.
+- Coding assistant with reviewable suggestions; future safely isolated server coding playground is separate sandbox work, not arbitrary generated shell on the phone/build computer.
+- Living interface: customizable avatar, dynamic wallpaper/accent, compact/expanded/immersive voice views, optional haptics, richer 2D/3D orb states. Listening/thinking/speaking reflect real runtime; battery/performance/accessibility first, reduced motion honored.
+
+## Stage 4 — automations, dashboard and integrations
+
+- Personal dashboard: opt-in real briefings/summaries, calendar/tasks/reminders, customizable cards, genuine recorded activity/productivity statistics, knowledge library/search; optional weather/news/technology sources. No made-up activity and no Wabi briefing schedule is created by this app request.
+- Visual block workflow studio: explicit triggers/conditions/schedules/steps/services, previews before enable, execution/failure history, pause/cancel/undo only where truly supported, safe recoverable retries. Example: scheduled study task plus reading selected study plan aloud. Consequential steps need exact approval; uncertain external effects must be reconciled before retry. No promise of universal undo.
+- Reviewed API/plugin/integration marketplace (calendar/email/notes/tasks/custom APIs/MCP), per-plugin permissions, scoped authentication and workflow import/export. No arbitrary code, inherited permission, new service account or live deployment by default. Community imports are data until reviewed/enabled.
+- Privacy/security center: device-auth app lock; supported local-only mode; deeper sensitive-data encryption and key management review; memory review/delete; per-feature microphone/camera permissions; data export and appropriately scoped account deletion; actual usage/API-cost metering. Account deletion cannot erase external-provider copies by assertion.
+- Security-log intent is recorded. The owner's phrase **“Security log for”** was incomplete; its object/scope must not be invented.
+
+## Stage 5 — optional companion and ecosystem
+
+- Desktop companion continuing authorized conversations/tasks; selective cross-device chat/memory sync with explicit selected data, per-device access and revocation. Desktop stays optional; no computer dependency returns to phone-local functionality. No default sync/upload/sharing.
+- Custom reusable skill builder, specialized research/coding/planning multi-agent workflows and knowledge graph linking people/projects/notes/concepts. Children cannot widen authority; skills are not arbitrary executable model code.
+- Authenticated/scoped developer API for authorized assistant capabilities, reviewed community workflows/integrations. No public endpoint, unreviewed execution or deployment now.
+
+## Delivery and maintenance
+
+Finish useful tested increments without calling the whole undertaking complete. Keep README/setup, this ledger, changelog, test status and real issue evidence aligned with each pushed commit. Existing Main-owned maintenance remains the sole recurring review; this roadmap creates no duplicate schedule. Preserve CLI/web/older Android sources/releases and owner data. Private development-signed APKs are not public production releases.

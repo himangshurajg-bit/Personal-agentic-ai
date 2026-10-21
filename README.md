@@ -10,6 +10,17 @@ permissions**, and a path to **cloud or offline local-model operation**.
 This is a tested starter, not an advanced production assistant that can do everything.
 The goal is to grow the architecture without pretending that unbuilt integrations work.
 
+## Android16 local-first private preview
+
+The new Flutter 0.3.0 increment adds on-phone notes, approved memories, tasks, study records, keyword conversation search and reviewed native actions without requiring the optional FastAPI computer. Both online and offline AI are the undertaking; an offline LLM is **not installed**, and online generation requires an owner-configured provider plus exact payload review. Offline/online recognition is selected separately, with no silent fallback. This is not the completed assistant or a production release.
+
+- [Phone installation, optional providers, permissions and build/test setup](mobile/README.md)
+- [Current test evidence and Android16 qualification limits](docs/FLUTTER_TEST_STATUS.md)
+- [Full staged capability roadmap](docs/ANDROID_ROADMAP.md)
+- [Android change log](docs/ANDROID_CHANGELOG.md)
+
+The CLI/web instructions below still describe the separate existing Python starter; they are not required for the phone-local functions. There is no public APK tag/release for this private increment.
+
 ## The autonomy contract
 
 Give the agent a goal. Within explicitly configured capabilities, it should plan and do

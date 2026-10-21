@@ -1,35 +1,66 @@
-# Flutter personal assistant — private test client
+# Android local-first preview — 0.3.0
 
-This is the new Android client for the existing Personal-agentic-ai project. It does not replace `agent/`, the local web UI, or the experimental `android/` application. The new application ID is `dev.personalagent.personal_assistant`; it installs separately. It is a development preview, not a production or phone-qualified release.
+This Flutter app is a private, development-signed increment, not the completed assistant. Android 16 / API 36 is the primary qualification target; `minSdk 26` is a package setting, not a promise of tested older-device compatibility. The existing Python/CLI/web and older Android projects are separate and unchanged.
 
-## What is implemented
+## Install on a phone (no computer required for local tools)
 
-- Onboarding, home, chat, settings and explicit memory screens; named navigation, ChangeNotifier state, light/dark/system theme, blurred glass cards, edge highlights and restrained motion.
-- Streaming typed chat with persistent server history, partial/interrupted markers, stop and explicit retry. No invented replies when no provider is configured. The notebook alone is available without a service.
-- Tap-to-start Android speech recognition, editable transcription, live listening indicator/sound-level visualization and system text-to-speech. Starting speech stops the current reply/playback. Leaving the foreground stops microphone, playback and streaming. Voice never sends a prompt automatically.
-- Explicit conversation-scoped memory save/inspect/forget and JSON export through Android's document picker. New chats get a distinct scope; chat history can be reopened from the history button. Service retrieval is lexical top-five matching, not semantic long-term reasoning. Inspecting memories shows all scopes; only the current scope is considered for a reply.
-- Reviewed Android reminders and app-opening requests. Only Settings, Chrome, YouTube and Google Calculator package IDs are allowed. Missing apps fail explicitly. Notification permission is requested at first reminder, microphone permission at first voice use. Typing needs neither.
+1. Obtain the private ARM64 `personal-agentic-ai-0.3.0-private-arm64.apk` supplied for this build. There is no public APK release/tag for this increment.
+2. Open the APK on the phone. If Android blocks installation, allow installation from that specific browser/file app only if you trust this build; turn that allowance off afterward. The app is labeled **Personal assistant (test)**. It uses an Android Debug/development certificate, not a production identity. Do not uninstall an older copy merely to bypass a signer mismatch: export local data first and inspect the mismatch.
+3. Complete onboarding and optionally choose the assistant display name. This changes UI and quoted self-introduction context, not package identity or wake recognition.
+4. Leave AI set to **Offline · model not installed** to use local notes, approved memories, tasks, chat search/history, study-attempt records, JSON exports and reviewed native actions without a server. The app never makes up an AI reply when no model is installed.
+5. Local actions: Home offers a reminder or a supported app launch. Review the exact payload and tap approval. Notification permission is asked for only when first needed. Android accepts an approximate alarm, not guaranteed exact delivery. HyperOS/battery restrictions can delay it. Removing app data removes reminders. Force-stopping can prevent delivery until Android allows the app to run again.
 
-## Private setup
+Navigation is Home, Chat, Automations, Memory & Library, Settings. Study and selected files are within those destinations, not separate primary tabs. Automations currently contains individual reviewed actions and receipts, **not** a workflow engine.
 
-1. Follow [`../service/README.md`](../service/README.md) to start the authenticated service on your computer's loopback interface. Real model chat needs a separately installed local model there. There is no bundled/on-phone language model and no hosted backend.
-2. For a USB-connected phone with developer debugging enabled, run `adb reverse tcp:8766 tcp:8766`. In app Settings use `http://127.0.0.1:8766`. The emulator can instead use `http://10.0.2.2:8766`.
-3. Enter the service token directly in the app's obscured Settings field, not in messages or source control. It is held in Android secure storage. Test the saved connection. An unconfigured model is reported separately from a reachable service.
-4. Without USB, a properly managed trusted HTTPS endpoint is required. Public plain HTTP, credentials in URLs, redirects and non-origin URLs are refused by the Dart client. This repository does not deploy that endpoint. Never expose the development service publicly just to get a phone connection.
+### Working local features
 
-The service's local SQLite database contains plaintext messages/memories. Use a private OS account and encrypted storage, and do not save secrets as memory. The handset's notebook/settings use secure storage. Disabling Android backup reduces accidental backup exposure; it is not a general guarantee of device security.
+- Device-owned conversation retention/reopening and case-insensitive keyword search. This is lexical search, not embeddings/semantic search.
+- Explicitly approved preference/project/summary memories, with current/all-conversation scope, edit/delete/export. Chat retention does not automatically approve facts for long-term memory. Relevant retrieval is lexical top-five matching.
+- Private notebook; local task completion; actual practice answers/feedback/results recorded by the owner. Counts reflect records, not inferred mastery. AI tutor prompts/quiz generation require a configured capable engine; generated answers are not independently verified.
+- Android document picker for a specific text/JSON/image/PDF. UTF-8 text preview (200 KB cap) and PNG/JPEG preview (2 MB cap). PDF extraction, OCR, diagram/image AI and camera are **not implemented**. Selected contents are data, never action authority. Text summarization shows exact payload before online sending; images are not submitted to a text-only model.
+- Strict local reminder/app-launch approval ledger: five-minute single-use approval consumed before the native effect, explicit denied/failed/unknown receipts, no automatic replay after an uncertain result. Four package targets are supported: Settings, Chrome, YouTube, Google Calculator, when installed. No arbitrary intents, shell, messages or purchases.
+- Markdown display and streaming protocol adapters, cancellation/interrupted-response labels and explicit connection/timeout/rate-limit errors. Actual online generation needs setup below. No offline inference runtime/model is bundled.
+- Assistant display name, English/Assamese response-language selection, light/dark/system theme, small stateful decorative orb and reduced-motion handling. Voice level display uses recognizer RMS callbacks, not simulated measurements. Language selection is not proof of model quality or installed speech support.
 
-## Voice, reminders and result boundaries
+## Optional online AI — no hosted backend required for compatible providers
 
-The Android speech provider may require the network and may send audio to its provider. Supported languages and offline recognition depend on the installed recognizer; there is no promise of offline STT. System TTS voices may require a voice download. Denied/missing permissions leave typed chat usable. The waveform reflects sound-level callbacks, not an always-on microphone. No wake phrase, foreground microphone service or background listening is implemented.
+An account/endpoint/model must already be yours and authorized; no key, hosted endpoint or subscription is bundled. This work did not create an account or call a paid API.
 
-Reminders use `AlarmManager.setAndAllowWhileIdle` and notification channels. Delivery is approximate and can be delayed by battery policy. Boot recovery reinstates future stored reminders; uninstalling clears them. No exact-alarm or battery-exemption permission is requested. A native receipt means Android accepted a schedule/launch request; it does not prove the reminder was seen or another app's screen completed. The service records receipts as device-reported, not independently verified.
+1. Settings → AI engine → **Online · OpenAI-compatible**.
+2. Enter the trusted HTTPS origin (not a URL containing a path, query, username or secret), the exact model ID and provider token directly in Settings. Requests go to `/v1/chat/completions` with bearer authentication and OpenAI-style text SSE. This is a protocol adapter, not a guarantee every vendor supports it. Other authentication, custom base paths, tools and vision are not implemented.
+3. Save settings. Tokens use device secure-storage APIs and are never included in export. Switching engine clears the token field to prevent silently reusing a key at another destination.
+4. Every send displays destination/model, exact prompt and optional current on-phone history/relevant approved memories. These context choices default OFF each time. The private notebook, unrelated memories and other chats are never silently attached. Choose **Keep local** to cancel. The provider may retain content or charge its own account; this app has no cost-meter/budget enforcement yet. Use only a provider arrangement you accept.
+5. No live compatible-provider request was made in this increment because provider configuration is not supplied. Automated tests use synthetic MockClient streams. No online fallback occurs from Offline mode.
 
-Actions are typed and prepared server-side, then shown as an exact action for owner approval. A token is payload-bound, expires after 120 seconds and is atomically consumed once before the device is invoked. There is no automatic retry following unknown outcomes. Cancellation of the dialog does not execute. Model output cannot call arbitrary shell, send messages, make purchases or open arbitrary intents. These are explicit UI tools, not automatically extracted free-form model instructions.
+### Optional private FastAPI/Ollama path
 
-## Build and checks
+This remains an optional computer-backed provider, **not the phone-only setup**. Follow [service setup](../service/README.md): Python 3.11+, `uv`, a private bearer token and an independently installed/authorized local model if real generation is needed. Start on loopback only. USB testing can use `adb reverse tcp:8766 tcp:8766`; enter `http://127.0.0.1:8766` on the phone. An Android emulator can use `http://10.0.2.2:8766`. Otherwise use a separately secured HTTPS origin; the app refuses public plaintext HTTP. No server, relay, public tunnel or deployment was created.
 
-Requires Flutter 3.47.7 / Dart 3.13.5, JDK 17, Android SDK 36 plus plugin-required platform 35. Minimum Android API is 26, which is a build declaration, not a compatibility test result.
+Select **Online · private FastAPI** in Settings and enter its origin/token. **Test private FastAPI connection** checks only that service's `/health`; it is not a compatible-provider/model test. Chat still uses explicit per-send review. Existing remote service history and memories are separate from phone storage, and the service can include its already-retained conversation context. Deleting on-phone history does not delete service/provider copies. The service currently caps each text request at 8,000 characters; the phone refuses an oversize payload before transmission. See service docs for its plaintext SQLite storage and retention.
+
+## Offline AI preparation — not installed
+
+Both offline and online AI are requested. Current Offline mode is a truthful unavailable engine boundary, not working on-device LLM inference. Local tools still work. No model was automatically downloaded and no tiny-model Assamese/tutoring claim is made. Selecting an eligible model/runtime needs available storage, exact device/runtime compatibility, license review and measured Assamese/English/tutoring quality, RAM/latency/heat checks on the phone. 128 GB total storage does not establish free space. Android16/HyperOS4 compatibility reported by an owner is not a physical-device test result. Do not treat the previous computer Ollama smoke test as mobile inference qualification.
+
+## Speech recognition — separate from AI mode
+
+- **Offline** uses native `createOnDeviceSpeechRecognizer`, not an `EXTRA_PREFER_OFFLINE` hint. This build requires Android13+ so it can check `RecognitionSupport.installedOnDeviceLanguages` for the selected exact locale (`en-IN` or `as-IN`) before listening. Missing service/language or unverifiable support returns unavailable; no network recognizer, download or silent fallback is attempted. Typing remains usable.
+- **Online** deliberately selects Android's installed recognizer after a separate audio-processing disclosure. The microphone permission is requested only after choosing to start. The recognition provider can process audio online; this is not a bundled cloud-speech account. No always-on microphone, background/wake-word listener or automatic retry exists.
+- Listening state starts only on a real native `onReadyForSpeech`; stop/cancel, app backgrounding and disposal cancel recognition. Network/provider errors are shown, not treated as transcriptions. Transcript is editable before AI sending.
+- Spoken replies use a reported installed, non-network Android TTS voice for the selected locale or remain text-only. No Bengali/Hindi substitution for Assamese. Recognition locale, TTS voice and model language quality must each be tested independently. Actual Assamese naturalness/ASR/TTS is not yet qualified.
+- Settings → **Check device speech capabilities** reports API and recognizer availability without requesting microphone access. Availability does not prove installed language support.
+
+## Privacy and permissions
+
+No broad storage, contacts, calendar, notification-listener, camera, accessibility or overlay access is requested. Microphone and notification permissions are just-in-time and optional for local typing/notes. Document grants are scoped to the selected file and not persisted for background scanning.
+
+Chats, memories, notes, tasks, attempts, settings and tokens use `flutter_secure_storage` Android secure-storage APIs; backups are disabled. Native reminder title/time is stored separately in app-private SharedPreferences for rescheduling (not encrypted by this implementation). Exports are ordinary plaintext JSON in your chosen location and must be protected separately. This is not a completed security audit, app-lock feature or verified resistance to a compromised/rooted phone. Local data currently has a two-million-character cap; export/delete older records before it fills. No cloud sync by default.
+
+Memory deletion, chat deletion, clearing a notebook, uninstalling the app, deleting an export and deleting provider copies are distinct. No account-deletion flow claims to erase third-party data. Security center/app lock, usage-cost tracking and deeper encryption review remain staged work.
+
+## Build and test
+
+Tested toolchain: Flutter 3.47.7 / Dart 3.13.5, JDK17, Android SDK36 and Flutter-selected NDK. From the repository root:
 
 ```sh
 cd mobile
@@ -37,10 +68,18 @@ flutter pub get
 flutter analyze
 flutter test
 flutter build apk --release --target-platform android-arm64
+# Output: build/app/outputs/flutter-apk/app-release.apk
 ```
 
-The release build type intentionally uses the development debug signing configuration for private testing. It is not signed with the owner's production key and must not be uploaded to a store or overwrite prior release assets. Keep dependency lockfiles. Flutter's built-in license view retains package notices. Dependency updates need regression testing; `flutter_tts` currently applies the Kotlin Gradle plugin, which Flutter warns must migrate in a future SDK.
+Development release builds reuse the existing debug signer; do not commit a private keystore or call it production signing. Gradle is limited to one worker and a 1200 MB heap/768 MB metaspace for the small build computer. A current flutter_tts warning notes future Flutter built-in-Kotlin migration; this is not an observed runtime failure. Versions remain locked in `pubspec.lock`.
 
-See [`../docs/FLUTTER_TEST_STATUS.md`](../docs/FLUTTER_TEST_STATUS.md) for actual completed checks and remaining device qualification and limited model evidence. An APK build is not an installation or physical-device test.
+On a disposable API36 emulator only (tests deliberately clear app secure data and create synthetic reminders):
 
-Forgetting a saved memory deletes that record only. It does not erase facts already present in conversation history; delete that conversation separately if needed. Exported JSON files are outside the memory database and must be handled by their owner.
+```sh
+adb shell pm grant dev.personalagent.personal_assistant android.permission.POST_NOTIFICATIONS
+flutter test integration_test/android16_test.dart -d emulator-5554
+adb shell am force-stop dev.personalagent.personal_assistant
+flutter test integration_test/rehydrate_test.dart -d emulator-5554
+```
+
+[API36 workflow](../.github/workflows/android16.yml) uses an accelerated GitHub-hosted emulator, synthetic data and no provider secrets. Check its actual run before claiming a pass. Native emulator tests do not establish physical Redmi/HyperOS behavior, offline model quality, successful speech, battery-delayed notification delivery, picker workflows or every Android16 restriction. Current evidence is in [test status](../docs/FLUTTER_TEST_STATUS.md). Complete staged scope is in [roadmap](../docs/ANDROID_ROADMAP.md).

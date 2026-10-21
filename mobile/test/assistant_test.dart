@@ -16,8 +16,11 @@ import 'package:personal_assistant/main.dart';
 
 AssistantState stateWith(http.Client client) =>
     AssistantState(clientFactory: () => client)
-      ..token = 'test-only-token-not-a-live-secret';
+      ..token = 'test-only-token-not-a-live-secret'
+      ..engine = 'private_service';
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => FlutterSecureStorage.setMockInitialValues({}));
   // Optional readable widget captures; normal tests retain Flutter's default test font.
   setUpAll(() async {
     if (Platform.environment['CAPTURE_REAL_FONTS'] == '1') {
@@ -61,6 +64,9 @@ void main() {
           );
         }),
       );
+      await state.local.writeChat('older', [
+        {'role': 'user', 'text': 'old chat', 'state': 'complete'},
+      ]);
       state.messages = [
         {'role': 'user', 'text': 'stale'},
       ];
@@ -122,7 +128,7 @@ void main() {
           );
         }),
       );
-      await state.send('hello');
+      await state.send('hello', approvedOnline: true);
       expect(state.messages.last['text'], 'नमस्ते world');
       expect(state.messages.last['state'], 'complete');
       expect(state.error, isEmpty);
@@ -143,7 +149,7 @@ void main() {
           );
         }),
       );
-      await state.send('hi');
+      await state.send('hi', approvedOnline: true);
       expect(calls, 1);
       expect(state.messages.last['state'], 'interrupted');
       expect(state.error, contains('before completion'));
@@ -159,7 +165,7 @@ void main() {
           return http.Response('{}', status);
         }),
       );
-      await state.send('hi');
+      await state.send('hi', approvedOnline: true);
       expect(state.messages.where((m) => m['role'] == 'assistant'), isEmpty);
       expect(state.error, AssistantState.describeStatus(status));
       expect(calls, 1);
@@ -176,34 +182,38 @@ void main() {
           throw TimeoutException('weak network');
         }),
       );
-      await state.send('hi');
+      await state.send('hi', approvedOnline: true);
       expect(state.error, contains('timed out'));
       expect(calls, 1);
       state.token = '';
-      await state.send('again');
-      expect(state.error, contains('private service'));
+      await state.send('again', approvedOnline: true);
+      expect(state.error, contains('Configure this provider'));
       state.dispose();
     },
   );
-  test(
-    'explicit memory save and delete use current scope then refresh',
-    () async {
-      final requests = <http.Request>[];
-      final state = stateWith(
-        MockClient((req) async {
-          requests.add(req);
-          return http.Response(req.method == 'GET' ? '[]' : '{}', 200);
-        }),
-      );
-      state.conversation = 'study';
-      await state.remember('I prefer short answers');
-      expect(jsonDecode(requests.first.body)['conversation'], 'study');
-      await state.forget('sample-id');
-      expect(requests[2].method, 'DELETE');
-      expect(requests[2].url.path, '/memories/sample-id');
-      state.dispose();
-    },
-  );
+  test('approved local memory save/edit/delete never calls a server', () async {
+    var calls = 0;
+    final state = stateWith(
+      MockClient((_) async {
+        calls++;
+        throw StateError('unexpected network');
+      }),
+    );
+    state.conversation = 'study';
+    await state.remember('I prefer short answers');
+    expect(state.memories.single['conversation'], 'study');
+    final id = state.memories.single['id'];
+    await state.editMemory(
+      id,
+      'I prefer short explanations',
+      type: 'project',
+      scope: 'all',
+    );
+    expect(state.memories.single['type'], 'project');
+    await state.forget(id);
+    expect(state.memories, isEmpty);
+    expect(calls, 0);
+  });
   test(
     'history selection persists the scope and reloads its messages',
     () async {
@@ -217,6 +227,9 @@ void main() {
           );
         }),
       );
+      await state.local.writeChat('earlier', [
+        {'role': 'user', 'text': 'old question', 'state': 'complete'},
+      ]);
       await state.selectConversation('earlier');
       expect(state.conversation, 'earlier');
       expect(state.messages.single['text'], 'old question');
@@ -305,14 +318,20 @@ void main() {
   testWidgets(
     'microphone denial remains typed-chat usable; no early microphone call',
     (tester) async {
-      const mic = MethodChannel('plugin.csdcorp.com/speech_to_text');
+      const mic = AssistantState.device;
       const tts = MethodChannel('flutter_tts');
       final calls = <String>[];
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(mic, (
         call,
       ) async {
         calls.add(call.method);
-        return false;
+        if (call.method == 'voice_start') {
+          throw PlatformException(
+            code: 'denied',
+            message: 'Microphone permission denied. Typing still works.',
+          );
+        }
+        return true;
       });
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         tts,
@@ -332,14 +351,14 @@ void main() {
         ..ready = true
         ..onboarded = true;
       await tester.pumpWidget(AssistantApp(state: state));
-      await tester.tap(find.text('Open conversation'));
+      await tester.tap(find.text('Chat').last);
       await tester.pumpAndSettle();
-      expect(calls.where((x) => x == 'initialize'), isEmpty);
+      expect(calls.where((x) => x == 'voice_start'), isEmpty);
       await tester.tap(find.byTooltip('Use microphone'));
       await tester.pumpAndSettle();
-      expect(calls.where((x) => x == 'initialize').length, 1);
+      expect(calls.where((x) => x == 'voice_start').length, 1);
       expect(
-        find.textContaining('No speech recognizer or microphone permission'),
+        find.textContaining('Microphone permission denied'),
         findsOneWidget,
       );
       expect(find.byType(TextField), findsOneWidget);
@@ -387,7 +406,9 @@ void main() {
                       'action': {
                         'kind': 'reminder',
                         'title': 'Study',
-                        'at_ms': 9999999999999,
+                        'at_ms': DateTime.now()
+                            .add(const Duration(hours: 1))
+                            .millisecondsSinceEpoch,
                       },
                     }),
                     200,
@@ -404,7 +425,9 @@ void main() {
       final future = home.action(tester.element(find.byType(Home)), {
         'kind': 'reminder',
         'title': 'Study',
-        'at_ms': 9999999999999,
+        'at_ms': DateTime.now()
+            .add(const Duration(hours: 1))
+            .millisecondsSinceEpoch,
       });
       await tester.pumpAndSettle();
       expect(nativeCalls, 0);
@@ -413,12 +436,9 @@ void main() {
       await future;
       await tester.pump(const Duration(milliseconds: 300));
       expect(nativeCalls, 1);
-      expect(reportedResult, 'denied');
-      expect(paths, [
-        '/actions/prepare',
-        '/actions/one/approve',
-        '/actions/one/receipt',
-      ]);
+      expect(reportedResult, isNull);
+      expect(state.local.rows('actions').single['status'], 'denied');
+      expect(paths, isEmpty);
       expect(
         find.text('Notification permission denied; no reminder was scheduled.'),
         findsOneWidget,
