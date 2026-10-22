@@ -327,29 +327,57 @@ void main() {
     },
   );
   test(
-    'action approval consumed before native call; unknown not replayed',
+    'app launches need a current picker selection and one-use owner approval',
     () async {
       final s = AssistantState();
       await s.initialize();
-      var calls = 0;
+      var executeCalls = 0;
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(AssistantState.device, (call) async {
-            calls++;
-            expect(s.local.rows('actions').single['status'], 'unknown');
-            throw PlatformException(code: 'lost');
+            if (call.method == 'list_launchable_apps') {
+              return [
+                {
+                  'package': 'com.example.reader',
+                  'label': 'Reader',
+                  'icon_png_base64': null,
+                },
+              ];
+            }
+            if (call.method == 'execute') {
+              executeCalls++;
+              expect(s.local.rows('actions').single['status'], 'unknown');
+              throw PlatformException(code: 'lost');
+            }
+            fail('Unexpected device method: ${call.method}');
           });
-      final a = await s.prepareAction({
-        'kind': 'open_app',
-        'package': 'com.android.settings',
-      });
-      expect(calls, 0);
-      final receipt = await s.executeApproved(a['id']);
-      expect(receipt['result'], 'unknown');
+      final apps = await s.loadLaunchableApps();
+      expect(apps.map((app) => app.label), ['Reader']);
       await expectLater(
-        s.executeApproved(a['id']),
+        s.prepareAction({
+          'kind': 'open_app',
+          'package': 'com.example.reader',
+          'app_name': 'Reader',
+        }),
         throwsA(isA<ServiceException>()),
       );
-      expect(calls, 1);
+      await expectLater(
+        s.prepareAction({
+          'kind': 'open_app',
+          'package': 'com.example.arbitrary',
+          'app_name': 'Made up',
+        }),
+        throwsA(isA<ServiceException>()),
+      );
+      final draft = await s.prepareSelectedAppLaunch(apps.single);
+      expect(draft['status'], 'prepared');
+      expect(executeCalls, 0);
+      final receipt = await s.executeApproved(draft['id']);
+      expect(receipt['result'], 'unknown');
+      await expectLater(
+        s.executeApproved(draft['id']),
+        throwsA(isA<ServiceException>()),
+      );
+      expect(executeCalls, 1);
       expect(
         () => s.validateAction({'kind': 'shell', 'command': 'anything'}),
         throwsA(isA<ServiceException>()),

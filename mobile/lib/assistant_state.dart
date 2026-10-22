@@ -12,6 +12,18 @@ import 'engines.dart';
 import 'mcp_servers.dart';
 import 'visual_theme.dart';
 
+class LaunchableApp {
+  final String packageName;
+  final String label;
+  final Uint8List? iconPng;
+
+  const LaunchableApp._({
+    required this.packageName,
+    required this.label,
+    required this.iconPng,
+  });
+}
+
 class ServiceException implements Exception {
   final String message;
   ServiceException(this.message);
@@ -116,6 +128,8 @@ class AssistantState extends ChangeNotifier {
       appLocked = false,
       appLockBusy = false;
   List<Map<String, dynamic>> messages = [], memories = [];
+  List<LaunchableApp> _launchableApps = [];
+  List<LaunchableApp> get launchableApps => List.unmodifiable(_launchableApps);
   http.Client? _stream;
   int _generation = 0;
   static const device = MethodChannel('personal_assistant/device');
@@ -448,10 +462,93 @@ class AssistantState extends ChangeNotifier {
     await loadMemories();
   }
 
+  Future<List<LaunchableApp>> loadLaunchableApps() async {
+    try {
+      final raw = await device.invokeMethod<List<dynamic>>(
+        'list_launchable_apps',
+      );
+      if (raw == null) {
+        throw ServiceException('Android did not return an app list.');
+      }
+      final apps = <LaunchableApp>[];
+      final seen = <String>{};
+      for (final value in raw) {
+        if (value is! Map) continue;
+        final packageName = value['package'];
+        final label = value['label'];
+        if (packageName is! String ||
+            !RegExp(r'^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$')
+                .hasMatch(packageName) ||
+            label is! String ||
+            label.trim().isEmpty ||
+            label.length > 120 ||
+            !seen.add(packageName)) {
+          continue;
+        }
+        Uint8List? iconPng;
+        final encodedIcon = value['icon_png_base64'];
+        if (encodedIcon is String && encodedIcon.length <= 180000) {
+          try {
+            iconPng = base64Decode(encodedIcon);
+          } on FormatException {
+            iconPng = null;
+          }
+        }
+        apps.add(
+          LaunchableApp._(
+            packageName: packageName,
+            label: label.trim(),
+            iconPng: iconPng,
+          ),
+        );
+      }
+      apps.sort((a, b) {
+        final byName = a.label.toLowerCase().compareTo(b.label.toLowerCase());
+        return byName == 0 ? a.packageName.compareTo(b.packageName) : byName;
+      });
+      _launchableApps = apps;
+      notifyListeners();
+      return List.unmodifiable(apps);
+    } on ServiceException {
+      rethrow;
+    } on PlatformException {
+      throw ServiceException('Installed apps could not be listed on Android.');
+    } on MissingPluginException {
+      throw ServiceException(
+        'Installed-app listing is available on Android only.',
+      );
+    }
+  }
+
   Future<Map<String, dynamic>> prepareAction(
     Map<String, dynamic> action,
   ) async {
+    // App launches must come from the native catalog picker, never a generated
+    // package string passed through the generic action interface.
     validateAction(action);
+    return _storePreparedAction(action);
+  }
+
+  Future<Map<String, dynamic>> prepareSelectedAppLaunch(
+    LaunchableApp app,
+  ) async {
+    if (!_launchableApps.any((candidate) => identical(candidate, app))) {
+      throw ServiceException(
+        'Choose an app from the current installed-app list.',
+      );
+    }
+    final action = <String, dynamic>{
+      'kind': 'open_app',
+      'package': app.packageName,
+      'app_name': app.label,
+    };
+    _validateAction(action, selectedFromCatalog: true);
+    return _storePreparedAction(action);
+  }
+
+  Future<Map<String, dynamic>> _storePreparedAction(
+    Map<String, dynamic> action,
+  ) async {
     final id = local.id();
     final record = {
       'id': id,
@@ -465,28 +562,46 @@ class AssistantState extends ChangeNotifier {
     return record;
   }
 
-  void validateAction(Map<String, dynamic> a) {
-    final kind = a['kind'];
+  void validateAction(Map<String, dynamic> action) => _validateAction(action);
+
+  void _validateAction(
+    Map<String, dynamic> action, {
+    bool selectedFromCatalog = false,
+  }) {
+    final kind = action['kind'];
     if (kind == 'open_app') {
-      if (a.keys.toSet().difference({'kind', 'package'}).isNotEmpty ||
-          ![
-            'com.android.settings',
-            'com.android.chrome',
-            'com.google.android.youtube',
-            'com.google.android.calculator',
-          ].contains(a['package'])) {
-        throw ServiceException('Unsupported app action.');
+      if (!selectedFromCatalog ||
+          action.keys.toSet().difference({
+            'kind',
+            'package',
+            'app_name',
+          }).isNotEmpty ||
+          action['package'] is! String ||
+          action['app_name'] is! String ||
+          !_launchableApps.any(
+            (app) =>
+                app.packageName == action['package'] &&
+                app.label == action['app_name'],
+          )) {
+        throw ServiceException(
+          'Choose an installed app from the app picker before reviewing its launch.',
+        );
       }
     } else if (kind == 'reminder') {
-      if (a.keys.toSet().difference({'kind', 'title', 'at_ms'}).isNotEmpty ||
-          a['title'] is! String ||
-          (a['title'] as String).trim().isEmpty ||
-          (a['title'] as String).length > 120 ||
-          a['at_ms'] is! int) {
+      if (action.keys.toSet().difference({
+            'kind',
+            'title',
+            'at_ms',
+          }).isNotEmpty ||
+          action['title'] is! String ||
+          (action['title'] as String).trim().isEmpty ||
+          (action['title'] as String).length > 120 ||
+          action['at_ms'] is! int) {
         throw ServiceException('Invalid reminder.');
       }
       final now = DateTime.now().millisecondsSinceEpoch;
-      if (a['at_ms'] < now + 1000 || a['at_ms'] > now + 366 * 86400000) {
+      if (action['at_ms'] < now + 1000 ||
+          action['at_ms'] > now + 366 * 86400000) {
         throw ServiceException('Choose a future reminder within one year.');
       }
     } else {
@@ -511,7 +626,10 @@ class AssistantState extends ChangeNotifier {
         );
       }
       action = Map<String, dynamic>.from(record['action']);
-      validateAction(action!);
+      _validateAction(
+        action!,
+        selectedFromCatalog: action!['kind'] == 'open_app',
+      );
       record['status'] =
           'unknown'; // Durable consumed state BEFORE native side effect.
     });

@@ -9,6 +9,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.media.MediaPlayer
 import android.os.Build
 import android.os.Bundle
@@ -23,6 +26,7 @@ import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 
 class MainActivity : FlutterFragmentActivity() {
     private var permissionResult: MethodChannel.Result? = null
@@ -147,6 +151,16 @@ class MainActivity : FlutterFragmentActivity() {
                 ))
                 "voice_start" -> startVoice(call.arguments as? Map<*,*> ?: emptyMap<Any,Any>(),result)
                 "voice_cancel" -> {stopVoice();result.success(true)}
+                "list_launchable_apps" -> {
+                    Thread {
+                        val apps = try { launchableAppCatalog() }
+                        catch (_: Exception) { null }
+                        runOnUiThread {
+                            if (apps == null) result.error("unavailable", "Installed apps could not be listed", null)
+                            else result.success(apps)
+                        }
+                    }.start()
+                }
                 "execute" -> {
                     val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
                     if (args["kind"] == "reminder" && Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -174,15 +188,79 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
     }
+    private fun cleanAppLabel(value: String): String =
+        value.replace(Regex("[\\p{Cc}\\p{Cf}]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(120)
+
+    private fun launcherEntries(packageName: String? = null): List<ResolveInfo> {
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        if (packageName != null) intent.setPackage(packageName)
+        return packageManager.queryIntentActivities(intent, 0).filter { info ->
+            val activity = info.activityInfo
+            activity != null &&
+                activity.packageName != this.packageName &&
+                activity.enabled &&
+                activity.applicationInfo.enabled
+        }
+    }
+
+    private fun launchableAppCatalog(): List<Map<String, Any?>> {
+        return launcherEntries()
+            .groupBy { it.activityInfo.packageName }
+            .mapNotNull { (appPackage, entries) ->
+                val selected = entries
+                    .mapNotNull { info ->
+                        val label = cleanAppLabel(info.loadLabel(packageManager).toString())
+                        if (label.isEmpty()) null else label to info
+                    }
+                    .minByOrNull { it.first.lowercase() }
+                    ?: return@mapNotNull null
+                val icon = try {
+                    val drawable = selected.second.loadIcon(packageManager).mutate()
+                    val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bitmap)
+                    drawable.setBounds(0, 0, 64, 64)
+                    drawable.draw(canvas)
+                    val bytes = ByteArrayOutputStream().use { stream ->
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+                        stream.toByteArray()
+                    }
+                    bitmap.recycle()
+                    android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                } catch (_: Exception) {
+                    null
+                }
+                mapOf(
+                    "package" to appPackage,
+                    "label" to selected.first,
+                    "icon_png_base64" to icon,
+                )
+            }
+            .sortedWith(compareBy<Map<String, Any?>> { it["label"].toString().lowercase() }
+                .thenBy { it["package"].toString() })
+    }
+
     private fun execute(args:Map<*, *>,result:MethodChannel.Result) {
         try {
             when(args["kind"]) {
                 "open_app" -> {
-                    val packageName=args["package"] as? String
-                    if(packageName !in setOf("com.android.settings","com.android.chrome","com.google.android.youtube","com.google.android.calculator")) throw IllegalArgumentException("Unsupported app")
-                    val launch=packageManager.getLaunchIntentForPackage(packageName!!) ?: throw IllegalStateException("That app is not installed or cannot be opened")
+                    val packageName = args["package"] as? String
+                        ?: throw IllegalArgumentException("Choose an app from the installed-app list")
+                    val approvedLabel = args["app_name"] as? String
+                        ?: throw IllegalArgumentException("The selected app name is missing")
+                    val liveLabel = launcherEntries(packageName)
+                        .mapNotNull { cleanAppLabel(it.loadLabel(packageManager).toString()).takeIf(String::isNotEmpty) }
+                        .minByOrNull { it.lowercase() }
+                        ?: throw IllegalStateException("That app is no longer launchable")
+                    if (liveLabel != approvedLabel) {
+                        throw IllegalStateException("The selected app changed; choose it again before approving")
+                    }
+                    val launch = packageManager.getLaunchIntentForPackage(packageName)
+                        ?: throw IllegalStateException("That app is not installed or cannot be opened")
                     startActivity(launch)
-                    result.success(mapOf("result" to "opened","detail" to "Android accepted the app launch request. Its screen was not independently checked."))
+                    result.success(mapOf("result" to "opened","detail" to "Android accepted the launch request for $liveLabel. Its screen was not independently checked."))
                 }
                 "reminder" -> {
                     val title=(args["title"] as? String)?.trim() ?: ""

@@ -41,6 +41,7 @@ dependencies:
   flutter_markdown_plus: ^1.0.12
   local_auth: ^2.3.0
   webview_flutter: ^4.13.0
+  google_sign_in: ^7.2.0
 dev_dependencies:
   integration_test:
     sdk: flutter

@@ -873,15 +873,26 @@ class Onboarding extends StatelessWidget {
 class Home extends StatelessWidget {
   final AssistantState state;
   const Home({super.key, required this.state});
-  Future<void> action(BuildContext context, Map<String, dynamic> action) async {
+  Future<void> action(
+    BuildContext context,
+    Map<String, dynamic> action, {
+    LaunchableApp? selectedApp,
+  }) async {
     try {
-      final draft = await state.prepareAction(action);
+      final draft = action['kind'] == 'open_app'
+          ? await state.prepareSelectedAppLaunch(
+              selectedApp ??
+                  (throw ServiceException(
+                    'Choose an app from the installed-app list.',
+                  )),
+            )
+          : await state.prepareAction(action);
       if (!context.mounted) {
         return;
       }
       final description = action['kind'] == 'reminder'
           ? 'Schedule “${action['title']}” for ${DateTime.fromMillisecondsSinceEpoch(action['at_ms'])}. Android delivery is approximate; battery restrictions may delay it.'
-          : 'Open ${action['package']} on this device.';
+          : 'Open ${selectedApp!.label} (${selectedApp.packageName}) on this device.';
       final approved = await showDialog<bool>(
         context: context,
         builder: (c) => AlertDialog(
@@ -911,6 +922,30 @@ class Home extends StatelessWidget {
       if (context.mounted) {
         notice(context, e);
       }
+    }
+  }
+
+  Future<void> openAppPicker(BuildContext context) async {
+    try {
+      final apps = await state.loadLaunchableApps();
+      if (!context.mounted) return;
+      if (apps.isEmpty) {
+        notice(context, 'No installed apps with a launcher screen were found.');
+        return;
+      }
+      final selected = await showModalBottomSheet<LaunchableApp>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (_) => AppPickerSheet(apps: apps),
+      );
+      if (selected != null && context.mounted) {
+        await action(context, const {
+          'kind': 'open_app',
+        }, selectedApp: selected);
+      }
+    } catch (error) {
+      if (context.mounted) notice(context, error);
     }
   }
 
@@ -1357,35 +1392,10 @@ class Home extends StatelessWidget {
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.open_in_new_rounded),
                       title: const Text('Open an Android app'),
-                      subtitle: const Text('Only supported installed apps'),
-                      onTap: () async {
-                        final package = await showModalBottomSheet<String>(
-                          context: context,
-                          builder: (c) => SafeArea(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                for (final entry in const {
-                                  'Settings': 'com.android.settings',
-                                  'Chrome': 'com.android.chrome',
-                                  'YouTube': 'com.google.android.youtube',
-                                  'Calculator': 'com.google.android.calculator',
-                                }.entries)
-                                  ListTile(
-                                    title: Text(entry.key),
-                                    onTap: () => Navigator.pop(c, entry.value),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        );
-                        if (package != null && context.mounted) {
-                          await action(context, {
-                            'kind': 'open_app',
-                            'package': package,
-                          });
-                        }
-                      },
+                      subtitle: const Text(
+                        'Search installed apps; review each launch',
+                      ),
+                      onTap: () => openAppPicker(context),
                     ),
                   ),
                 ],
@@ -1403,6 +1413,121 @@ class Home extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class AppPickerSheet extends StatefulWidget {
+  final List<LaunchableApp> apps;
+  const AppPickerSheet({super.key, required this.apps});
+
+  @override
+  State<AppPickerSheet> createState() => _AppPickerSheetState();
+}
+
+class _AppPickerSheetState extends State<AppPickerSheet> {
+  final TextEditingController _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = _search.text.trim().toLowerCase();
+    final apps = widget.apps
+        .where(
+          (app) =>
+              app.label.toLowerCase().contains(query) ||
+              app.packageName.toLowerCase().contains(query),
+        )
+        .toList(growable: false);
+    final theme = Theme.of(context);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        20,
+        16,
+        20,
+        16 + MediaQuery.viewInsetsOf(context).bottom,
+      ),
+      child: SizedBox(
+        height: math
+            .min(MediaQuery.sizeOf(context).height * .78, 680)
+            .toDouble(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Installed apps', style: theme.textTheme.titleLarge),
+            const SizedBox(height: 6),
+            Text(
+              'Choose one to prepare a launch for your review.',
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _search,
+              onChanged: (_) => setState(() {}),
+              textInputAction: TextInputAction.search,
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search_rounded),
+                hintText: 'Search by app name',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: apps.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No matching apps',
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    )
+                  : ListView.separated(
+                      itemCount: apps.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final app = apps[index];
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: app.iconPng == null
+                              ? CircleAvatar(
+                                  child: Text(app.label.substring(0, 1)),
+                                )
+                              : ClipRRect(
+                                  borderRadius: BorderRadius.circular(10),
+                                  child: Image.memory(
+                                    app.iconPng!,
+                                    width: 40,
+                                    height: 40,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, _, _) => const SizedBox(
+                                      width: 40,
+                                      height: 40,
+                                      child: Icon(Icons.apps_rounded),
+                                    ),
+                                  ),
+                                ),
+                          title: Text(
+                            app.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            app.packageName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onTap: () => Navigator.pop(context, app),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

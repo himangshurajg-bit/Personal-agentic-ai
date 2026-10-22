@@ -43,10 +43,11 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
-        <package android:name="com.android.settings" />
-        <package android:name="com.android.chrome" />
-        <package android:name="com.google.android.youtube" />
-        <package android:name="com.google.android.calculator" />
+        <!-- Discover only apps that expose a user-launchable activity. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
         <intent><action android:name="android.speech.RecognitionService" /></intent>
         <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
         <intent>
