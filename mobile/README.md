@@ -14,7 +14,7 @@ Navigation is Home, Chat, Automations, Memory & Library, Settings. Study and sel
 
 ### Working local features
 
-- Device-owned conversation retention/reopening and case-insensitive keyword search. This is lexical search, not embeddings/semantic search.
+- Device-owned conversation retention/reopening and ranked multilingual lexical search. Android uses the Rust native module to tokenize Unicode text and rank exact words/phrases locally; there are no embeddings, model calls, or uploads. Other Flutter test/host targets retain a small Dart fallback.
 - Explicitly approved preference/project/summary memories, with current/all-conversation scope, edit/delete/export. Chat retention does not automatically approve facts for long-term memory. Relevant retrieval is lexical top-five matching.
 - Private notebook; local task completion; actual practice answers/feedback/results recorded by the owner. Counts reflect records, not inferred mastery. Study includes user-authored decks/cards, editable/deletable content, a due queue and deterministic Again/Hard/Good/Easy intervals; only completed review actions affect review totals. All flashcard data stays in phone-local secure storage and works without AI or network. Tutor prompts/quiz generation still require a configured capable engine; generated answers are not independently verified.
 - Android document picker for a specific text/JSON/image/PDF. UTF-8 text preview (200 KB cap) and PNG/JPEG preview (2 MB cap). PDF extraction, OCR, diagram/image AI and camera are **not implemented**. Selected contents are data, never action authority. Text summarization shows exact payload before online sending; images are not submitted to a text-only model.
@@ -64,10 +64,14 @@ Memory deletion, chat deletion, clearing a notebook, uninstalling the app, delet
 
 ## Build and test
 
-Tested toolchain: Flutter 3.47.7 / Dart 3.13.5, JDK17, Android SDK36 and Flutter-selected NDK. From the repository root:
+Tested toolchain: Flutter 3.47.7 / Dart 3.13.5, JDK17, Android SDK36, Rust stable, `cargo-ndk`, and Flutter-selected NDK. Android builds compile the Rust crate from source for ARM64 and x86_64; generated `.so` files stay under the ignored build output and are not committed. From the repository root:
 
 ```sh
 cd mobile
+rustup target add aarch64-linux-android x86_64-linux-android
+cargo install cargo-ndk --locked
+export ANDROID_NDK_HOME="$(find "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+cargo test --manifest-path rust/local_search/Cargo.toml --locked
 flutter pub get
 flutter analyze
 flutter test

@@ -27,7 +27,7 @@ void main() {
       await s.local.writeChat('test36', [
         {
           'role': 'user',
-          'text': 'Synthetic velocity practice',
+          'text': 'Synthetic velocity practice · অসমীয়া পাঠ · हिन्दी पढ़ाई · Hinglish kal study',
           'state': 'complete',
         },
       ]);
@@ -51,9 +51,24 @@ void main() {
       await restored.initialize();
       expect(restored.note, 'Synthetic local-only note');
       expect(
-        restored.local.searchChats('VELOCITY').single['conversation'],
+        (await restored.local.searchChats('VELOCITY')).single['conversation'],
         'test36',
       );
+      expect(
+        (await restored.local.searchChats('অসমীয়া')).single['conversation'],
+        'test36',
+      );
+      expect(restored.local.lastSearchUsedRust, isTrue);
+      expect(
+        (await restored.local.searchChats('पढ़ाई')).single['conversation'],
+        'test36',
+      );
+      expect(restored.local.lastSearchUsedRust, isTrue);
+      expect(
+        (await restored.local.searchChats('Hinglish')).single['conversation'],
+        'test36',
+      );
+      expect(restored.local.lastSearchUsedRust, isTrue);
       expect(restored.local.rows('memories'), hasLength(1));
       expect(restored.local.rows('tasks'), hasLength(1));
       expect(restored.local.rows('attempts'), hasLength(1));

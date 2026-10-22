@@ -131,6 +131,24 @@ class MainActivity : FlutterFragmentActivity() {
     private var fileResult: MethodChannel.Result? = null
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
+        MethodChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/rust_search").setMethodCallHandler { call, result ->
+            if (call.method != "search_chats") {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            val request = call.argument<String>("request")
+            if (request.isNullOrEmpty() || request.toByteArray(Charsets.UTF_8).size > 9_000_000) {
+                result.error("invalid_request", "Local search request is missing or too large.", null)
+                return@setMethodCallHandler
+            }
+            try {
+                result.success(RustLocalSearch.search(request))
+            } catch (_: LinkageError) {
+                result.error("rust_unavailable", "Native local search is unavailable in this build.", null)
+            } catch (_: Exception) {
+                result.error("search_failed", "Local search could not complete.", null)
+            }
+        }
         voiceChannel=MethodChannel(engine.dartExecutor.binaryMessenger,"personal_assistant/voice")
         audioChannel=MethodChannel(engine.dartExecutor.binaryMessenger,"personal_assistant/audio")
         audioChannel?.setMethodCallHandler { call, result ->
