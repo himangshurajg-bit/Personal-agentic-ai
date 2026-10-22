@@ -42,6 +42,8 @@ void main() {
     expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNotNull);
     expect(calls, isEmpty);
 
+    await tester.ensureVisible(find.byType(FilledButton));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Choose app to review reply'));
     await tester.pumpAndSettle();
     expect(calls, hasLength(1));
@@ -65,6 +67,8 @@ void main() {
       'A small study step today.',
     );
     await tester.pump();
+    await tester.ensureVisible(find.text('Choose app to review caption'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Choose app to review caption'));
     await tester.pumpAndSettle();
     expect(calls.single.arguments, {

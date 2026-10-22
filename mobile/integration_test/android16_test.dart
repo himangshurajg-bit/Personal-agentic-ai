@@ -122,8 +122,8 @@ void main() {
       await pumpRouteFrames(tester);
       expect(find.text('API36 Test assistant'), findsOneWidget);
       phase('initial app frame settled');
-      // Exercise the labels the glass dock actually exposes; Actions opens
-      // automations and Memory opens the combined memory/library destination.
+      // Use the grouped navigation drawer for routes; the glass dock only
+      // shows labels for selected destinations and reserves its center for Voice.
       for (final label in [
         'Chat',
         'Actions',
@@ -131,6 +131,8 @@ void main() {
         'Settings',
         'Home',
       ]) {
+        await tester.tap(find.byTooltip('Open navigation menu'));
+        await tester.pumpAndSettle();
         phase('navigation tap started: $label');
         await tester.tap(find.text(label).last);
         phase('navigation tap completed: $label');
@@ -138,7 +140,7 @@ void main() {
         phase('navigation settled: $label');
         expect(tester.takeException(), isNull);
       }
-      phase('glass dock navigation passed');
+      phase('drawer navigation passed');
       final draft = await s.prepareAction({
         'kind': 'reminder',
         'title': 'Synthetic API36 test',
