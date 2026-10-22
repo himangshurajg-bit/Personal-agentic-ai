@@ -88,6 +88,56 @@ void main() {
     },
   );
   test(
+    'online API settings keep service and provider credentials separate',
+    () async {
+      final state = AssistantState();
+      await state.initialize();
+      await state.saveSettings(
+        'http://127.0.0.1:8766',
+        'private-token-test',
+        'dark',
+        compatibleUrl: 'https://provider.example',
+        compatibleSecret: 'provider-key-test',
+      );
+      await state.saveEngine('compatible', 'model-x', 'en-IN');
+      expect(state.config.origin, 'https://provider.example');
+      expect(state.config.token, 'provider-key-test');
+      expect(state.privateServiceEndpoint, 'http://127.0.0.1:8766');
+      expect(state.privateServiceToken, 'private-token-test');
+      final request = state.config.request('chat', 'hello');
+      expect(request.url.host, 'provider.example');
+      expect(request.headers['Authorization'], 'Bearer provider-key-test');
+      expect(request.body, isNot(contains('provider-key-test')));
+      expect(await state.storage.read(key: 'token'), isNull);
+      expect(await state.storage.read(key: 'endpoint'), isNull);
+      await state.clearProviderCredential(compatible: true);
+      expect(state.compatibleApiKey, isEmpty);
+      expect(await state.storage.read(key: 'compatible_api_key'), isNull);
+      state.dispose();
+    },
+  );
+
+  test(
+    'legacy provider settings migrate into the selected secure slot',
+    () async {
+      FlutterSecureStorage.setMockInitialValues({
+        'engine': 'compatible',
+        'endpoint': 'https://provider.example',
+        'token': 'legacy-provider-key',
+      });
+      final state = AssistantState();
+      await state.initialize();
+      expect(state.compatibleApiEndpoint, 'https://provider.example');
+      expect(state.compatibleApiKey, 'legacy-provider-key');
+      expect(state.privateServiceEndpoint, 'http://127.0.0.1:8766');
+      expect(state.privateServiceToken, isEmpty);
+      expect(await state.storage.read(key: 'endpoint'), isNull);
+      expect(await state.storage.read(key: 'token'), isNull);
+      state.dispose();
+    },
+  );
+
+  test(
     'endpoint enforces TLS or explicit loopback and refuses credentials',
     () {
       for (final value in [

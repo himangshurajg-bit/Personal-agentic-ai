@@ -38,16 +38,16 @@ void main() {
       await tester.pumpAndSettle();
       for (final label in [
         'Chat',
-        'Automations',
-        'Memory & Library',
+        'Actions',
+        'Library',
         'Settings',
         'Home',
-        'Memory & Library',
+        'Library',
       ]) {
         await tester.tap(find.text(label).last);
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull, reason: 'Entering $label');
-        if (label == 'Memory & Library') {
+        if (label == 'Library') {
           expect(find.text('Synthetic navigation memory'), findsOneWidget);
         }
       }
