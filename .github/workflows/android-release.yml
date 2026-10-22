@@ -1,0 +1,165 @@
+name: Signed Android APK release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: signed-android-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require main before any signing secrets are exposed
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Run this workflow from main so the release matches the published app." >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - name: Install cargo-ndk and select Android NDK
+        run: |
+          cargo install cargo-ndk --locked
+          ndk="${ANDROID_NDK_ROOT:-${ANDROID_NDK:-}}"
+          if [ -z "$ndk" ] || [ ! -d "$ndk" ]; then
+            ndk="$(find "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          fi
+          test -n "$ndk" && test -d "$ndk"
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK=$ndk" >> "$GITHUB_ENV"
+
+      - name: Validate and stage release signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${ANDROID_KEYSTORE_BASE64:?Add the release-signing Actions secrets described in mobile/README.md}"
+          : "${ANDROID_KEYSTORE_PASSWORD:?Add the release-signing Actions secrets described in mobile/README.md}"
+          : "${ANDROID_KEY_ALIAS:?Add the release-signing Actions secrets described in mobile/README.md}"
+          : "${ANDROID_KEY_PASSWORD:?Add the release-signing Actions secrets described in mobile/README.md}"
+          keystore="$RUNNER_TEMP/personal-agentic-ai-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          test -s "$keystore"
+          keytool -list -keystore "$keystore" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
+          echo "ANDROID_KEYSTORE_PATH=$keystore" >> "$GITHUB_ENV"
+
+      - name: Rust checks
+        run: |
+          cargo fmt --manifest-path mobile/rust/local_search/Cargo.toml -- --check
+          cargo test --manifest-path mobile/rust/local_search/Cargo.toml --locked
+          cargo clippy --manifest-path mobile/rust/local_search/Cargo.toml --all-targets --locked -- -D warnings
+
+      - name: Flutter analysis and tests
+        working-directory: mobile
+        run: flutter pub get && flutter analyze && flutter test
+
+      - name: Choose next release number
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version_line="$(sed -n 's/^version:[[:space:]]*//p' mobile/pubspec.yaml | head -n 1)"
+          version_name="${version_line%%+*}"
+          current_code="${version_line##*+}"
+          if [ "$current_code" = "$version_line" ] || ! [[ "$current_code" =~ ^[0-9]+$ ]]; then current_code=0; fi
+          max_code="$current_code"
+          while IFS= read -r tag; do
+            case "$tag" in
+              "v${version_name}-build"*)
+                candidate="${tag##*-build}"
+                if [[ "$candidate" =~ ^[0-9]+$ ]] && [ "$candidate" -gt "$max_code" ]; then max_code="$candidate"; fi
+                ;;
+            esac
+          done < <(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName')
+          build_number=$((max_code + 1))
+          tag="v${version_name}-build${build_number}"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "Release tag $tag already exists; refusing to replace it." >&2
+            exit 1
+          fi
+          {
+            echo "version_name=$version_name"
+            echo "build_number=$build_number"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+          echo "Preparing $tag from $GITHUB_SHA."
+
+      - name: Build release APK with the configured key
+        working-directory: mobile
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          flutter build apk --release --target-platform android-arm64 \
+            --build-name='${{ steps.release.outputs.version_name }}' \
+            --build-number='${{ steps.release.outputs.build_number }}'
+
+      - name: Verify APK signature and integrity
+        id: verify
+        working-directory: mobile
+        run: |
+          set -euo pipefail
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          test -s "$apk"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$apksigner"
+          "$apksigner" verify --verbose --print-certs "$apk"
+          unzip -tq "$apk"
+          sha256sum "$apk" | tee "$RUNNER_TEMP/apk.sha256"
+          echo "apk=$apk" >> "$GITHUB_OUTPUT"
+
+      - name: Publish downloadable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes=$(cat <<EOF
+          Android release built from main commit $GITHUB_SHA (version ${{ steps.release.outputs.version_name }}, build ${{ steps.release.outputs.build_number }}).
+
+          Signed with the owner's configured Android release key. This APK is for direct Android installation; it is not a Google Play Store listing.
+
+          SHA-256:
+          $(cat "$RUNNER_TEMP/apk.sha256")
+          EOF
+          )
+          gh release create '${{ steps.release.outputs.tag }}' \
+            'mobile/${{ steps.verify.outputs.apk }}' \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Personal AI ${{ steps.release.outputs.version_name }} build ${{ steps.release.outputs.build_number }}" \
+            --notes "$notes"
+
+      - name: Remove temporary signing key
+        if: always()
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/personal-agentic-ai-release.jks
+        run: rm -f "$ANDROID_KEYSTORE_PATH"

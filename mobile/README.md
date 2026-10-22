@@ -79,7 +79,7 @@ flutter build apk --release --target-platform android-arm64
 # Output: build/app/outputs/flutter-apk/app-release.apk
 ```
 
-Development release builds reuse the existing debug signer; do not commit a private keystore or call it production signing. Gradle is limited to one worker and a 1200 MB heap/768 MB metaspace for the small build computer. A current flutter_tts warning notes future Flutter built-in-Kotlin migration; this is not an observed runtime failure. Versions remain locked in `pubspec.lock`.
+Release builds require the owner’s release key; never silently create a debug-signed release APK or commit a private keystore. The GitHub Actions workflow `Signed Android APK release` creates a downloadable, release-key-signed GitHub release when manually run. Before running it, add these repository secrets under Settings → Secrets and variables → Actions: `ANDROID_KEYSTORE_BASE64` (base64 of the existing `.jks`/`.keystore` file), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`. The workflow validates the key, runs Rust and Flutter checks, builds an ARM64 APK, verifies its signature and checksum, then publishes the APK as a GitHub release asset. Gradle is limited to one worker and a 1200 MB heap/768 MB metaspace for the small build computer. A current flutter_tts warning notes future Flutter built-in-Kotlin migration; this is not an observed runtime failure. Versions remain locked in `pubspec.lock`.
 
 On a disposable API36 emulator only (tests deliberately clear app secure data and create synthetic reminders):
 
