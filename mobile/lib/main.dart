@@ -44,10 +44,13 @@ class _AssistantAppState extends State<AssistantApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) {
+    // Device-auth prompts can temporarily take focus without sending the app to
+    // the background. Lock only after the app is actually hidden or paused.
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
       _leftForeground = true;
       widget.state.lockApp();
-    } else if (_leftForeground) {
+    } else if (state == AppLifecycleState.resumed && _leftForeground) {
       _leftForeground = false;
       widget.state.lockApp();
     }
