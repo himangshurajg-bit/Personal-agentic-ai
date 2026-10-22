@@ -34,8 +34,12 @@ void main() {
       });
       final restored = PhoneData(secure);
       await restored.load();
-      expect(restored.searchChats('VELOCITY').single['conversation'], 'math');
-      expect(restored.searchChats('synonym'), isEmpty);
+      expect(
+        (await restored.searchChats('VELOCITY')).single['conversation'],
+        'math',
+      );
+      expect(await restored.searchChats('synonym'), isEmpty);
+      expect(restored.lastSearchUsedRust, isFalse);
       expect(restored.rows('tasks').single['done'], true);
       expect(restored.rows('attempts').single['answer'], '2 m/s');
       expect(jsonDecode(restored.export())['memories'], hasLength(1));

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Device-owned data. No networking. Writes are serialized and commit before visibility.
@@ -82,21 +83,69 @@ class PhoneData {
   Future<void> writeChat(String id, List<Map<String, dynamic>> messages) =>
       change((d) => d['chats'][id] = jsonDecode(jsonEncode(messages)));
   Future<void> deleteChat(String id) => change((d) => d['chats'].remove(id));
-  List<Map<String, dynamic>> searchChats(String query) {
-    final results = <Map<String, dynamic>>[];
-    (snapshot['chats'] as Map).forEach((id, items) {
-      final matches = (items as List)
-          .where(
-            (m) => m['text'].toString().toLowerCase().contains(
-              query.toLowerCase(),
-            ),
-          )
+  static const _rustSearch = MethodChannel('personal_assistant/rust_search');
+  bool lastSearchUsedRust = false;
+
+  Future<List<Map<String, dynamic>>> searchChats(String query) async {
+    final chats = _data['chats'] as Map<String, dynamic>;
+    // Browsing an empty query does not need to cross the platform channel.
+    if (query.trim().isEmpty) {
+      lastSearchUsedRust = false;
+      return _searchChatsDart(query, chats);
+    }
+    final request = jsonEncode({'query': query, 'conversations': chats});
+    try {
+      final raw = await _rustSearch.invokeMethod<String>(
+        'search_chats',
+        {'request': request},
+      );
+      if (raw == null) throw const FormatException('Missing Rust search result');
+      final response = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      final results = response['results'];
+      if (response['engine'] != 'rust' ||
+          response['error'] != null ||
+          results is! List) {
+        throw const FormatException('Invalid Rust search result');
+      }
+      lastSearchUsedRust = true;
+      return results
+          .map((hit) => Map<String, dynamic>.from(hit as Map))
           .toList();
+    } on PlatformException {
+      lastSearchUsedRust = false;
+      return _searchChatsDart(query, chats);
+    } on MissingPluginException {
+      lastSearchUsedRust = false;
+      return _searchChatsDart(query, chats);
+    } on FormatException {
+      lastSearchUsedRust = false;
+      return _searchChatsDart(query, chats);
+    } on TypeError {
+      lastSearchUsedRust = false;
+      return _searchChatsDart(query, chats);
+    }
+  }
+
+  List<Map<String, dynamic>> _searchChatsDart(
+    String query,
+    Map<String, dynamic> chats,
+  ) {
+    final results = <Map<String, dynamic>>[];
+    chats.forEach((id, items) {
+      if (items is! List) return;
+      final matches = items.where((message) {
+        if (message is! Map) return false;
+        return message['text'].toString().toLowerCase().contains(
+          query.toLowerCase(),
+        );
+      }).toList();
       if (matches.isNotEmpty) {
+        final first = matches.first as Map;
         results.add({
-          'conversation': id,
-          'title': matches.first['text'],
+          'conversation': id.toString(),
+          'title': first['text']?.toString() ?? '',
           'matches': matches.length,
+          'score': 0,
         });
       }
     });

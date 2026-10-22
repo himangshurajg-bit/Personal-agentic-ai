@@ -48,6 +48,30 @@ flutter {
     source = "../.."
 }
 
+// Build the local, offline Rust search library for the Android ABIs used by
+// the API 36 emulator and ARM64 phone releases. No generated .so is committed.
+val rustSearchDir = project.file("../../rust/local_search")
+val rustJniLibsDir = project.file("src/main/jniLibs")
+val buildRustLocalSearch = tasks.register<Exec>("buildRustLocalSearch") {
+    workingDir = rustSearchDir
+    environment("CARGO_BUILD_JOBS", "2")
+    commandLine(
+        "cargo", "ndk",
+        "--platform", "26",
+        "-t", "arm64-v8a",
+        "-t", "x86_64",
+        "-o", rustJniLibsDir.absolutePath,
+        "build", "--release",
+    )
+    inputs.files(fileTree(rustSearchDir) { exclude("target/**") })
+    outputs.files(
+        file("src/main/jniLibs/arm64-v8a/libpersonal_local_search.so"),
+        file("src/main/jniLibs/x86_64/libpersonal_local_search.so"),
+    )
+}
+tasks.named("preBuild") {
+    dependsOn(buildRustLocalSearch)
+}
 
 dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")

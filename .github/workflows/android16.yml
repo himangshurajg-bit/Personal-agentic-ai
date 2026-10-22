@@ -20,6 +20,26 @@ jobs:
           flutter-version: '3.47.7'
           channel: stable
           cache: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: aarch64-linux-android,x86_64-linux-android
+      - name: Install cargo-ndk and configure the Android NDK
+        run: |
+          cargo install cargo-ndk --locked
+          ndk="${ANDROID_NDK_ROOT:-${ANDROID_NDK:-}}"
+          if [ -z "$ndk" ] || [ ! -d "$ndk" ]; then
+            ndk="$(find "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          fi
+          test -n "$ndk" && test -d "$ndk"
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK=$ndk" >> "$GITHUB_ENV"
+      - name: Rust native search checks
+        run: |
+          cargo fmt --manifest-path mobile/rust/local_search/Cargo.toml -- --check
+          cargo test --manifest-path mobile/rust/local_search/Cargo.toml --locked
+          cargo clippy --manifest-path mobile/rust/local_search/Cargo.toml --all-targets --locked -- -D warnings
       - name: Enable acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

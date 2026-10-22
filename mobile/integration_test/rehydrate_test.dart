@@ -19,7 +19,8 @@ void main() {
     expect(s.local.rows('flashcards').single['review_count'], 1);
     expect(s.local.rows('study_reviews'), hasLength(1));
     expect(s.local.rows('actions').single['status'], 'scheduled');
-    expect(s.local.searchChats('velocity'), isNotEmpty);
+    expect(await s.local.searchChats('velocity'), isNotEmpty);
+    expect(s.local.lastSearchUsedRust, isTrue);
     await tester.pumpWidget(AssistantApp(state: s));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);

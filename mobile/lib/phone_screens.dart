@@ -1,5 +1,6 @@
 import 'study_quiz.dart';
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -117,6 +118,10 @@ class _PhoneLibraryState extends State<PhoneLibrary> {
   final sheetsRange = TextEditingController(text: 'A1:C3');
   final sheetsValues = TextEditingController();
   String filter = '';
+  List<Map<String, dynamic>> chatResults = [];
+  bool searchLoading = true;
+  Timer? _searchDebounce;
+  int _searchGeneration = 0;
   String? _googleEmail;
   String? _selectedGoogleListId;
   List<GoogleTaskList> _googleLists = [];
@@ -173,6 +178,25 @@ class _PhoneLibraryState extends State<PhoneLibrary> {
     _loadStoredDocsAccount();
     _loadStoredGmailAccount();
     _loadStoredSheetsAccount();
+    unawaited(_runSearch('', ++_searchGeneration));
+  }
+
+  void _scheduleSearch(String value) {
+    setState(() => searchLoading = true);
+    _searchDebounce?.cancel();
+    final generation = ++_searchGeneration;
+    _searchDebounce = Timer(const Duration(milliseconds: 120), () {
+      unawaited(_runSearch(value, generation));
+    });
+  }
+
+  Future<void> _runSearch(String value, int generation) async {
+    final results = await widget.state.local.searchChats(value);
+    if (!mounted || generation != _searchGeneration) return;
+    setState(() {
+      chatResults = results;
+      searchLoading = false;
+    });
   }
 
   Future<void> _loadStoredGoogleAccount() async {
@@ -1502,6 +1526,7 @@ class _PhoneLibraryState extends State<PhoneLibrary> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     query.dispose();
     contactsQuery.dispose();
     driveName.dispose();
@@ -1674,7 +1699,7 @@ class _PhoneLibraryState extends State<PhoneLibrary> {
       children: [
         const Glass(
           child: Text(
-            'Local tasks and conversation search work without a server. Search is keyword matching, not semantic search. Nothing here is silently uploaded.',
+            'Local tasks and conversation search work without a server. Search ranks matching words and phrases in English, Assamese, Hindi and Hinglish; it is lexical, not semantic, and never uploads chat text.',
           ),
         ),
         TextField(
@@ -1727,9 +1752,19 @@ class _PhoneLibraryState extends State<PhoneLibrary> {
           decoration: const InputDecoration(
             labelText: 'Search previous conversations',
           ),
-          onChanged: (s) => setState(() => filter = s),
+          onChanged: (s) {
+            filter = s;
+            _scheduleSearch(s);
+          },
         ),
-        for (final chat in widget.state.local.searchChats(filter))
+        if (searchLoading) const LinearProgressIndicator(),
+        if (!searchLoading && filter.trim().isNotEmpty)
+          Text(
+            widget.state.local.lastSearchUsedRust
+                ? 'Ranked with the native Rust search engine.'
+                : 'Using the on-device Dart fallback; no server is contacted.',
+          ),
+        for (final chat in chatResults)
           TapMotion(
             depth: .7,
             child: ListTile(
@@ -1747,7 +1782,7 @@ class _PhoneLibraryState extends State<PhoneLibrary> {
               },
             ),
           ),
-        if (widget.state.local.searchChats(filter).isEmpty)
+        if (!searchLoading && chatResults.isEmpty)
           const Text(
             'No on-phone messages match. Remote history is not automatically imported.',
           ),
