@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import 'assistant_state.dart';
 import 'phone_data.dart';
+import 'ui_motion.dart';
 import 'main.dart' show Shell, Glass, notice, Home;
 
 /// Exact per-send disclosure. Unselected memories, notes and past chats stay local.
@@ -150,19 +151,22 @@ class _PhoneLibraryState extends State<PhoneLibrary> {
           onChanged: (s) => setState(() => filter = s),
         ),
         for (final chat in widget.state.local.searchChats(filter))
-          ListTile(
-            title: Text(
-              chat['title'],
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+          TapMotion(
+            depth: .7,
+            child: ListTile(
+              title: Text(
+                chat['title'],
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(
+                '${chat['matches']} matching messages · ${chat['conversation']}',
+              ),
+              onTap: () async {
+                await widget.state.selectConversation(chat['conversation']);
+                if (context.mounted) Navigator.pushNamed(context, '/chat');
+              },
             ),
-            subtitle: Text(
-              '${chat['matches']} matching messages · ${chat['conversation']}',
-            ),
-            onTap: () async {
-              await widget.state.selectConversation(chat['conversation']);
-              if (context.mounted) Navigator.pushNamed(context, '/chat');
-            },
           ),
         if (widget.state.local.searchChats(filter).isEmpty)
           const Text(
@@ -802,31 +806,34 @@ class _LocalFlashcardsState extends State<LocalFlashcards> {
                     if (cards.isEmpty)
                       const ListTile(title: Text('No cards in this deck yet.')),
                     for (final card in cards)
-                      ListTile(
-                        title: Text(
-                          card['front'],
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: Text(
-                          'Reviewed ${card['review_count']} times · due ${DateTime.fromMillisecondsSinceEpoch(card['due_at'], isUtc: true).toLocal()}',
-                        ),
-                        trailing: PopupMenuButton<String>(
-                          tooltip: 'Card options',
-                          onSelected: (value) {
-                            if (value == 'edit') _editCard(card);
-                            if (value == 'delete') _deleteCard(card);
-                          },
-                          itemBuilder: (_) => const [
-                            PopupMenuItem(
-                              value: 'edit',
-                              child: Text('Edit card'),
-                            ),
-                            PopupMenuItem(
-                              value: 'delete',
-                              child: Text('Delete card'),
-                            ),
-                          ],
+                      TapMotion(
+                        depth: .7,
+                        child: ListTile(
+                          title: Text(
+                            card['front'],
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            'Reviewed ${card['review_count']} times · due ${DateTime.fromMillisecondsSinceEpoch(card['due_at'], isUtc: true).toLocal()}',
+                          ),
+                          trailing: PopupMenuButton<String>(
+                            tooltip: 'Card options',
+                            onSelected: (value) {
+                              if (value == 'edit') _editCard(card);
+                              if (value == 'delete') _deleteCard(card);
+                            },
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                value: 'edit',
+                                child: Text('Edit card'),
+                              ),
+                              PopupMenuItem(
+                                value: 'delete',
+                                child: Text('Delete card'),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                   ],
