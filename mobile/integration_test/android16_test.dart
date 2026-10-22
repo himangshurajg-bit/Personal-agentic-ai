@@ -91,10 +91,12 @@ void main() {
       await tester.pumpWidget(AssistantApp(state: s));
       await tester.pumpAndSettle();
       expect(find.text('API36 Test assistant'), findsOneWidget);
+      // Exercise the labels the glass dock actually exposes; Actions opens
+      // automations and Library opens the combined memory/library destination.
       for (final label in [
         'Chat',
-        'Automations',
-        'Memory & Library',
+        'Actions',
+        'Library',
         'Settings',
         'Home',
       ]) {
