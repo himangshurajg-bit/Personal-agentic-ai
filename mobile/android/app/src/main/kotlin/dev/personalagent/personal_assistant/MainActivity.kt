@@ -25,6 +25,7 @@ import android.util.Base64
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.EventChannel
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 
@@ -126,11 +127,63 @@ class MainActivity : FlutterFragmentActivity() {
             } else {recognizer.startListening(intent);result.success(mapOf("started" to true,"mode" to "online"))}
         } catch(_:Exception) {stopVoice();result.error("unavailable","Speech could not start; typing remains available",null)}
     }
-    override fun onPause() {stopVoice();stopAudio();super.onPause()}
-    override fun onDestroy() {stopVoice();stopAudio();super.onDestroy()}
+    override fun onPause() {
+        stopVoice()
+        stopAudio()
+        offlineModelCoordinator?.onAppPaused()
+        super.onPause()
+    }
+    override fun onDestroy() {
+        stopVoice()
+        stopAudio()
+        offlineModelCoordinator?.shutdown()
+        offlineModelCoordinator = null
+        super.onDestroy()
+    }
     private var fileResult: MethodChannel.Result? = null
+    private var offlineModelCoordinator: Gemma4OfflineCoordinator? = null
+    private var offlineModelEventSink: EventChannel.EventSink? = null
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
+        offlineModelCoordinator = Gemma4OfflineCoordinator(applicationContext) { event ->
+            offlineModelEventSink?.success(event)
+        }
+        EventChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/offline_model/events")
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    offlineModelEventSink = events
+                }
+                override fun onCancel(arguments: Any?) {
+                    offlineModelEventSink = null
+                }
+            })
+        MethodChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/offline_model")
+            .setMethodCallHandler { call, result ->
+                val offline = offlineModelCoordinator
+                if (offline == null) {
+                    result.error("unavailable", "Local model management is unavailable in this session.", null)
+                    return@setMethodCallHandler
+                }
+                when (call.method) {
+                    "status" -> result.success(offline.status())
+                    "download" -> { offline.startDownload(); result.success(true) }
+                    "cancel_download" -> { offline.cancelDownload(); result.success(true) }
+                    "remove_model" -> { offline.removeModel(); result.success(true) }
+                    "load_for_screening" -> { offline.loadForScreening(); result.success(true) }
+                    "run_qualification" -> {
+                        val fixture = call.argument<String>("fixture_id")
+                        if (fixture.isNullOrBlank()) {
+                            result.error("invalid_fixture", "Choose a fixed screening prompt.", null)
+                        } else {
+                            offline.runQualification(fixture)
+                            result.success(true)
+                        }
+                    }
+                    "cancel_inference" -> { offline.cancelInference(); result.success(true) }
+                    "unload_candidate" -> { offline.unloadCandidate(); result.success(true) }
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/rust_search").setMethodCallHandler { call, result ->
             if (call.method != "search_chats") {
                 result.notImplemented()

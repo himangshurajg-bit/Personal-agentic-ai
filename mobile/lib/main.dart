@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -10,6 +9,7 @@ import 'assistant_state.dart';
 import 'mcp_servers.dart';
 import 'phone_screens.dart';
 import 'home_orb.dart';
+import 'offline_model.dart';
 import 'ui_motion.dart';
 import 'visual_theme.dart';
 
@@ -66,7 +66,7 @@ class _AssistantAppState extends State<AssistantApp>
       debugShowCheckedModeBanner: false,
       theme: _assistantTheme(Brightness.light, widget.state.visualTheme),
       darkTheme: _assistantTheme(Brightness.dark, widget.state.visualTheme),
-      themeAnimationDuration: const Duration(milliseconds: 520),
+      themeAnimationDuration: const Duration(milliseconds: 220),
       themeAnimationCurve: Curves.easeInOutCubic,
       themeMode: widget.state.theme == 'dark'
           ? ThemeMode.dark
@@ -216,138 +216,65 @@ class Shell extends StatelessWidget {
     this.actions,
     this.primaryNavigation = true,
   });
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final dark = theme.brightness == Brightness.dark;
     final currentRoute = ModalRoute.of(context)?.settings.name;
     return Scaffold(
-      extendBody: true,
       bottomNavigationBar: !primaryNavigation
           ? null
-          : Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(26),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surface.withValues(
-                        alpha: dark ? .74 : .70,
-                      ),
-                      borderRadius: BorderRadius.circular(26),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: dark ? .16 : .72),
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: theme.colorScheme.primary.withValues(
-                            alpha: dark ? .10 : .08,
-                          ),
-                          blurRadius: 26,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
-                    ),
-                    child: NavigationBar(
-                      height: 80,
-                      selectedIndex: switch (currentRoute) {
-                        '/chat' => 1,
-                        '/study' => 1,
-                        '/files' => 1,
-                        '/automations' => 2,
-                        '/memory' => 3,
-                        '/library' => 3,
-                        '/settings' => 4,
-                        _ => 0,
-                      },
-                      onDestinationSelected: (i) {
-                        final route = [
-                          '/home',
-                          '/chat',
-                          '/automations',
-                          '/memory',
-                          '/settings',
-                        ][i];
-                        if (currentRoute != route) {
-                          Navigator.pushReplacementNamed(context, route);
-                        }
-                      },
-                      destinations: const [
-                        NavigationDestination(
-                          icon: Icon(Icons.home_outlined),
-                          selectedIcon: Icon(Icons.home_rounded),
-                          label: 'Home',
-                        ),
-                        NavigationDestination(
-                          icon: Icon(Icons.chat_bubble_outline),
-                          selectedIcon: Icon(Icons.chat_bubble_rounded),
-                          label: 'Chat',
-                        ),
-                        NavigationDestination(
-                          icon: Icon(Icons.bolt_outlined),
-                          selectedIcon: Icon(Icons.bolt_rounded),
-                          label: 'Actions',
-                        ),
-                        NavigationDestination(
-                          icon: Icon(Icons.auto_awesome_outlined),
-                          selectedIcon: Icon(Icons.auto_awesome),
-                          label: 'Memory',
-                        ),
-                        NavigationDestination(
-                          icon: Icon(Icons.tune_rounded),
-                          selectedIcon: Icon(Icons.tune_rounded),
-                          label: 'Settings',
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+          : NavigationBar(
+              height: 80,
+              selectedIndex: switch (currentRoute) {
+                '/chat' => 1,
+                '/study' || '/files' => 1,
+                '/automations' => 2,
+                '/memory' || '/library' => 3,
+                '/settings' => 4,
+                _ => 0,
+              },
+              onDestinationSelected: (i) {
+                final route = ['/home', '/chat', '/automations', '/memory', '/settings'][i];
+                if (currentRoute != route) Navigator.pushReplacementNamed(context, route);
+              },
+              destinations: const [
+                NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'Home'),
+                NavigationDestination(icon: Icon(Icons.chat_bubble_outline), selectedIcon: Icon(Icons.chat_bubble_rounded), label: 'Chat'),
+                NavigationDestination(icon: Icon(Icons.bolt_outlined), selectedIcon: Icon(Icons.bolt_rounded), label: 'Actions'),
+                NavigationDestination(icon: Icon(Icons.auto_awesome_outlined), selectedIcon: Icon(Icons.auto_awesome), label: 'Memory'),
+                NavigationDestination(icon: Icon(Icons.tune_rounded), selectedIcon: Icon(Icons.tune_rounded), label: 'Settings'),
+              ],
             ),
       appBar: AppBar(
         title: Text(title),
         actions: actions,
-        backgroundColor: Colors.transparent,
+        backgroundColor: theme.colorScheme.surface,
         surfaceTintColor: Colors.transparent,
         scrolledUnderElevation: 0,
         titleSpacing: 20,
       ),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: dark
-                    ? const [
-                        Color(0xff101322),
-                        Color(0xff151b2b),
-                        Color(0xff101a20),
-                      ]
-                    : const [
-                        Color(0xffe8edff),
-                        Color(0xfff8f7fc),
-                        Color(0xffe6f4f1),
-                      ],
-              ),
+      body: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              theme.colorScheme.surface,
+              Color.lerp(theme.colorScheme.surface, theme.colorScheme.primary, theme.brightness == Brightness.dark ? .045 : .025)!,
+            ],
+          ),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: child,
             ),
           ),
-          const Positioned.fill(child: _AmbientGlow()),
-          SafeArea(
-            top: false,
-            child: Align(
-              alignment: Alignment.topCenter,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 700),
-                child: child,
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -410,10 +337,10 @@ ThemeData _assistantTheme(Brightness brightness, String paletteId) {
       iconTheme: IconThemeData(color: scheme.onSurface),
     ),
     navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: Colors.transparent,
+      backgroundColor: scheme.surface,
       elevation: 0,
-      indicatorColor: scheme.primary.withValues(alpha: dark ? .28 : .13),
-      labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+      indicatorColor: scheme.primary.withValues(alpha: dark ? .24 : .12),
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       iconTheme: WidgetStateProperty.resolveWith(
         (states) => IconThemeData(
           color: states.contains(WidgetState.selected)
@@ -527,98 +454,6 @@ ThemeData _assistantTheme(Brightness brightness, String paletteId) {
   );
 }
 
-class _AmbientGlow extends StatefulWidget {
-  const _AmbientGlow();
-
-  @override
-  State<_AmbientGlow> createState() => _AmbientGlowState();
-}
-
-class _AmbientGlowState extends State<_AmbientGlow>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(seconds: 18),
-  );
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (MediaQuery.disableAnimationsOf(context)) {
-      _controller.stop();
-    } else if (!_controller.isAnimating) {
-      _controller.repeat(reverse: true);
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _controller,
-    builder: (context, _) => CustomPaint(
-      painter: _AmbientPainter(
-        progress: MediaQuery.disableAnimationsOf(context)
-            ? .45
-            : _controller.value,
-        scheme: Theme.of(context).colorScheme,
-      ),
-      child: const SizedBox.expand(),
-    ),
-  );
-}
-
-class _AmbientPainter extends CustomPainter {
-  final double progress;
-  final ColorScheme scheme;
-  const _AmbientPainter({required this.progress, required this.scheme});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (size.isEmpty) return;
-    final dark = scheme.brightness == Brightness.dark;
-    final phase = progress * math.pi * 2;
-    void glow(Offset center, double radius, Color color, double opacity) {
-      final bounds = Rect.fromCircle(center: center, radius: radius);
-      final paint = Paint()
-        ..shader = RadialGradient(
-          colors: [
-            color.withValues(alpha: opacity),
-            color.withValues(alpha: 0),
-          ],
-        ).createShader(bounds);
-      canvas.drawCircle(center, radius, paint);
-    }
-
-    glow(
-      Offset(size.width * (.18 + .14 * math.sin(phase)), size.height * .16),
-      size.width * .78,
-      scheme.primary,
-      dark ? .28 : .24,
-    );
-    glow(
-      Offset(size.width * (.84 - .12 * math.sin(phase)), size.height * .64),
-      size.width * .68,
-      scheme.tertiary,
-      dark ? .22 : .19,
-    );
-    glow(
-      Offset(size.width * (.48 + .10 * math.cos(phase)), size.height * .98),
-      size.width * .56,
-      scheme.secondary,
-      dark ? .14 : .15,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_AmbientPainter oldDelegate) =>
-      oldDelegate.progress != progress || oldDelegate.scheme != scheme;
-}
-
 class Glass extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -632,96 +467,32 @@ class Glass extends StatelessWidget {
     this.padding = const EdgeInsets.all(20),
     this.tintColor,
     this.bottomSpacing = 14,
-    this.borderRadius = const BorderRadius.all(Radius.circular(24)),
+    this.borderRadius = const BorderRadius.all(Radius.circular(20)),
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final dark = theme.brightness == Brightness.dark;
     final surface = tintColor == null
-        ? theme.colorScheme.surface
-        : Color.alphaBlend(
-            tintColor!.withValues(alpha: dark ? .24 : .12),
-            theme.colorScheme.surface,
-          );
+        ? theme.colorScheme.surfaceContainerLow
+        : Color.alphaBlend(tintColor!.withValues(alpha: .08), theme.colorScheme.surfaceContainerLow);
     return Padding(
       padding: EdgeInsets.only(bottom: bottomSpacing),
-      child: DecoratedBox(
+      child: Container(
         decoration: BoxDecoration(
+          color: surface,
           borderRadius: borderRadius,
+          border: Border.all(color: theme.colorScheme.outlineVariant.withValues(alpha: .55)),
           boxShadow: [
             BoxShadow(
-              color: theme.colorScheme.primary.withValues(
-                alpha: dark ? .20 : .13,
-              ),
-              blurRadius: 34,
-              spreadRadius: -3,
-              offset: const Offset(0, 11),
-            ),
-            BoxShadow(
-              color: theme.colorScheme.tertiary.withValues(
-                alpha: dark ? .11 : .08,
-              ),
-              blurRadius: 38,
-              spreadRadius: -8,
-              offset: const Offset(0, 18),
+              color: theme.colorScheme.shadow.withValues(alpha: theme.brightness == Brightness.dark ? .12 : .045),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
-        child: ClipRRect(
-          borderRadius: borderRadius,
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Colors.white.withValues(alpha: dark ? .12 : .70),
-                    surface.withValues(alpha: dark ? .62 : .62),
-                    theme.colorScheme.surfaceContainerHighest.withValues(
-                      alpha: dark ? .28 : .42,
-                    ),
-                  ],
-                ),
-                borderRadius: borderRadius,
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: dark ? .18 : .82),
-                  width: 1,
-                ),
-              ),
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.center,
-                            colors: [
-                              Colors.white.withValues(alpha: dark ? .07 : .30),
-                              Colors.transparent,
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: padding,
-                    child: Material(
-                      type: MaterialType.transparency,
-                      child: child,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
+        padding: padding,
+        child: Material(type: MaterialType.transparency, child: child),
       ),
     );
   }
@@ -2699,6 +2470,10 @@ class _SettingsState extends State<Settings> {
             'Your chats, approved memories, notes, tasks and study records stay on this phone. AI is optional: offline inference is not installed; online requests require an explicit payload review. The private FastAPI adapter remains optional, not a requirement for local tools.',
           ),
         ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
+          child: Text('PRIVACY & APP ACCESS', style: Theme.of(context).textTheme.labelLarge?.copyWith(letterSpacing: 1.1, color: Theme.of(context).colorScheme.primary)),
+        ),
         Glass(
           child: SwitchListTile(
             contentPadding: EdgeInsets.zero,
@@ -2726,6 +2501,10 @@ class _SettingsState extends State<Settings> {
               'Require your phone’s biometric or screen lock when opening or returning to the app.',
             ),
           ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
+          child: Text('VOICE & AI', style: Theme.of(context).textTheme.labelLarge?.copyWith(letterSpacing: 1.1, color: Theme.of(context).colorScheme.primary)),
         ),
         Glass(
           child: Column(
@@ -2764,11 +2543,11 @@ class _SettingsState extends State<Settings> {
                 decoration: const InputDecoration(labelText: 'AI engine'),
                 items: [
                   for (final item in {
-                    'offline': 'Offline · model not installed',
+                    'offline': 'Offline · not qualified / unavailable',
                     'compatible': 'Online · OpenAI-compatible',
                     'private_service': 'Online · private FastAPI',
                   }.entries)
-                    DropdownMenuItem(value: item.key, child: Text(item.value)),
+                    DropdownMenuItem(value: item.key, enabled: item.key != 'offline' || engine == 'offline', child: Text(item.value)),
                 ],
                 onChanged: (v) => setState(() => engine = v!),
               ),
@@ -2892,7 +2671,7 @@ class _SettingsState extends State<Settings> {
                   ),
               ] else
                 const Text(
-                  'Offline AI is unavailable: no model is installed. No online fallback will be used.',
+                  'Offline AI is not qualified and cannot handle chat. The Gemma candidate below is isolated to fixed screening prompts; there is no online fallback.',
                 ),
               const SizedBox(height: 16),
               FuturisticThemePicker(state: widget.state),
@@ -2969,6 +2748,15 @@ class _SettingsState extends State<Settings> {
                 ),
             ],
           ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
+          child: Text('LOCAL MODEL SCREENING', style: Theme.of(context).textTheme.labelLarge?.copyWith(letterSpacing: 1.1, color: Theme.of(context).colorScheme.primary)),
+        ),
+        const OfflineModelPanel(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
+          child: Text('CONNECTIONS', style: Theme.of(context).textTheme.labelLarge?.copyWith(letterSpacing: 1.1, color: Theme.of(context).colorScheme.primary)),
         ),
         CustomMcpPanel(state: widget.state),
         TextButton(
