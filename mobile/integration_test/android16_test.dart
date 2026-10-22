@@ -101,11 +101,11 @@ void main() {
       expect(find.text('API36 Test assistant'), findsOneWidget);
       phase('initial app frame settled');
       // Exercise the labels the glass dock actually exposes; Actions opens
-      // automations and Library opens the combined memory/library destination.
+      // automations and Memory opens the combined memory/library destination.
       for (final label in [
         'Chat',
         'Actions',
-        'Library',
+        'Memory',
         'Settings',
         'Home',
       ]) {
