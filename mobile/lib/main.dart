@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
 
@@ -711,6 +712,7 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final input = TextEditingController();
   static const voiceEvents = MethodChannel('personal_assistant/voice');
+  static const audioEvents = MethodChannel('personal_assistant/audio');
   final tts = FlutterTts();
   bool listening = false, speaking = false;
   double level = 0;
@@ -751,6 +753,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       });
       if (event['kind'] == 'error') notice(context, event['value'].toString());
     });
+    audioEvents.setMethodCallHandler((call) async {
+      if (!mounted || call.method != 'audio_event') return;
+      final event = Map<String, dynamic>.from(call.arguments);
+      if (event['kind'] == 'completed' || event['kind'] == 'error') {
+        if (mounted) setState(() => speaking = false);
+        if (event['kind'] == 'error' && mounted) {
+          notice(
+            context,
+            'Expressive voice playback stopped; the reply remains readable.',
+          );
+        }
+      }
+    });
   }
 
   @override
@@ -758,6 +773,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (state != AppLifecycleState.resumed) {
       AssistantState.device.invokeMethod('voice_cancel');
       tts.stop();
+      if (speaking) unawaited(stopExpressiveAudio());
       widget.state.stop();
       if (mounted) {
         setState(() {
@@ -768,10 +784,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> stopExpressiveAudio() async {
+    try {
+      await audioEvents.invokeMethod('stop_audio');
+    } on MissingPluginException {
+      // Platforms without the Android playback channel keep other chat controls usable.
+    } on PlatformException {
+      // Stopping optional audio must not block microphone or typed chat.
+    }
+  }
+
   Future<void> stopAll() async {
     widget.state.stop();
     await AssistantState.device.invokeMethod('voice_cancel');
     await tts.stop();
+    if (speaking) await stopExpressiveAudio();
     if (mounted) {
       setState(() {
         listening = false;
@@ -826,6 +853,100 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> playExpressiveVoice(String text) async {
+    if (speaking) {
+      await stopAll();
+      return;
+    }
+    var style = 'neutral';
+    final approved =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => StatefulBuilder(
+            builder: (dialogContext, setDialogState) => AlertDialog(
+              title: const Text('Generate expressive voice?'),
+              scrollable: true,
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'This sends the selected reply text to your private service and then to ElevenLabs. ElevenLabs retains text and generated-audio history by default. Avoid sending private text unless you accept this retention. Zero Retention is available only to some Enterprise accounts. It can use credits from the account configured on that service. Nothing is generated until you confirm here.',
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    initialValue: style,
+                    decoration: const InputDecoration(labelText: 'Expression'),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'neutral',
+                        child: Text('Natural'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'curious',
+                        child: Text('Curious'),
+                      ),
+                      DropdownMenuItem(value: 'crying', child: Text('Crying')),
+                      DropdownMenuItem(
+                        value: 'mischievous',
+                        child: Text('Mischievous'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'whispering',
+                        child: Text('Whispering'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'shouting',
+                        child: Text('Shouting'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'laughing',
+                        child: Text('Laughing'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'sighing',
+                        child: Text('Sighing'),
+                      ),
+                    ],
+                    onChanged: (value) =>
+                        setDialogState(() => style = value ?? 'neutral'),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'These documented audio tags guide delivery; they cannot guarantee every emotion or a particular performance.',
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  child: const Text('Generate once'),
+                ),
+              ],
+            ),
+          ),
+        ) ??
+        false;
+    if (!approved || !mounted) return;
+    setState(() => speaking = true);
+    try {
+      final audio = await widget.state.synthesizeElevenLabs(text, style);
+      await audioEvents.invokeMethod('play_audio', {'bytes': audio});
+    } catch (e) {
+      if (mounted) {
+        setState(() => speaking = false);
+        if (e is! PlatformException || e.code != 'cancelled') {
+          notice(context, e);
+        }
+      }
+    }
+  }
+
   Future<void> send([String? retry]) async {
     final text = retry ?? input.text;
     if (text.trim().isEmpty) {
@@ -833,6 +954,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     await AssistantState.device.invokeMethod('voice_cancel');
     await tts.stop();
+    if (speaking) await stopExpressiveAudio();
     if (mounted) {
       setState(() => listening = false);
     }
@@ -897,6 +1019,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     voiceEvents.setMethodCallHandler(null);
+    audioEvents.setMethodCallHandler(null);
+    if (speaking) unawaited(stopExpressiveAudio());
     AssistantState.device.invokeMethod('voice_cancel');
     tts.stop();
     widget.state.stop(notify: false);
@@ -1047,6 +1171,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                   'Links are not opened automatically. Review and copy the destination if needed.',
                                 ),
                               ),
+                              if (m['state'] == 'complete' &&
+                                  m['role'] == 'assistant')
+                                TextButton.icon(
+                                  onPressed: () =>
+                                      playExpressiveVoice(m['text'] as String),
+                                  icon: Icon(
+                                    speaking
+                                        ? Icons.stop_circle_outlined
+                                        : Icons.record_voice_over,
+                                  ),
+                                  label: Text(
+                                    speaking
+                                        ? 'Stop voice'
+                                        : 'Play expressive voice',
+                                  ),
+                                ),
                               if (m['state'] != 'complete')
                                 const Text(
                                   'Interrupted • not a completed reply',
@@ -1326,7 +1466,11 @@ class _SettingsState extends State<Settings> {
               ),
               const SizedBox(height: 16),
               const Text(
-                'Online providers may retain submitted content and charge your account. Configure only your own authorized service. No provider key is bundled. Offline never falls back online.',
+                'ElevenLabs expressive voice is on-demand per reply. It sends only that reply through your private service; each play asks first and may use your account credits. The ElevenLabs key and voice ID must be configured on the service host and are never stored in this APK. Audio tags guide delivery but do not guarantee an emotion. No provider key is bundled. Offline never falls back online.',
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Online providers may retain submitted content and charge your account. Configure only your own authorized service. Offline never falls back online.',
               ),
               TextField(
                 controller: url,

@@ -9,6 +9,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaPlayer
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
@@ -30,10 +31,58 @@ class MainActivity : FlutterFragmentActivity() {
     private var exportText: String? = null
     private var voice: SpeechRecognizer? = null
     private var voiceChannel: MethodChannel? = null
+    private var audioChannel: MethodChannel? = null
+    private var audioPlayer: MediaPlayer? = null
+    private var audioFile: java.io.File? = null
+    private var audioStartResult: MethodChannel.Result? = null
     private var voicePermission: MethodChannel.Result? = null
     private var voiceArgs: Map<*,*>? = null
     private fun voiceEvent(kind:String, value:Any? = null) { voiceChannel?.invokeMethod("voice_event",mapOf("kind" to kind,"value" to value)) }
     private fun stopVoice() { voice?.cancel();voice?.destroy();voice=null;voiceEvent("stopped") }
+    private fun stopAudio() {
+        val pending = audioStartResult
+        audioStartResult = null
+        try { audioPlayer?.setOnPreparedListener(null); audioPlayer?.setOnCompletionListener(null); audioPlayer?.setOnErrorListener(null); audioPlayer?.release() } catch (_: Exception) {}
+        audioPlayer = null
+        try { audioFile?.delete() } catch (_: Exception) {}
+        audioFile = null
+        pending?.error("cancelled", "Audio playback stopped", null)
+    }
+    private fun playAudio(args: Map<*, *>, result: MethodChannel.Result) {
+        stopAudio()
+        val bytes = args["bytes"] as? ByteArray
+        if (bytes == null || bytes.isEmpty() || bytes.size > 12_000_000) {
+            result.error("invalid_audio", "Audio is missing or exceeds the playback limit", null); return
+        }
+        try {
+            val file = java.io.File.createTempFile("assistant-voice-", ".mp3", cacheDir)
+            file.writeBytes(bytes)
+            val player = MediaPlayer()
+            audioFile = file; audioPlayer = player; audioStartResult = result
+            player.setOnPreparedListener { prepared ->
+                if (audioPlayer !== prepared) return@setOnPreparedListener
+                val pending = audioStartResult; audioStartResult = null
+                try { prepared.start(); pending?.success(mapOf("started" to true)) }
+                catch (_: Exception) { pending?.error("playback_failed", "Audio could not start", null); stopAudio() }
+            }
+            player.setOnCompletionListener {
+                stopAudio()
+                audioChannel?.invokeMethod("audio_event", mapOf("kind" to "completed"))
+            }
+            player.setOnErrorListener { _, _, _ ->
+                val pending = audioStartResult; audioStartResult = null
+                stopAudio()
+                pending?.error("playback_failed", "Audio playback failed", null)
+                audioChannel?.invokeMethod("audio_event", mapOf("kind" to "error"))
+                true
+            }
+            player.setDataSource(file.absolutePath)
+            player.prepareAsync()
+        } catch (_: Exception) {
+            stopAudio()
+            result.error("playback_failed", "Audio could not be prepared", null)
+        }
+    }
     private fun startVoice(args:Map<*,*>, result:MethodChannel.Result) {
         val mode=args["mode"] as? String
         val locale=args["locale"] as? String
@@ -73,12 +122,20 @@ class MainActivity : FlutterFragmentActivity() {
             } else {recognizer.startListening(intent);result.success(mapOf("started" to true,"mode" to "online"))}
         } catch(_:Exception) {stopVoice();result.error("unavailable","Speech could not start; typing remains available",null)}
     }
-    override fun onPause() {stopVoice();super.onPause()}
-    override fun onDestroy() {stopVoice();super.onDestroy()}
+    override fun onPause() {stopVoice();stopAudio();super.onPause()}
+    override fun onDestroy() {stopVoice();stopAudio();super.onDestroy()}
     private var fileResult: MethodChannel.Result? = null
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
         voiceChannel=MethodChannel(engine.dartExecutor.binaryMessenger,"personal_assistant/voice")
+        audioChannel=MethodChannel(engine.dartExecutor.binaryMessenger,"personal_assistant/audio")
+        audioChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "play_audio" -> playAudio(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
+                "stop_audio" -> { stopAudio(); result.success(true) }
+                else -> result.notImplemented()
+            }
+        }
         MethodChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/device").setMethodCallHandler { call, result ->
             when (call.method) {
                 "device_status" -> result.success(mapOf(

@@ -80,6 +80,46 @@ async def test_failure_and_unconfigured(tmp_path):
         assert (await c.post('/chat',json={'conversation':'a','text':'hi'})).status_code==503
         assert (await c.get('/health')).json()['provider_configured'] is False
 
+class FakeVoice:
+    def __init__(self): self.calls=[]
+    async def synthesize(self, text, style):
+        self.calls.append((text,style))
+        return b"fake-mp3-audio"
+
+async def test_voice_requires_configuration_auth_and_explicit_valid_payload(tmp_path):
+    app=create_app(tmp_path/"voice-off",token=TOKEN)
+    async with AsyncClient(transport=ASGITransport(app=app),base_url="http://test",headers={"Authorization":"Bearer "+TOKEN}) as c:
+        assert (await c.post("/voice/speech",json={"text":"hello","style":"curious"})).status_code==503
+        assert (await c.post("/voice/speech",json={"text":"hello"},headers={"Authorization":"bad"})).status_code==401
+        assert (await c.post("/voice/speech",json={"text":"hello","style":"invented"})).status_code==422
+        assert (await c.post("/voice/speech",json={"text":"hello","style":"neutral","api_key":"leak"})).status_code==422
+    voice=FakeVoice(); app=create_app(tmp_path/"voice-on",token=TOKEN,voice_provider=voice)
+    async with AsyncClient(transport=ASGITransport(app=app),base_url="http://test",headers={"Authorization":"Bearer "+TOKEN}) as c:
+        response=await c.post("/voice/speech",json={"text":"A reply","style":"whispering"})
+        assert response.status_code==200
+        assert response.headers["content-type"]=="audio/mpeg"
+        assert response.headers["cache-control"]=="no-store"
+        assert response.content==b"fake-mp3-audio"
+        assert voice.calls==[("A reply","whispering")]
+
+async def test_elevenlabs_adapter_uses_server_key_and_official_tag_without_live_calls(monkeypatch):
+    import httpx
+    original=httpx.AsyncClient
+    seen=[]
+    def handler(request):
+        seen.append(request)
+        assert request.url.host=="api.elevenlabs.io"
+        assert request.url.path=="/v1/text-to-speech/voice_12345678"
+        assert request.url.query==b"output_format=mp3_44100_128"
+        assert request.headers["xi-api-key"]=="server-secret-test-only"
+        payload=json.loads(request.content)
+        assert payload=={"text":"[curious] Is this working?","model_id":"eleven_v4"}
+        return httpx.Response(200,content=b"mock-audio",headers={"content-type":"audio/mpeg"})
+    monkeypatch.setattr(httpx,"AsyncClient",lambda **kw:original(transport=httpx.MockTransport(handler),**kw))
+    voice=__import__("app").ElevenLabsVoice("server-secret-test-only","voice_12345678")
+    assert await voice.synthesize("Is this working?","curious")==b"mock-audio"
+    assert len(seen)==1
+
 def test_token_and_provider_host(tmp_path):
     with pytest.raises(ValueError): create_app(tmp_path/'a',token='short')
     with pytest.raises(ValueError): Ollama('model','https://public.example')

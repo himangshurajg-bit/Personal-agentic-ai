@@ -14,7 +14,7 @@ from typing import Annotated, AsyncIterator, Literal, Protocol, Union
 import re
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class Strict(BaseModel):
@@ -47,6 +47,10 @@ class Receipt(Strict):
     result: Literal["scheduled", "opened", "denied", "failed", "unknown"]
     detail: str = Field(max_length=300)
 
+class SpeechRequest(Strict):
+    text: str = Field(min_length=1, max_length=2000)
+    style: Literal["neutral", "curious", "crying", "mischievous", "whispering", "shouting", "laughing", "sighing"] = "neutral"
+
 class Provider(Protocol):
     async def stream(self, messages: list[dict]) -> AsyncIterator[str]: ...
 class Unconfigured:
@@ -75,6 +79,54 @@ class Ollama:
                         if obj.get("done") is True: completed=True
                 if not completed: raise RuntimeError("Local model stream ended before completion")
 
+VOICE_TAGS = {
+    "neutral": "",
+    "curious": "[curious]",
+    "crying": "[crying]",
+    "mischievous": "[mischievously]",
+    "whispering": "[whispers]",
+    "shouting": "[shouts]",
+    "laughing": "[laughs]",
+    "sighing": "[sighs]",
+}
+
+class VoiceProvider(Protocol):
+    async def synthesize(self, text: str, style: str) -> bytes: ...
+
+class ElevenLabsVoice:
+    """Server-side ElevenLabs adapter; the API key never leaves this process."""
+    def __init__(self, api_key: str, voice_id: str, model: str = "eleven_v4"):
+        if not api_key or len(api_key) > 512 or "\n" in api_key or "\r" in api_key:
+            raise ValueError("Invalid ElevenLabs API key configuration")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", voice_id):
+            raise ValueError("Invalid ElevenLabs voice ID configuration")
+        if model not in {"eleven_v4", "eleven_v4_turbo"}:
+            raise ValueError("Unsupported ElevenLabs model configuration")
+        self.api_key, self.voice_id, self.model = api_key, voice_id, model
+
+    async def synthesize(self, text: str, style: str) -> bytes:
+        tag = VOICE_TAGS[style]
+        spoken = f"{tag} {text}" if tag else text
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}?output_format=mp3_44100_128"
+        async with httpx.AsyncClient(timeout=httpx.Timeout(45, connect=5), follow_redirects=False) as client:
+            async with client.stream(
+                "POST", url,
+                headers={"xi-api-key": self.api_key, "Content-Type": "application/json", "Accept": "audio/mpeg"},
+                json={"text": spoken, "model_id": self.model},
+            ) as response:
+                if response.status_code != 200:
+                    raise RuntimeError("ElevenLabs returned an unsuccessful response")
+                chunks=[]
+                total=0
+                async for chunk in response.aiter_bytes():
+                    total += len(chunk)
+                    if total > 12_000_000:
+                        raise RuntimeError("Generated audio exceeded the size limit")
+                    chunks.append(chunk)
+        if not chunks:
+            raise RuntimeError("ElevenLabs returned no audio")
+        return b"".join(chunks)
+
 class Store:
     def __init__(self, path):
         self.path=str(path)
@@ -99,16 +151,23 @@ CREATE TABLE IF NOT EXISTS actions(id TEXT PRIMARY KEY, payload TEXT NOT NULL, t
         scored=[(len(words & set(re.findall(r"\w+",r["fact"].casefold()))),r) for r in rows]
         return [r["fact"] for n,r in sorted(scored,key=lambda p:p[0],reverse=True)[:5] if n]
 
-def create_app(path=None, provider=None, token=None):
+def create_app(path=None, provider=None, token=None, voice_provider=None):
     token=token if token is not None else os.environ.get("ASSISTANT_TOKEN", "")
     if len(token)<24: raise ValueError("Set ASSISTANT_TOKEN to at least 24 random characters")
     store=Store(path or os.environ.get("ASSISTANT_DB","assistant.sqlite3"))
     if provider is None:
         model=os.environ.get("OLLAMA_MODEL")
         provider=Ollama(model,os.environ.get("OLLAMA_URL","http://127.0.0.1:11434")) if model else Unconfigured()
+    if voice_provider is None:
+        key=os.environ.get("ELEVENLABS_API_KEY", "")
+        voice_id=os.environ.get("ELEVENLABS_VOICE_ID", "")
+        if key and voice_id:
+            voice_provider=ElevenLabsVoice(key, voice_id, os.environ.get("ELEVENLABS_MODEL_ID", "eleven_v4"))
     app=FastAPI(title="Personal assistant private service",docs_url=None,redoc_url=None,openapi_url=None)
     app.state.store=store
+    app.state.voice_provider=voice_provider
     calls=defaultdict(deque)
+    voice_calls=deque()
     active=set()
     async def auth(request: Request):
         supplied=request.headers.get("authorization","").removeprefix("Bearer ")
@@ -118,6 +177,24 @@ def create_app(path=None, provider=None, token=None):
     @app.get("/health")
     async def health(_=Depends(auth)):
         return {"ok":True,"provider_configured":not isinstance(provider,Unconfigured)}
+    @app.post("/voice/speech")
+    async def voice_speech(body: SpeechRequest, _=Depends(auth)):
+        if voice_provider is None:
+            raise HTTPException(503, "ElevenLabs voice is not configured on this private service")
+        now=time.monotonic()
+        while voice_calls and voice_calls[0] < now-60: voice_calls.popleft()
+        if len(voice_calls) >= 3:
+            raise HTTPException(429, "Voice generation limit reached; wait one minute")
+        voice_calls.append(now)
+        try:
+            audio=await asyncio.wait_for(voice_provider.synthesize(body.text, body.style), timeout=50)
+        except TimeoutError:
+            raise HTTPException(504, "Voice generation timed out; nothing was retried")
+        except Exception:
+            raise HTTPException(502, "Voice provider did not return usable audio; nothing was retried")
+        if not audio or len(audio) > 12_000_000:
+            raise HTTPException(502, "Voice provider returned unusable audio")
+        return Response(audio, media_type="audio/mpeg", headers={"Cache-Control":"no-store", "X-Content-Type-Options":"nosniff"})
     @app.get("/conversations")
     async def conversations(_=Depends(auth)):
         with store.db() as db:

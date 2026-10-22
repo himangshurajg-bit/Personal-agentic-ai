@@ -402,6 +402,83 @@ class AssistantState extends ChangeNotifier {
     }
   }
 
+  Future<Uint8List> synthesizeElevenLabs(String text, String style) async {
+    if (text.trim().isEmpty || text.length > 2000) {
+      throw ServiceException('Choose a reply with 1–2,000 characters.');
+    }
+    if (!const [
+      'neutral',
+      'curious',
+      'crying',
+      'mischievous',
+      'whispering',
+      'shouting',
+      'laughing',
+      'sighing',
+    ].contains(style)) {
+      throw ServiceException('Unsupported expressive voice style.');
+    }
+    if (token.isEmpty) {
+      throw ServiceException(
+        'Connect your private service first. ElevenLabs credentials are kept on the service, not in this app.',
+      );
+    }
+    final client = clientFactory();
+    try {
+      final req =
+          http.Request(
+              'POST',
+              checkedEndpoint(endpoint).resolve('/voice/speech'),
+            )
+            ..followRedirects = false
+            ..headers.addAll(headers)
+            ..headers['Accept'] = 'audio/mpeg'
+            ..body = jsonEncode({'text': text, 'style': style});
+      final response = await client
+          .send(req)
+          .timeout(const Duration(seconds: 55));
+      if (response.statusCode == 503) {
+        throw ServiceException(
+          'ElevenLabs is not configured on the private service. No audio was generated.',
+        );
+      }
+      if (response.statusCode == 429) {
+        throw ServiceException(
+          'The voice limit was reached. Wait a minute before choosing another reply.',
+        );
+      }
+      if (response.statusCode >= 300) {
+        throw ServiceException(
+          'Voice generation failed (${response.statusCode}); nothing was retried.',
+        );
+      }
+      if (!(response.headers['content-type'] ?? '').toLowerCase().startsWith(
+        'audio/mpeg',
+      )) {
+        throw ServiceException(
+          'The service returned an unexpected audio format.',
+        );
+      }
+      final bytes = await response.stream.toBytes().timeout(
+        const Duration(seconds: 55),
+      );
+      if (bytes.isEmpty || bytes.length > 12000000) {
+        throw ServiceException('The audio was empty or too large to play.');
+      }
+      return Uint8List.fromList(bytes);
+    } on TimeoutException {
+      throw ServiceException(
+        'Voice generation timed out. Nothing was retried.',
+      );
+    } on http.ClientException {
+      throw ServiceException(
+        'Could not reach the private service. Nothing was retried.',
+      );
+    } finally {
+      client.close();
+    }
+  }
+
   static String describeStatus(int status) => switch (status) {
     401 => 'Service token rejected. Check Settings.',
     409 => 'This request is already running, expired or already used. Check its outcome before trying again.',
