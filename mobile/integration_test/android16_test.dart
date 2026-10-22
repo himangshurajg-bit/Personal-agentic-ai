@@ -131,8 +131,11 @@ void main() {
         'Settings',
         'Home',
       ]) {
+        phase('navigation tap started: $label');
         await tester.tap(find.text(label).last);
+        phase('navigation tap completed: $label');
         await pumpRouteFrames(tester);
+        phase('navigation settled: $label');
         expect(tester.takeException(), isNull);
       }
       phase('glass dock navigation passed');
