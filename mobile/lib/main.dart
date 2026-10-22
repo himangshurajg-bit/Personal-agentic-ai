@@ -57,18 +57,8 @@ class _AssistantAppState extends State<AssistantApp>
     builder: (context, _) => MaterialApp(
       title: widget.state.assistantName,
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff5267a6)),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xffa9b9ef),
-          brightness: Brightness.dark,
-        ),
-        scaffoldBackgroundColor: const Color(0xff101827),
-        useMaterial3: true,
-      ),
+      theme: _assistantTheme(Brightness.light),
+      darkTheme: _assistantTheme(Brightness.dark),
       themeMode: widget.state.theme == 'dark'
           ? ThemeMode.dark
           : widget.state.theme == 'light'
@@ -93,6 +83,55 @@ class _AssistantAppState extends State<AssistantApp>
         '/files': (_) => SelectedFiles(state: widget.state),
         '/automations': (_) => ActionHistory(state: widget.state),
       },
+    ),
+  );
+}
+
+ThemeData _assistantTheme(Brightness brightness) {
+  final scheme = ColorScheme.fromSeed(
+    seedColor: brightness == Brightness.dark
+        ? const Color(0xffb8c8ff)
+        : const Color(0xff536fbd),
+    brightness: brightness,
+  );
+  final outline = scheme.outlineVariant.withValues(alpha: .62);
+  return ThemeData(
+    colorScheme: scheme,
+    useMaterial3: true,
+    scaffoldBackgroundColor: brightness == Brightness.dark
+        ? const Color(0xff101522)
+        : const Color(0xfff4f6fb),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: scheme.surface.withValues(alpha: .64),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide(color: outline),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide(color: outline),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide(color: scheme.primary, width: 1.7),
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(17),
+          side: BorderSide(color: scheme.primary.withValues(alpha: .34)),
+        ),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        side: BorderSide(color: scheme.outline.withValues(alpha: .56)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(17)),
+      ),
     ),
   );
 }
@@ -221,7 +260,7 @@ class Shell extends StatelessWidget {
   Widget build(BuildContext context) => Scaffold(
     bottomNavigationBar: !primaryNavigation
         ? null
-        : NavigationBar(
+        : _GlassDock(
             selectedIndex: switch (ModalRoute.of(context)?.settings.name) {
               '/chat' => 1,
               '/study' => 1,
@@ -232,7 +271,7 @@ class Shell extends StatelessWidget {
               '/settings' => 4,
               _ => 0,
             },
-            onDestinationSelected: (i) {
+            onSelected: (i) {
               final route = [
                 '/home',
                 '/chat',
@@ -244,25 +283,6 @@ class Shell extends StatelessWidget {
                 Navigator.pushReplacementNamed(context, route);
               }
             },
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.home_outlined),
-                label: 'Home',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.chat_bubble_outline),
-                label: 'Chat',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.bolt_outlined),
-                label: 'Automations',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.library_books_outlined),
-                label: 'Memory & Library',
-              ),
-              NavigationDestination(icon: Icon(Icons.tune), label: 'Settings'),
-            ],
           ),
     appBar: AppBar(
       title: Text(title),
@@ -276,7 +296,7 @@ class Shell extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: Theme.of(context).brightness == Brightness.dark
               ? const [Color(0xff19283e), Color(0xff111722), Color(0xff263139)]
-              : const [Color(0xffe4ecfc), Color(0xfff5f6fb), Color(0xffe1efec)],
+              : const [Color(0xffe5ebff), Color(0xfff7f8fc), Color(0xffe9e8ff)],
         ),
       ),
       child: SafeArea(
@@ -293,6 +313,139 @@ class Shell extends StatelessWidget {
   );
 }
 
+class _GlassDock extends StatelessWidget {
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+  const _GlassDock({required this.selectedIndex, required this.onSelected});
+
+  static const _items = [
+    (Icons.home_rounded, 'Home'),
+    (Icons.chat_bubble_rounded, 'Chat'),
+    (Icons.bolt_rounded, 'Actions'),
+    (Icons.auto_stories_rounded, 'Library'),
+    (Icons.tune_rounded, 'Settings'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 5, 12, 9),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(28),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 6),
+              decoration: BoxDecoration(
+                color: scheme.surface.withValues(alpha: .77),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(
+                  color: scheme.onSurface.withValues(alpha: .15),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: scheme.primary.withValues(alpha: .10),
+                    blurRadius: 26,
+                    spreadRadius: -8,
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  for (var i = 0; i < _items.length; i++)
+                    Expanded(
+                      child: Semantics(
+                        button: true,
+                        selected: i == selectedIndex,
+                        label: _items[i].$2,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 2),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(22),
+                            splashColor: scheme.primary.withValues(alpha: .16),
+                            highlightColor: scheme.primary.withValues(
+                              alpha: .09,
+                            ),
+                            onTap: () => onSelected(i),
+                            child: AnimatedContainer(
+                              duration: Duration(
+                                milliseconds: reduceMotion ? 0 : 180,
+                              ),
+                              constraints: const BoxConstraints(minHeight: 50),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 2,
+                                vertical: 5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: i == selectedIndex
+                                    ? scheme.primary.withValues(alpha: .14)
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(22),
+                                border: Border.all(
+                                  color: i == selectedIndex
+                                      ? scheme.primary.withValues(alpha: .28)
+                                      : Colors.transparent,
+                                ),
+                                boxShadow: i == selectedIndex
+                                    ? [
+                                        BoxShadow(
+                                          color: scheme.primary.withValues(
+                                            alpha: .14,
+                                          ),
+                                          blurRadius: 14,
+                                          spreadRadius: -4,
+                                        ),
+                                      ]
+                                    : const [],
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _items[i].$1,
+                                    size: 20,
+                                    color: i == selectedIndex
+                                        ? scheme.primary
+                                        : scheme.onSurfaceVariant,
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _items[i].$2,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(
+                                          color: i == selectedIndex
+                                              ? scheme.primary
+                                              : scheme.onSurfaceVariant,
+                                          fontWeight: i == selectedIndex
+                                              ? FontWeight.w700
+                                              : FontWeight.w500,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class Glass extends StatelessWidget {
   final Widget child;
   const Glass({super.key, required this.child});
@@ -306,12 +459,21 @@ class Glass extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface.withValues(alpha: .75),
+            color: Theme.of(context).colorScheme.surface.withValues(alpha: .68),
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
-              color: Theme.of(context).colorScheme.outline
-                  .withValues(alpha: .25),
+              color: Theme.of(context).colorScheme.onSurface
+                  .withValues(alpha: .13),
             ),
+            boxShadow: [
+              BoxShadow(
+                color: Theme.of(context).colorScheme.primary
+                    .withValues(alpha: .07),
+                blurRadius: 24,
+                spreadRadius: -7,
+                offset: const Offset(0, 8),
+              ),
+            ],
           ),
           child: Material(type: MaterialType.transparency, child: child),
         ),
@@ -1327,8 +1489,14 @@ class Settings extends StatefulWidget {
 }
 
 class _SettingsState extends State<Settings> {
-  late final url = TextEditingController(text: widget.state.endpoint);
-  late final token = TextEditingController(text: widget.state.token);
+  late final serviceUrl = TextEditingController(
+    text: widget.state.privateServiceEndpoint,
+  );
+  late final compatibleUrl = TextEditingController(
+    text: widget.state.compatibleApiEndpoint,
+  );
+  final serviceSecret = TextEditingController();
+  final compatibleSecret = TextEditingController();
   late String speechMode = widget.state.speechMode;
   late String theme = widget.state.theme;
   late String engine = widget.state.engine, language = widget.state.language;
@@ -1347,11 +1515,41 @@ class _SettingsState extends State<Settings> {
   @override
   void dispose() {
     widget.state.removeListener(_stateChanged);
-    url.dispose();
-    token.dispose();
+    serviceUrl.dispose();
+    compatibleUrl.dispose();
+    serviceSecret.dispose();
+    compatibleSecret.dispose();
     model.dispose();
     name.dispose();
     super.dispose();
+  }
+
+  Future<void> _clearCredential({required bool compatible}) async {
+    final label = compatible ? 'API key' : 'private service token';
+    final remove =
+        await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('Clear $label?'),
+            content: const Text(
+              'This removes the saved credential from this phone. It does not revoke it at the provider.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Keep'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Clear'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!remove || !mounted) return;
+    await widget.state.clearProviderCredential(compatible: compatible);
+    if (mounted) notice(context, '$label cleared from this phone.');
   }
 
   @override
@@ -1436,10 +1634,7 @@ class _SettingsState extends State<Settings> {
                   }.entries)
                     DropdownMenuItem(value: item.key, child: Text(item.value)),
                 ],
-                onChanged: (v) => setState(() {
-                  engine = v!;
-                  token.clear();
-                }),
+                onChanged: (v) => setState(() => engine = v!),
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
@@ -1458,13 +1653,6 @@ class _SettingsState extends State<Settings> {
                 onChanged: (v) => setState(() => language = v!),
               ),
               const SizedBox(height: 16),
-              TextField(
-                controller: model,
-                decoration: const InputDecoration(
-                  labelText: 'Model identifier (compatible provider)',
-                ),
-              ),
-              const SizedBox(height: 16),
               const Text(
                 'ElevenLabs expressive voice is on-demand per reply. It sends only that reply through your private service; each play asks first and may use your account credits. The ElevenLabs key and voice ID must be configured on the service host and are never stored in this APK. Audio tags guide delivery but do not guarantee an emotion. No provider key is bundled. Offline never falls back online.',
               ),
@@ -1472,21 +1660,104 @@ class _SettingsState extends State<Settings> {
               const Text(
                 'Online providers may retain submitted content and charge your account. Configure only your own authorized service. Offline never falls back online.',
               ),
-              TextField(
-                controller: url,
-                decoration: const InputDecoration(labelText: 'Service origin'),
-                keyboardType: TextInputType.url,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: token,
-                obscureText: true,
-                autocorrect: false,
-                enableSuggestions: false,
-                decoration: const InputDecoration(
-                  labelText: 'Provider / private-service token',
+              if (engine == 'compatible') ...[
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('OpenAI-compatible API'),
                 ),
-              ),
+                TextField(
+                  controller: compatibleUrl,
+                  keyboardType: TextInputType.url,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'HTTPS API origin',
+                    hintText: 'https://api.example.com',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: model,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Model ID',
+                    hintText: 'Use the exact model name from your provider',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'API key: ${widget.state.compatibleApiKey.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
+                ),
+                TextField(
+                  controller: compatibleSecret,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  autofillHints: const [],
+                  decoration: const InputDecoration(
+                    labelText: 'API key',
+                    hintText: 'Enter a new key to replace the saved key',
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Keys are kept in Android secure storage, are not shown again, and are sent only as authentication when you approve an online request. Leave blank to keep the saved key.',
+                ),
+                if (widget.state.compatibleApiKey.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => _clearCredential(compatible: true),
+                      icon: const Icon(Icons.key_off),
+                      label: const Text('Clear API key'),
+                    ),
+                  ),
+              ] else if (engine == 'private_service') ...[
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Private FastAPI service'),
+                ),
+                TextField(
+                  controller: serviceUrl,
+                  keyboardType: TextInputType.url,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Service origin',
+                    hintText: 'https://your-private-service.example',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Service token: ${widget.state.privateServiceToken.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
+                ),
+                TextField(
+                  controller: serviceSecret,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  autofillHints: const [],
+                  decoration: const InputDecoration(
+                    labelText: 'Private service token',
+                    hintText: 'Enter a new token to replace the saved token',
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Leave blank to keep the saved token. The service remains separate from public provider credentials.',
+                ),
+                if (widget.state.privateServiceToken.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => _clearCredential(compatible: false),
+                      icon: const Icon(Icons.key_off),
+                      label: const Text('Clear service token'),
+                    ),
+                  ),
+              ] else
+                const Text(
+                  'Offline AI is unavailable: no model is installed. No online fallback will be used.',
+                ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
                 isExpanded: true,
@@ -1503,10 +1774,14 @@ class _SettingsState extends State<Settings> {
                 onPressed: () async {
                   try {
                     await widget.state.saveSettings(
-                      url.text,
-                      token.text,
+                      serviceUrl.text,
+                      serviceSecret.text,
                       theme,
+                      compatibleUrl: compatibleUrl.text,
+                      compatibleSecret: compatibleSecret.text,
                     );
+                    serviceSecret.clear();
+                    compatibleSecret.clear();
                     await widget.state.setAssistantName(name.text);
                     await widget.state.saveSpeechMode(speechMode);
                     await widget.state.saveEngine(engine, model.text, language);
@@ -1521,26 +1796,30 @@ class _SettingsState extends State<Settings> {
                 },
                 child: const Text('Save settings'),
               ),
-              TextButton(
-                onPressed: () async {
-                  try {
-                    final result = await widget.state.request('GET', '/health');
-                    if (context.mounted) {
-                      notice(
-                        context,
-                        result['provider_configured'] == true
-                            ? 'Service reachable; model configured.'
-                            : 'Service reachable; no AI provider configured.',
+              if (engine == 'private_service')
+                TextButton(
+                  onPressed: () async {
+                    try {
+                      final result = await widget.state.request(
+                        'GET',
+                        '/health',
                       );
+                      if (context.mounted) {
+                        notice(
+                          context,
+                          result['provider_configured'] == true
+                              ? 'Service reachable; model configured.'
+                              : 'Service reachable; no AI provider configured.',
+                        );
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        notice(context, e);
+                      }
                     }
-                  } catch (e) {
-                    if (context.mounted) {
-                      notice(context, e);
-                    }
-                  }
-                },
-                child: const Text('Test private FastAPI connection'),
-              ),
+                  },
+                  child: const Text('Test private FastAPI connection'),
+                ),
             ],
           ),
         ),

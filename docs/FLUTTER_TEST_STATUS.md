@@ -103,3 +103,13 @@ Dependency locks and Flutter's built-in license view retain package notices. `fl
 
 
 The current flashcard Android16 integration qualification is run [39580662913](https://github.com/himangshurajg-bit/Personal-agentic-ai/actions/runs/39580662913), API36 emulator. Both native integration tests passed: `API36 native storage, safe modes, navigation and action boundary` and `API36 restart retains local state without provider`. In addition to the broader app gates, this run exercised study records and review persistence through reload/restart. This is emulator evidence only; actual Redmi Note 14 Pro 5G / HyperOS behavior remains untested. The earlier defect and harness runs are retained below as history.
+
+
+## 2026-10-22 — provider settings, glass navigation and local practice quiz
+
+- Split OpenAI-compatible API endpoint/key storage from the private FastAPI endpoint/token. Existing legacy endpoint/token values migrate to the provider slot selected at the time; keys remain in Flutter secure storage, are never prefilled into the UI, and are independently clearable. HTTPS/API-origin validation, explicit per-send content approval, and no automatic retry/fallback remain in place.
+- Refreshed primary navigation to a bordered, translucent iOS-inspired glass dock with active-state ambient glow and touch feedback; reduced-motion disables the selection transition. Buttons and fields use visible borders and comfortable minimum touch sizes.
+- Added a deterministic, on-device multiple-choice practice quiz built from the learner's own saved flashcards. It needs at least two different answers, performs no network/model inference, and does not alter spaced-repetition progress or claim mastery.
+- Offline inference remains unavailable. Linux Qwen2.5 0.5B had passed a narrow memory-retrieval smoke but failed Class 12 tutoring and Assamese response quality; no compatible Android runtime/model passed the Redmi's language, memory/thermal and tutoring gates.
+- Validation: Flutter analyzer reported no issues; all 35 Flutter tests passed, including provider-key isolation/legacy migration, no-network fallback and local-quiz behavior; all 19 FastAPI tests passed. `git diff --check` passed.
+- No APK build was attempted: the build computer had only 303 MiB free (99% disk use), below a safe Android build margin. No files were deleted to make room. The actual Redmi and HyperOS were not available for qualification. Changes remain uncommitted; no push, tag, release or service deployment was made.
