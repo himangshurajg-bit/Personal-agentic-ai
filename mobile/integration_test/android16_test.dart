@@ -7,6 +7,13 @@ import 'package:integration_test/integration_test.dart';
 import 'package:personal_assistant/assistant_state.dart';
 import 'package:personal_assistant/main.dart';
 
+Future<void> pumpRouteFrames(WidgetTester tester) async {
+  // Home includes a continuously animated orb, so pump fixed frames instead of
+  // waiting for the entire widget tree to become idle.
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 500));
+}
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   testWidgets(
@@ -112,7 +119,7 @@ void main() {
       expect(s.error, contains('Offline AI is not installed'));
       phase('offline mode failed closed without a network');
       await tester.pumpWidget(AssistantApp(state: s));
-      await tester.pumpAndSettle();
+      await pumpRouteFrames(tester);
       expect(find.text('API36 Test assistant'), findsOneWidget);
       phase('initial app frame settled');
       // Exercise the labels the glass dock actually exposes; Actions opens
@@ -125,7 +132,7 @@ void main() {
         'Home',
       ]) {
         await tester.tap(find.text(label).last);
-        await tester.pumpAndSettle();
+        await pumpRouteFrames(tester);
         expect(tester.takeException(), isNull);
       }
       phase('glass dock navigation passed');
@@ -144,7 +151,7 @@ void main() {
         s.executeApproved(draft['id']),
         throwsA(isA<ServiceException>()),
       );
-      await tester.pumpAndSettle();
+      await pumpRouteFrames(tester);
       phase('all Android 16 integration assertions passed');
     },
   );

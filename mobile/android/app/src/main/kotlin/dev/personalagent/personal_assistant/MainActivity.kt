@@ -254,7 +254,8 @@ class MainActivity : FlutterFragmentActivity() {
                     if(exportResult != null) { result.error("busy","An export is already open",null) }
                     else {
                         exportText=call.argument<String>("text"); exportResult=result
-                        try { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="application/json"; putExtra(Intent.EXTRA_TITLE,"personal-memories.json") },42) }
+                        val filename = safeJsonExportName(call.argument<String>("filename"))
+                        try { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="application/json"; putExtra(Intent.EXTRA_TITLE,filename) },42) }
                         catch(_:Exception) { exportResult=null; exportText=null; result.error("unavailable","No document picker is available",null) }
                     }
                 }
@@ -262,6 +263,17 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
     }
+    private fun safeJsonExportName(requested: String?): String {
+        val name = (requested ?: "personal-memories.json")
+            .substringAfterLast('/')
+            .substringAfterLast('\\')
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .trim('.', '_')
+            .take(80)
+            .ifBlank { "personal-data" }
+        return if (name.endsWith(".json", ignoreCase = true)) name else "$name.json"
+    }
+
     private fun cleanAppLabel(value: String): String =
         value.replace(Regex("[\\p{Cc}\\p{Cf}]"), " ")
             .replace(Regex("\\s+"), " ")
@@ -450,7 +462,7 @@ class MainActivity : FlutterFragmentActivity() {
             if(resultCode!=RESULT_OK || data?.data==null || text==null) { result?.error("cancelled","Export cancelled; no file saved",null); return }
             try { contentResolver.openOutputStream(data.data!!,"wt")?.use { it.write(text.toByteArray(Charsets.UTF_8)); it.flush() } ?: throw IllegalStateException("Could not open destination")
                 result?.success(mapOf("saved" to true))
-            } catch(_:Exception) { result?.error("write_failed","Memory export could not be saved",null) }
+            } catch(_:Exception) { result?.error("write_failed","Local data export could not be saved",null) }
         }
     }
 }

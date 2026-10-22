@@ -2607,6 +2607,60 @@ class _SettingsState extends State<Settings> {
     if (mounted) notice(context, '$label cleared from this phone.');
   }
 
+  Future<void> _exportLocalBackup() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Export a private backup?'),
+        content: const Text(
+          'This creates a readable, unencrypted JSON copy of your on-phone chats, approved memories, notes, tasks, study records and action receipts. Provider API keys and service tokens are stored separately and are not included. Choose a private save location. Restore is not available in this build.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.download_outlined),
+            label: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final result = await AssistantState.device.invokeMapMethod<String, dynamic>(
+        'export',
+        {
+          'text': widget.state.exportLocalData(),
+          'filename': 'personal-ai-backup.json',
+        },
+      );
+      if (mounted && result?['saved'] == true) {
+        notice(context, 'Local backup saved to the location you chose.');
+      }
+    } on PlatformException catch (error) {
+      if (!mounted || error.code == 'cancelled') return;
+      notice(context, error.message ?? 'The local backup could not be saved.');
+    } catch (error) {
+      if (mounted) notice(context, error);
+    }
+  }
+
+  Widget _destinationTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required String route,
+  }) => ListTile(
+    leading: Icon(icon),
+    title: Text(title),
+    subtitle: Text(subtitle),
+    trailing: const Icon(Icons.chevron_right),
+    onTap: () => Navigator.pushNamed(context, route),
+  );
+
   @override
   Widget build(BuildContext context) => Shell(
     title: 'Settings',
@@ -2651,6 +2705,52 @@ class _SettingsState extends State<Settings> {
           ),
         ),
         const AndroidAccessPanel(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
+          child: Text(
+            'YOUR TOOLS',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              letterSpacing: 1.1,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+        ),
+        Glass(
+          child: Column(
+            children: [
+              _destinationTile(
+                icon: Icons.school_outlined,
+                title: 'Study planner',
+                subtitle: 'Targets, study logs and flashcards',
+                route: '/study',
+              ),
+              _destinationTile(
+                icon: Icons.psychology_alt_outlined,
+                title: 'Memory and local search',
+                subtitle: 'Review saved facts and search this phone’s chats',
+                route: '/memory',
+              ),
+              _destinationTile(
+                icon: Icons.hub_outlined,
+                title: 'Google services and files',
+                subtitle: 'Open available connectors; access depends on account and scope',
+                route: '/library',
+              ),
+              _destinationTile(
+                icon: Icons.notifications_active_outlined,
+                title: 'Reminders and action history',
+                subtitle: 'Review local actions and reminder receipts',
+                route: '/automations',
+              ),
+              _destinationTile(
+                icon: Icons.folder_open_outlined,
+                title: 'Selected files',
+                subtitle: 'Manage files you chose for this device',
+                route: '/files',
+              ),
+            ],
+          ),
+        ),
         Padding(
           padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
           child: Text('VOICE & AI', style: Theme.of(context).textTheme.labelLarge?.copyWith(letterSpacing: 1.1, color: Theme.of(context).colorScheme.primary)),
@@ -2908,6 +3008,44 @@ class _SettingsState extends State<Settings> {
           child: Text('CONNECTIONS', style: Theme.of(context).textTheme.labelLarge?.copyWith(letterSpacing: 1.1, color: Theme.of(context).colorScheme.primary)),
         ),
         CustomMcpPanel(state: widget.state),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
+          child: Text(
+            'DATA & BACKUP',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              letterSpacing: 1.1,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+        ),
+        Glass(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.backup_outlined),
+                title: const Text('Export local data'),
+                subtitle: const Text('Save a private JSON copy to a location you choose'),
+              ),
+              const Text(
+                'The export is readable and unencrypted. Provider credentials are excluded. Restore is not implemented yet.',
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _exportLocalBackup,
+                icon: const Icon(Icons.download_outlined),
+                label: const Text('Export backup'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        const Glass(
+          child: Text(
+            'Not available in this build: WhatsApp replies, social-media publishing, YouTube or music control, phone-call automation, a remote skills marketplace, sub-agent execution, and restoring a backup. No inactive switches are shown for these services.',
+          ),
+        ),
         TextButton(
           onPressed: () async {
             try {
