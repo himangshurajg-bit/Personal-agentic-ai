@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -15,6 +17,17 @@ class FakeAuthenticator implements DeviceAuthenticator {
     final outcome = outcomes[calls++];
     if (outcome is Exception || outcome is Error) throw outcome;
     return outcome as bool;
+  }
+}
+
+class ControlledAuthenticator implements DeviceAuthenticator {
+  final Completer<bool> result = Completer<bool>();
+  bool called = false;
+
+  @override
+  Future<bool> authenticate() {
+    called = true;
+    return result.future;
   }
 }
 
@@ -106,6 +119,42 @@ void main() {
     },
   );
 
+  testWidgets(
+    'authentication focus loss does not immediately relock after success',
+    (tester) async {
+      final setup = AssistantState(authenticator: FakeAuthenticator([true]));
+      await setup.initialize();
+      await setup.finishOnboarding();
+      expect(await setup.setAppLockEnabled(true), isTrue);
+      setup.dispose();
+
+      final auth = ControlledAuthenticator();
+      final state = AssistantState(authenticator: auth);
+      await state.initialize();
+      await tester.pumpWidget(AssistantApp(state: state));
+      await tester.pumpAndSettle();
+      expect(find.text('Your assistant is locked'), findsOneWidget);
+
+      await tester.tap(find.text('Unlock'));
+      await tester.pump();
+      expect(auth.called, isTrue);
+
+      // Android's biometric/device-credential prompt can temporarily take focus.
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      auth.result.complete(true);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Your assistant is locked'), findsNothing);
+      expect(find.text('Home'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      state.dispose();
+    },
+  );
+
   testWidgets('app content is gated on background return until auth succeeds', (
     tester,
   ) async {
@@ -124,6 +173,8 @@ void main() {
     expect(find.text('Home'), findsOneWidget);
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pumpAndSettle();
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();

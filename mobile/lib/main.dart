@@ -11,6 +11,7 @@ import 'mcp_servers.dart';
 import 'phone_screens.dart';
 import 'home_orb.dart';
 import 'ui_motion.dart';
+import 'visual_theme.dart';
 
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
@@ -45,10 +46,13 @@ class _AssistantAppState extends State<AssistantApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) {
+    // Device-auth prompts can temporarily take focus without sending the app to
+    // the background. Lock only after the app is actually hidden or paused.
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
       _leftForeground = true;
       widget.state.lockApp();
-    } else if (_leftForeground) {
+    } else if (state == AppLifecycleState.resumed && _leftForeground) {
       _leftForeground = false;
       widget.state.lockApp();
     }
@@ -60,8 +64,10 @@ class _AssistantAppState extends State<AssistantApp>
     builder: (context, _) => MaterialApp(
       title: widget.state.assistantName,
       debugShowCheckedModeBanner: false,
-      theme: _assistantTheme(Brightness.light),
-      darkTheme: _assistantTheme(Brightness.dark),
+      theme: _assistantTheme(Brightness.light, widget.state.visualTheme),
+      darkTheme: _assistantTheme(Brightness.dark, widget.state.visualTheme),
+      themeAnimationDuration: const Duration(milliseconds: 520),
+      themeAnimationCurve: Curves.easeInOutCubic,
       themeMode: widget.state.theme == 'dark'
           ? ThemeMode.dark
           : widget.state.theme == 'light'
@@ -347,12 +353,18 @@ class Shell extends StatelessWidget {
   }
 }
 
-ThemeData _assistantTheme(Brightness brightness) {
+ThemeData _assistantTheme(Brightness brightness, String paletteId) {
   final dark = brightness == Brightness.dark;
-  final scheme = ColorScheme.fromSeed(
-    seedColor: dark ? const Color(0xffc1b5ff) : const Color(0xff6557c8),
-    brightness: brightness,
-  );
+  final palette = FuturisticPalette.fromId(paletteId);
+  final scheme =
+      ColorScheme.fromSeed(
+        seedColor: palette.primaryFor(brightness),
+        brightness: brightness,
+      ).copyWith(
+        primary: palette.primaryFor(brightness),
+        secondary: palette.secondaryFor(brightness),
+        tertiary: palette.tertiaryFor(brightness),
+      );
   final fieldRadius = BorderRadius.circular(18);
   final outline = OutlineInputBorder(
     borderRadius: fieldRadius,
@@ -363,9 +375,17 @@ ThemeData _assistantTheme(Brightness brightness) {
   return ThemeData(
     colorScheme: scheme,
     brightness: brightness,
-    scaffoldBackgroundColor: dark
-        ? const Color(0xff101322)
-        : const Color(0xfff7f7fb),
+    scaffoldBackgroundColor: palette.backgroundFor(brightness),
+    extensions: [
+      PaletteVisuals(
+        orbColors: palette.orbColors,
+        glowColors: [
+          palette.primaryFor(brightness),
+          palette.secondaryFor(brightness),
+          palette.tertiaryFor(brightness),
+        ],
+      ),
+    ],
     useMaterial3: true,
     splashFactory: InkSparkle.splashFactory,
     pageTransitionsTheme: const PageTransitionsTheme(
@@ -2224,6 +2244,254 @@ class WavePainter extends CustomPainter {
       old.level != level || old.color != color;
 }
 
+/// Interactive theme choices; palette selection applies and saves immediately.
+class FuturisticThemePicker extends StatelessWidget {
+  final AssistantState state;
+  const FuturisticThemePicker({super.key, required this.state});
+
+  Future<void> _choose(BuildContext context, String id) async {
+    try {
+      await state.setVisualTheme(id);
+    } catch (_) {
+      if (context.mounted) {
+        notice(context, 'The visual theme could not be saved on this phone.');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.palette_outlined, color: theme.colorScheme.primary),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Choose your visual universe',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Colors flow through the orb, glass and ambient light.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            for (var i = 0; i < FuturisticPalette.all.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              Expanded(
+                child: _FuturisticThemeChoice(
+                  palette: FuturisticPalette.all[i],
+                  selected: state.visualTheme == FuturisticPalette.all[i].id,
+                  onTap: () => _choose(context, FuturisticPalette.all[i].id),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _FuturisticThemeChoice extends StatelessWidget {
+  final FuturisticPalette palette;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _FuturisticThemeChoice({
+    required this.palette,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    return TapMotion(
+      depth: 1.35,
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label:
+            '${palette.name}, ${palette.description}${selected ? ', selected' : ''}',
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            key: ValueKey('theme-choice-${palette.id}'),
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(20),
+            child: AnimatedContainer(
+              duration: reduceMotion
+                  ? Duration.zero
+                  : const Duration(milliseconds: 360),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.fromLTRB(7, 9, 7, 10),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: selected
+                      ? [
+                          palette.primary.withValues(alpha: .30),
+                          palette.secondary.withValues(alpha: .15),
+                        ]
+                      : [
+                          palette.primary.withValues(alpha: .14),
+                          palette.tertiary.withValues(alpha: .07),
+                        ],
+                ),
+                border: Border.all(
+                  color: selected
+                      ? palette.primary.withValues(alpha: .88)
+                      : Theme.of(context).colorScheme.outlineVariant
+                            .withValues(alpha: .72),
+                  width: selected ? 1.8 : 1,
+                ),
+                boxShadow: [
+                  if (selected)
+                    BoxShadow(
+                      color: palette.primary.withValues(alpha: .26),
+                      blurRadius: 22,
+                      spreadRadius: -3,
+                    ),
+                ],
+              ),
+              child: ExcludeSemantics(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedScale(
+                      scale: selected ? 1.08 : .92,
+                      duration: reduceMotion
+                          ? Duration.zero
+                          : const Duration(milliseconds: 420),
+                      curve: Curves.easeOutBack,
+                      child: _PaletteOrbPreview(palette: palette),
+                    ),
+                    const SizedBox(height: 7),
+                    Text(
+                      palette.name,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.fade,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontSize: 12,
+                        fontWeight: selected
+                            ? FontWeight.w800
+                            : FontWeight.w600,
+                        color: selected
+                            ? palette.primaryFor(Theme.of(context).brightness)
+                            : Theme.of(context).colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      palette.description,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.fade,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        fontSize: 9,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PaletteOrbPreview extends StatelessWidget {
+  final FuturisticPalette palette;
+  const _PaletteOrbPreview({required this.palette});
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 48,
+    height: 48,
+    child: Stack(
+      alignment: Alignment.center,
+      children: [
+        Container(
+          width: 46,
+          height: 24,
+          decoration: BoxDecoration(
+            border: Border.all(color: palette.secondary.withValues(alpha: .62)),
+            borderRadius: BorderRadius.circular(50),
+            boxShadow: [
+              BoxShadow(
+                color: palette.secondary.withValues(alpha: .28),
+                blurRadius: 9,
+              ),
+            ],
+          ),
+        ),
+        Container(
+          width: 31,
+          height: 31,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(
+              center: const Alignment(-.35, -.42),
+              colors: [
+                Colors.white.withValues(alpha: .98),
+                palette.orbColors.first,
+                palette.orbColors[1],
+                const Color(0xff0a0d1b),
+              ],
+              stops: const [0, .17, .48, 1],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: palette.primary.withValues(alpha: .62),
+                blurRadius: 15,
+                spreadRadius: 1,
+              ),
+            ],
+          ),
+        ),
+        Positioned(
+          right: 5,
+          top: 5,
+          child: Container(
+            width: 4,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+              boxShadow: [BoxShadow(color: palette.secondary, blurRadius: 5)],
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 class Settings extends StatefulWidget {
   final AssistantState state;
   const Settings({super.key, required this.state});
@@ -2502,13 +2770,24 @@ class _SettingsState extends State<Settings> {
                   'Offline AI is unavailable: no model is installed. No online fallback will be used.',
                 ),
               const SizedBox(height: 16),
+              FuturisticThemePicker(state: widget.state),
+              const SizedBox(height: 18),
               DropdownButtonFormField<String>(
                 isExpanded: true,
                 initialValue: theme,
-                decoration: const InputDecoration(labelText: 'Appearance'),
+                decoration: const InputDecoration(
+                  labelText: 'Light or dark mode',
+                ),
                 items: [
                   for (final mode in ['system', 'light', 'dark'])
-                    DropdownMenuItem(value: mode, child: Text(mode)),
+                    DropdownMenuItem(
+                      value: mode,
+                      child: Text(switch (mode) {
+                        'system' => 'Follow device',
+                        'light' => 'Light',
+                        _ => 'Dark',
+                      }),
+                    ),
                 ],
                 onChanged: (v) => setState(() => theme = v ?? 'system'),
               ),
