@@ -1,4 +1,5 @@
 import 'study_quiz.dart';
+import 'selected_text_search.dart';
 
 import 'dart:async';
 import 'dart:convert';
@@ -2627,6 +2628,14 @@ class SelectedFiles extends StatefulWidget {
 class _SelectedFilesState extends State<SelectedFiles> {
   Map<String, dynamic>? selected;
   String error = '';
+  final TextEditingController _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => Shell(
     title: 'Selected file',
@@ -2650,6 +2659,7 @@ class _SelectedFilesState extends State<SelectedFiles> {
                 setState(() {
                   selected = result;
                   error = '';
+                  _search.clear();
                 });
               }
             } catch (e) {
@@ -2667,8 +2677,64 @@ class _SelectedFilesState extends State<SelectedFiles> {
               errorBuilder: (_, _, _) =>
                   const Text('Image preview could not be decoded.'),
             ),
-          if (selected!['text'] != null) ...[
-            SelectableText(selected!['text']),
+          if (selected!['text'] is String) ...[
+            const SizedBox(height: 12),
+            TextField(
+              controller: _search,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                labelText: 'Search this selected text',
+                hintText: 'Find a word or phrase on this device',
+                prefixIcon: const Icon(Icons.search_rounded),
+                suffixIcon: _search.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Clear search',
+                        onPressed: () {
+                          _search.clear();
+                          setState(() {});
+                        },
+                        icon: const Icon(Icons.clear_rounded),
+                      ),
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            if (_search.text.trim().isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Builder(
+                builder: (context) {
+                  final matches = searchSelectedText(
+                    selected!['text'] as String,
+                    _search.text,
+                  );
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        matches.isEmpty
+                            ? 'No matches in this selected text.'
+                            : matches.length == 100
+                            ? 'Showing the first 100 matches · kept only on this device'
+                            : '${matches.length} local matches · kept only on this device',
+                      ),
+                      for (final match in matches)
+                        ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Text('${match.lineNumber}'),
+                          title: Text(match.snippet),
+                        ),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+            const Text(
+              'Search is limited to this file’s locally readable text. It is not indexed, saved, or sent to an AI.',
+            ),
+            const SizedBox(height: 8),
+            SelectableText(selected!['text'] as String),
             FilledButton(
               onPressed: () async {
                 final state = widget.state;
