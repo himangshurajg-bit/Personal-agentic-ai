@@ -123,6 +123,8 @@ class AssistantState extends ChangeNotifier {
   bool shareMemories = false, shareHistory = false;
   Map<String, dynamic>? selectedFile;
   bool ready = false, onboarded = false, busy = false, speakReplies = false;
+  bool experimentalOfflineChatEnabled = false;
+  bool _localInferenceActive = false;
   bool appLockConfigurationReady = false,
       appLockEnabled = false,
       appLocked = false,
@@ -133,6 +135,7 @@ class AssistantState extends ChangeNotifier {
   http.Client? _stream;
   int _generation = 0;
   static const device = MethodChannel('personal_assistant/device');
+  static const offlineModel = MethodChannel('personal_assistant/offline_model');
   Future<void> initialize() async {
     try {
       final savedLock = await storage.read(key: 'app_lock_enabled');
@@ -149,6 +152,20 @@ class AssistantState extends ChangeNotifier {
           await storage.read(key: 'assistant_name') ?? 'Personal assistant';
       speechMode = await storage.read(key: 'speech_mode') ?? 'offline';
       engine = await storage.read(key: 'engine') ?? 'offline';
+      experimentalOfflineChatEnabled =
+          await storage.read(key: 'experimental_offline_chat') == 'yes';
+      if (experimentalOfflineChatEnabled) {
+        try {
+          await offlineModel.invokeMethod<void>(
+            'set_experimental_chat_enabled',
+            {'enabled': true},
+          );
+        } on PlatformException {
+          // The normal-chat call still fails closed if this build lacks the native runtime.
+        } on MissingPluginException {
+          // Non-Android builds never enable the local runtime.
+        }
+      }
       model = await storage.read(key: 'model') ?? '';
       final savedLanguage = await storage.read(key: 'language') ?? 'en-IN';
       language = languageLabels.containsKey(savedLanguage)
@@ -418,6 +435,26 @@ class AssistantState extends ChangeNotifier {
     model: model,
     token: engine == 'compatible' ? compatibleApiKey : privateServiceToken,
   );
+  Future<void> saveExperimentalOfflineChat(bool enabled) async {
+    await storage.write(
+      key: 'experimental_offline_chat',
+      value: enabled ? 'yes' : 'no',
+    );
+    experimentalOfflineChatEnabled = enabled;
+    try {
+      await offlineModel.invokeMethod<void>(
+        'set_experimental_chat_enabled',
+        {'enabled': enabled},
+      );
+    } on PlatformException {
+      // Opt-in is stored locally, but unsupported builds still cannot run native inference.
+    } on MissingPluginException {
+      // Unsupported builds still cannot run native inference.
+    }
+    if (!enabled && _localInferenceActive) stop();
+    notifyListeners();
+  }
+
   Future<void> saveEngine(
     String selected,
     String modelName,
@@ -824,12 +861,20 @@ class AssistantState extends ChangeNotifier {
     if (busy || text.trim().isEmpty) {
       return;
     }
+    if (engine == 'offline' && !experimentalOfflineChatEnabled) {
+      error =
+          'Experimental Gemma chat is off. Turn it on in Settings > AI & Voice after reviewing the warning. No online fallback was used.';
+      notifyListeners();
+      return;
+    }
     if (engine != 'offline' && !approvedOnline) {
       error = 'Review and approve the online payload before sending.';
       notifyListeners();
       return;
     }
     error = '';
+    final selectedEngine = engine;
+    final selectedConfig = selectedEngine == 'offline' ? null : config;
     final prior = messages
         .where((m) => m['state'] == 'complete')
         .map((m) => {'role': m['role'], 'text': m['text']})
@@ -840,7 +885,7 @@ class AssistantState extends ChangeNotifier {
     final generation = ++_generation;
     messages.add({'role': 'user', 'text': lastPrompt, 'state': 'complete'});
     notifyListeners();
-    final client = clientFactory();
+    final client = selectedEngine == 'offline' ? null : clientFactory();
     _stream = client;
     try {
       final facts = shareMemories
@@ -855,45 +900,77 @@ class AssistantState extends ChangeNotifier {
         if (shareHistory) 'quoted_history': prior,
         'user_message': lastPrompt,
       });
-      final req = config.request(conversation, prompt);
       await persistChat();
-      final res = await client.send(req).timeout(const Duration(seconds: 10));
-      if (res.statusCode >= 300) {
-        throw ServiceException(describeStatus(res.statusCode));
-      }
-      var done = false;
-      await for (final event
-          in config.events(res.stream).timeout(const Duration(seconds: 65))) {
-        if (generation != _generation) break;
-        if (event['type'] == 'delta') {
-          partial += event['text'] as String;
-          notifyListeners();
-        }
-        if (event['type'] == 'error') {
-          throw ServiceException(event['message'] as String);
-        }
-        if (event['type'] == 'done') {
-          done = true;
-        }
-      }
-      if (generation == _generation) {
-        if (!done) {
-          throw ServiceException(
-            'The reply stopped before completion. Retry only when you choose.',
-          );
-        }
-        if (partial.isNotEmpty) {
+      if (generation != _generation) return;
+      if (selectedEngine == 'offline') {
+        _localInferenceActive = true;
+        final answer = await offlineModel.invokeMethod<String>(
+          'run_chat',
+          {'prompt': prompt, 'experimental_opt_in': true},
+        );
+        if (generation == _generation) {
+          if (answer == null || answer.trim().isEmpty) {
+            throw ServiceException(
+              'The local model returned no text. No online fallback was used.',
+            );
+          }
           messages.add({
             'role': 'assistant',
-            'text': partial,
+            'text': answer,
             'state': 'complete',
           });
+          partial = '';
         }
-        partial = '';
+      } else {
+        final req = selectedConfig!.request(conversation, prompt);
+        final res = await client!.send(req).timeout(const Duration(seconds: 10));
+        if (res.statusCode >= 300) {
+          throw ServiceException(describeStatus(res.statusCode));
+        }
+        var done = false;
+        await for (final event
+            in selectedConfig!.events(res.stream).timeout(const Duration(seconds: 65))) {
+          if (generation != _generation) break;
+          if (event['type'] == 'delta') {
+            partial += event['text'] as String;
+            notifyListeners();
+          }
+          if (event['type'] == 'error') {
+            throw ServiceException(event['message'] as String);
+          }
+          if (event['type'] == 'done') {
+            done = true;
+          }
+        }
+        if (generation == _generation) {
+          if (!done) {
+            throw ServiceException(
+              'The reply stopped before completion. Retry only when you choose.',
+            );
+          }
+          if (partial.isNotEmpty) {
+            messages.add({
+              'role': 'assistant',
+              'text': partial,
+              'state': 'complete',
+            });
+          }
+          partial = '';
+        }
+      }
+    } on PlatformException catch (e) {
+      if (generation == _generation) {
+        final message = e.message ?? 'Local Gemma could not answer.';
+        error = selectedEngine == 'offline' &&
+                !message.toLowerCase().contains('fallback')
+            ? '$message No online fallback was used.'
+            : message;
       }
     } catch (e) {
       if (generation == _generation) {
-        error = e is TimeoutException
+        error = selectedEngine == 'offline'
+            ? 'Local Gemma failed: $e. No online fallback was used.'
+            : e is TimeoutException
             ? 'The reply timed out. Check the connection and retry explicitly.'
             : e is http.ClientException
             ? 'Connection lost. No automatic retry was made.'
@@ -908,7 +985,8 @@ class AssistantState extends ChangeNotifier {
         }
       }
     } finally {
-      client.close();
+      client?.close();
+      _localInferenceActive = false;
       if (generation == _generation) {
         try {
           await persistChat();
@@ -926,6 +1004,17 @@ class AssistantState extends ChangeNotifier {
     _generation++;
     _stream?.close();
     _stream = null;
+    if (_localInferenceActive) {
+      unawaited(() async {
+        try {
+          await offlineModel.invokeMethod<void>('cancel_chat');
+        } on PlatformException {
+          // The native completion/cancellation path owns final cleanup.
+        } on MissingPluginException {
+          // No local runtime is installed on this platform.
+        }
+      }());
+    }
     if (partial.isNotEmpty) {
       messages.add({
         'role': 'assistant',

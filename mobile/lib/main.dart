@@ -1754,7 +1754,9 @@ class Home extends StatelessWidget {
         ? 'Good afternoon'
         : 'Good evening';
     final modeLabel = state.engine == 'offline'
-        ? 'Offline AI unavailable'
+        ? state.experimentalOfflineChatEnabled
+            ? 'Experimental Gemma · local only'
+            : 'Offline AI · opt-in needed'
         : 'Online mode selected';
     return Shell(
       title: state.assistantName,
@@ -3526,6 +3528,44 @@ class _SettingsState extends State<Settings> {
     if (mounted) notice(context, '$label cleared from this phone.');
   }
 
+  Future<void> _setExperimentalOfflineChat(bool enabled) async {
+    if (enabled) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Try experimental Gemma chat?'),
+          content: const Text(
+            'Gemma 4 E4B has not passed answer-quality or Redmi/HyperOS memory, speed and heat testing. It may give wrong answers, run slowly, or make the phone warm. You must download and load the 3.66 GB model yourself. Typed chat prompts will stay on this phone; errors never switch to an online provider. Continue only as an experiment.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Enable experimental chat'),
+            ),
+          ],
+        ),
+      );
+      if (proceed != true || !mounted) return;
+    }
+    try {
+      await widget.state.saveExperimentalOfflineChat(enabled);
+      if (mounted) {
+        notice(
+          context,
+          enabled
+              ? 'Experimental local chat is opted in. Download and load Gemma below; it is still unqualified.'
+              : 'Experimental local chat is off. The model is not used for normal chat.',
+        );
+      }
+    } catch (error) {
+      if (mounted) notice(context, error);
+    }
+  }
+
   Future<void> _exportLocalBackup() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -3606,7 +3646,7 @@ class _SettingsState extends State<Settings> {
         const _SettingsSectionLabel('PRIVACY & ACCESS'),
         const Glass(
           child: Text(
-            'Your chats, approved memories, notes, tasks and study records stay on this phone. AI is optional: offline inference is not installed; online requests require an explicit payload review. The private FastAPI adapter remains optional, not a requirement for local tools.',
+            'Your chats, approved memories, notes, tasks and study records stay on this phone. Gemma is an experimental offline option that requires your opt-in, a manual download and load; it is not qualified for this phone. Online requests require explicit payload review. The private FastAPI adapter remains optional.',
           ),
         ),
         Glass(
@@ -3706,13 +3746,24 @@ class _SettingsState extends State<Settings> {
                 decoration: const InputDecoration(labelText: 'AI engine'),
                 items: [
                   for (final item in {
-                    'offline': 'Offline · model not installed',
+                    'offline': 'Offline · Gemma (experimental)',
                     'compatible': 'Online · OpenAI-compatible',
                     'private_service': 'Online · private FastAPI',
                   }.entries)
                     DropdownMenuItem(value: item.key, child: Text(item.value)),
                 ],
                 onChanged: (v) => setState(() => engine = v!),
+              ),
+              const SizedBox(height: 12),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: widget.state.experimentalOfflineChatEnabled,
+                onChanged: (enabled) => _setExperimentalOfflineChat(enabled),
+                secondary: const _SettingsIconTile(icon: Icons.memory_rounded),
+                title: const Text('Use Gemma in normal chat · experimental'),
+                subtitle: const Text(
+                  'Explicit opt-in. Select Offline · Gemma and save settings to use it. It only runs locally after you download and load the model. Not qualified for Redmi/HyperOS; replies may be inaccurate, slow or heat the phone. There is no online fallback.',
+                ),
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
@@ -3833,8 +3884,10 @@ class _SettingsState extends State<Settings> {
                     ),
                   ),
               ] else
-                const Text(
-                  'Offline AI is unavailable: no model is installed. No online fallback will be used.',
+                Text(
+                  widget.state.experimentalOfflineChatEnabled
+                      ? 'Experimental local chat is opted in. Download and load Gemma in the model panel below; it will not contact a network service.'
+                      : 'Offline chat needs your explicit experimental opt-in and a downloaded, loaded Gemma model. No online fallback is used.',
                 ),
               const SizedBox(height: 20),
               FilledButton(
@@ -3914,8 +3967,8 @@ class _SettingsState extends State<Settings> {
         ),
         const _SettingsSectionLabel('CONNECTED TOOLS'),
         CustomMcpPanel(state: widget.state),
-        const _SettingsSectionLabel('OFFLINE MODEL SCREENING'),
-        const Text('Optional device-only candidate evaluation. This does not enable offline chat or qualify the model for your phone.'),
+        const _SettingsSectionLabel('OFFLINE MODEL & EXPERIMENTAL CHAT'),
+        const Text('The optional model is downloaded only when you start it. You can run fixed screening prompts or, after opting in above, use it for normal chat. Neither option means the model is qualified for your phone.'),
         const SizedBox(height: 8),
         const OfflineModelPanel(),
         const _SettingsSectionLabel('VOICE CAPABILITIES'),

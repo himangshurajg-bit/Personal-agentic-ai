@@ -16,7 +16,7 @@ bool gemma4DownloadHasSpace({
   return availableBytes >= remainingBytes + gemma4StorageReserveBytes;
 }
 
-/// A separate, opt-in screening surface. It never supplies normal chat turns.
+/// Opt-in model manager for fixed screening and separately enabled experimental local chat.
 class OfflineModelPanel extends StatefulWidget {
   const OfflineModelPanel({super.key});
 
@@ -141,7 +141,8 @@ class _OfflineModelPanelState extends State<OfflineModelPanel>
   }
 
   String _formatBytes(Object? value) {
-    final bytes = value is num ? value.toInt() : 0;
+    if (value is! num || value < 0) return 'unavailable';
+    final bytes = value.toInt();
     if (bytes < 1024 * 1024) return '$bytes B';
     if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(0)} MB';
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
@@ -179,7 +180,7 @@ class _OfflineModelPanelState extends State<OfflineModelPanel>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Gemma 4 E4B · local screening', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                      Text('Gemma 4 E4B · experimental local AI', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
                       const SizedBox(height: 5),
                       Text('8B total · 4.5B effective · Apache-2.0', style: theme.textTheme.bodySmall),
                     ],
@@ -190,8 +191,13 @@ class _OfflineModelPanelState extends State<OfflineModelPanel>
             ),
             const SizedBox(height: 14),
             Text('3.66 GB model · app-private storage · no network inference', style: theme.textTheme.bodyMedium),
+            const SizedBox(height: 4),
+            Text(
+              'Available RAM: ${_formatBytes(_status['available_memory_bytes'])}${_status['low_memory'] == true ? ' · Android reports low memory' : ''}. This is only a momentary reading, not a fit guarantee.',
+              style: theme.textTheme.bodySmall,
+            ),
             const SizedBox(height: 6),
-            Text('Downloading or loading can take time and use substantial storage, memory, battery and heat. It stays unavailable to chat until separate quality and device qualification passes.', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            Text('Downloading or loading can take time and use substantial storage, memory, battery and heat. Normal chat is available only after a separate experimental opt-in; this model is not qualified for your phone.', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
             const SizedBox(height: 14),
             if (downloading) ...[
               LinearProgressIndicator(value: progress == 0 ? null : progress),
@@ -214,7 +220,7 @@ class _OfflineModelPanelState extends State<OfflineModelPanel>
                         : () async {
                             final proceed = await _confirm(
                               bytes > 0 ? 'Resume model download?' : 'Download model for screening?',
-                              'This starts a user-requested 3.66 GB download. It uses app-private storage and keeps 512 MB free as a reserve. The model will not be enabled for chat.',
+                              'This starts a user-requested 3.66 GB download. It uses app-private storage and keeps 512 MB free as a reserve. Downloading alone does not load it or opt it into normal chat.',
                               bytes > 0 ? 'Resume download' : 'Download',
                             );
                             if (proceed && mounted) await _invoke('download');
@@ -227,11 +233,11 @@ class _OfflineModelPanelState extends State<OfflineModelPanel>
                 if (modelPresent && !loaded)
                   FilledButton.icon(
                     onPressed: _calling || !sizeMatches ? null : () async {
-                      final proceed = await _confirm('Load candidate for screening?', 'Local inference can consume several GB of RAM and increase battery use or heat. This loads it only for fixed test prompts; it will not handle normal chat.', 'Load for screening');
+                      final proceed = await _confirm('Load Gemma locally?', 'This checks Android’s low-memory warning first, then loads the model in app memory. It may still fail, run slowly, or heat the phone. It remains unqualified. If you explicitly opted in above, the loaded model can also answer normal chat without network fallback.', 'Load model');
                       if (proceed && mounted) await _invoke('load_for_screening');
                     },
                     icon: const Icon(Icons.memory_rounded),
-                    label: const Text('Load for screening'),
+                    label: const Text('Load for screening / chat'),
                   ),
                 if (loaded)
                   OutlinedButton.icon(onPressed: _calling ? null : () => _invoke('unload_candidate'), icon: const Icon(Icons.memory_outlined), label: const Text('Unload from memory')),
@@ -273,7 +279,7 @@ class _OfflineModelPanelState extends State<OfflineModelPanel>
               Text('Elapsed ${_metrics['elapsed_ms']} ms · process PSS ${_metrics['pss_before_mb']} → ${_metrics['pss_after_mb']} MB · thermal status ${_metrics['thermal_before']} → ${_metrics['thermal_after']}', style: theme.textTheme.labelSmall),
             ],
             const SizedBox(height: 10),
-            Text('Normal chat is still marked unavailable. No model answer is stored or sent. This single-device sample is not a quality pass or a Redmi/HyperOS qualification.', style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            Text('Experimental chat uses the loaded model only after the separate Settings opt-in. Fixed samples are not stored or sent. Nothing here qualifies answer quality or Redmi/HyperOS behavior.', style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
           ],
         ),
       ),

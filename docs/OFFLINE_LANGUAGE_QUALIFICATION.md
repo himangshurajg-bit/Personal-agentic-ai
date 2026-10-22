@@ -1,6 +1,6 @@
 # Offline model language qualification
 
-Status: not passed. This is a candidate evaluation plan, not evidence that any model supports these languages. Offline AI must stay unavailable until one specifically licensed model artifact passes the language/tutoring checks and the Android runtime/device gates below. Do not download or bundle a candidate as part of this qualification document.
+Status: not passed. This is a candidate evaluation plan, not evidence that any model supports these languages. Gemma 4 E4B may be tried only through the explicitly opted-in experimental local-chat path; do not call it qualified or production-ready until one specifically licensed artifact passes the language/tutoring checks and Android runtime/device gates below. Do not download or bundle a candidate as part of this qualification document.
 
 ## Candidate record
 
@@ -25,4 +25,4 @@ For each language, also ask the tutor to check a learner’s wrong claim (“the
 
 ## Device and safety gate
 
-A candidate must also have an allowed license, a supported Android 16 inference runtime, measured memory/latency/heat behavior, cancellation and restart checks, actual free-space preflight, and testing on both API 36 and the owner’s physical target phone. Preserve strict no-network fallback throughout installation, generation, errors and cancellation. Only after all model-quality, licensing, runtime and device gates pass may Offline AI be considered for enabling. No such qualification has been completed by adding these fixtures.
+A candidate must also have an allowed license, a supported Android 16 inference runtime, measured memory/latency/heat behavior, cancellation and restart checks, actual free-space preflight, and testing on both API 36 and the owner’s physical target phone. Preserve strict no-network fallback throughout installation, generation, errors and cancellation. The current experimental path is not evidence that any of these gates passed. Only after all model-quality, licensing, runtime and device gates pass may normal Offline AI be treated as qualified. No such qualification has been completed by adding these fixtures.

@@ -14,14 +14,14 @@ class EngineConfig {
     required this.token,
   });
   String get description => mode == 'offline'
-      ? 'Offline · model not installed'
+      ? 'Offline · Gemma experimental'
       : mode == 'compatible'
       ? 'Online · OpenAI-compatible'
       : 'Online · private FastAPI service';
   http.Request request(String conversation, String prompt) {
     if (mode == 'offline') {
       throw ServiceException(
-        'Offline AI is not installed. Model selection needs phone RAM/storage and language testing. No online fallback was made.',
+        'Offline chat must use the explicitly opted-in local Gemma runtime. No online fallback was made.',
       );
     }
     if (token.isEmpty) {

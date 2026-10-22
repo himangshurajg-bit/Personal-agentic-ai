@@ -197,7 +197,7 @@ void main() {
     expect(s.local.relevant('blue', 'personal'), isEmpty);
   });
   test(
-    'offline AI stays unavailable for every language without network fallback',
+    'offline chat stays opt-in and never falls back to the network',
     () async {
       var calls = 0;
       final s = AssistantState(
@@ -212,7 +212,7 @@ void main() {
         await s.send('Explain Newton’s second law with a worked example.');
         expect(
           s.error,
-          contains('Offline AI is not installed'),
+          contains('Experimental Gemma chat is off'),
           reason:
               'locale $locale remains behind the offline qualification gate',
         );
@@ -229,6 +229,49 @@ void main() {
       s.dispose();
     },
   );
+
+  test('opted-in offline chat routes only through the local native runtime', () async {
+    final calls = <MethodCall>[];
+    var networkCalls = 0;
+    addTearDown(() =>
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(AssistantState.offlineModel, null));
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(AssistantState.offlineModel, (call) async {
+          calls.add(call);
+          if (call.method == 'run_chat') return 'A local answer.';
+          return true;
+        });
+    final s = AssistantState(
+      clientFactory: () => MockClient((_) async {
+        networkCalls++;
+        return http.Response('{}', 200);
+      }),
+    );
+    await s.initialize();
+    expect(s.experimentalOfflineChatEnabled, isFalse);
+    await s.saveExperimentalOfflineChat(true);
+    await s.send('Explain Newton’s second law.');
+
+    expect(networkCalls, 0);
+    expect(calls.map((call) => call.method), contains('set_experimental_chat_enabled'));
+    final chatCall = calls.singleWhere((call) => call.method == 'run_chat');
+    expect((chatCall.arguments as Map)['experimental_opt_in'], isTrue);
+    final prompt = jsonDecode((chatCall.arguments as Map)['prompt'] as String);
+    expect(prompt['user_message'], 'Explain Newton’s second law.');
+    expect(s.messages.last, {
+      'role': 'assistant',
+      'text': 'A local answer.',
+      'state': 'complete',
+    });
+    expect(s.error, isEmpty);
+
+    final restored = AssistantState();
+    await restored.initialize();
+    expect(restored.experimentalOfflineChatEnabled, isTrue);
+    s.dispose();
+    restored.dispose();
+  });
 
   for (final entry in const {
     'en-IN': 'English',

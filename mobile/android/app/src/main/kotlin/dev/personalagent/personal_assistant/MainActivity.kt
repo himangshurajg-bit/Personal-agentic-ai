@@ -171,6 +171,22 @@ class MainActivity : FlutterFragmentActivity() {
                 }
                 when (call.method) {
                     "status" -> result.success(offline.status())
+                    "set_experimental_chat_enabled" -> {
+                        offline.setExperimentalChatEnabled(call.argument<Boolean>("enabled") == true)
+                        result.success(true)
+                    }
+                    "run_chat" -> {
+                        val prompt = call.argument<String>("prompt")
+                        if (prompt.isNullOrBlank()) {
+                            result.error("invalid_prompt", "The local prompt is empty.", null)
+                        } else {
+                            offline.runChat(prompt, call.argument<Boolean>("experimental_opt_in") == true) { text, code, message ->
+                                if (code == null) result.success(text)
+                                else result.error(code, message ?: "Local generation failed; no online fallback was used.", null)
+                            }
+                        }
+                    }
+                    "cancel_chat" -> { offline.cancelChat(); result.success(true) }
                     "download" -> { offline.startDownload(); result.success(true) }
                     "cancel_download" -> { offline.cancelDownload(); result.success(true) }
                     "remove_model" -> { offline.removeModel(); result.success(true) }
