@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
@@ -11,7 +12,7 @@ void main() {
   testWidgets(
     'API36 native storage, safe modes, navigation and action boundary',
     (tester) async {
-      void phase(String name) => print('API36_PHASE: $name');
+      void phase(String name) => debugPrint('API36_PHASE: $name');
 
       const secure = FlutterSecureStorage();
       phase('clear isolated secure storage');
