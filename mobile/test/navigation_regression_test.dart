@@ -38,11 +38,11 @@ void main() {
       await tester.pumpAndSettle();
       for (final label in [
         'Chat',
-        'Automations',
-        'Memory & Library',
+        'Actions',
+        'Memory',
         'Settings',
         'Home',
-        'Memory & Library',
+        'Memory',
       ]) {
         await tester.tap(find.text(label).last);
         await tester.pumpAndSettle();

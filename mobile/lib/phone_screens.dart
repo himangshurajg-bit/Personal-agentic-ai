@@ -1004,39 +1004,135 @@ class ActionHistory extends StatelessWidget {
 }
 
 /// Decorative orb, not a microphone meter. Changes state only for actual AI activity.
-class AssistantOrb extends StatelessWidget {
+class AssistantOrb extends StatefulWidget {
   final bool busy;
   const AssistantOrb({super.key, required this.busy});
+
   @override
-  Widget build(BuildContext context) => Semantics(
-    label: busy
-        ? 'Assistant generating a reply'
-        : 'Assistant idle; microphone not active',
-    child: AnimatedContainer(
-      duration: MediaQuery.disableAnimationsOf(context)
-          ? Duration.zero
-          : const Duration(milliseconds: 250),
-      width: busy ? 88 : 80,
-      height: busy ? 88 : 80,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: RadialGradient(
-          colors: [
-            Theme.of(context).colorScheme.primaryContainer,
-            Theme.of(context).colorScheme.primary,
-          ],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Theme.of(context).colorScheme.primary.withValues(alpha: .15),
-            blurRadius: 24,
-          ),
-        ],
+  State<AssistantOrb> createState() => _AssistantOrbState();
+}
+
+class _AssistantOrbState extends State<AssistantOrb>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..forward();
+
+  @override
+  void didUpdateWidget(covariant AssistantOrb oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.busy != widget.busy) _pulse.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final reduced = MediaQuery.disableAnimationsOf(context);
+    return Semantics(
+      label: widget.busy
+          ? 'Assistant generating a reply'
+          : 'Assistant idle; microphone not active',
+      child: AnimatedBuilder(
+        animation: _pulse,
+        builder: (context, _) {
+          final phase = reduced
+              ? .35
+              : Curves.easeInOutCubic.transform(_pulse.value);
+          final ringSize = 104 + 9 * phase;
+          final coreSize = widget.busy ? 80.0 : 74.0;
+          return SizedBox(
+            width: 116,
+            height: 116,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                AnimatedContainer(
+                  duration: reduced
+                      ? Duration.zero
+                      : const Duration(milliseconds: 300),
+                  width: ringSize,
+                  height: ringSize,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: theme.colorScheme.primary.withValues(
+                        alpha: widget.busy ? .34 : .16 + .10 * phase,
+                      ),
+                      width: 1.2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: theme.colorScheme.primary.withValues(
+                          alpha: (widget.busy ? .19 : .08) + .04 * phase,
+                        ),
+                        blurRadius: 25 + 9 * phase,
+                        spreadRadius: 1 + 2 * phase,
+                      ),
+                    ],
+                  ),
+                ),
+                AnimatedContainer(
+                  duration: reduced
+                      ? Duration.zero
+                      : const Duration(milliseconds: 280),
+                  width: coreSize,
+                  height: coreSize,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      center: const Alignment(-.28, -.35),
+                      radius: 1.1,
+                      colors: [
+                        theme.colorScheme.primaryContainer,
+                        theme.colorScheme.primary,
+                        theme.colorScheme.tertiary,
+                      ],
+                      stops: const [0, .62, 1],
+                    ),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: .58),
+                      width: 1.2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: theme.colorScheme.primary.withValues(alpha: .23),
+                        blurRadius: 24 + phase * 8,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: AnimatedSwitcher(
+                      duration: reduced
+                          ? Duration.zero
+                          : const Duration(milliseconds: 220),
+                      transitionBuilder: (child, animation) => ScaleTransition(
+                        scale: animation,
+                        child: FadeTransition(opacity: animation, child: child),
+                      ),
+                      child: Icon(
+                        widget.busy
+                            ? Icons.more_horiz_rounded
+                            : Icons.auto_awesome_rounded,
+                        key: ValueKey(widget.busy),
+                        color: theme.colorScheme.onPrimary,
+                        size: 30,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
       ),
-      child: Icon(
-        busy ? Icons.more_horiz : Icons.auto_awesome,
-        color: Theme.of(context).colorScheme.onPrimary,
-      ),
-    ),
-  );
+    );
+  }
 }

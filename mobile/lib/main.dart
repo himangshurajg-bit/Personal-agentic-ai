@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter/services.dart';
@@ -57,18 +58,8 @@ class _AssistantAppState extends State<AssistantApp>
     builder: (context, _) => MaterialApp(
       title: widget.state.assistantName,
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff5267a6)),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xffa9b9ef),
-          brightness: Brightness.dark,
-        ),
-        scaffoldBackgroundColor: const Color(0xff101827),
-        useMaterial3: true,
-      ),
+      theme: _assistantTheme(Brightness.light),
+      darkTheme: _assistantTheme(Brightness.dark),
       themeMode: widget.state.theme == 'dark'
           ? ThemeMode.dark
           : widget.state.theme == 'light'
@@ -218,106 +209,491 @@ class Shell extends StatelessWidget {
     this.primaryNavigation = true,
   });
   @override
-  Widget build(BuildContext context) => Scaffold(
-    bottomNavigationBar: !primaryNavigation
-        ? null
-        : NavigationBar(
-            selectedIndex: switch (ModalRoute.of(context)?.settings.name) {
-              '/chat' => 1,
-              '/study' => 1,
-              '/files' => 1,
-              '/automations' => 2,
-              '/memory' => 3,
-              '/library' => 3,
-              '/settings' => 4,
-              _ => 0,
-            },
-            onDestinationSelected: (i) {
-              final route = [
-                '/home',
-                '/chat',
-                '/automations',
-                '/memory',
-                '/settings',
-              ][i];
-              if (ModalRoute.of(context)?.settings.name != route) {
-                Navigator.pushReplacementNamed(context, route);
-              }
-            },
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.home_outlined),
-                label: 'Home',
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final currentRoute = ModalRoute.of(context)?.settings.name;
+    return Scaffold(
+      extendBody: true,
+      bottomNavigationBar: !primaryNavigation
+          ? null
+          : Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(26),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surface.withValues(
+                        alpha: dark ? .74 : .70,
+                      ),
+                      borderRadius: BorderRadius.circular(26),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: dark ? .16 : .72),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: theme.colorScheme.primary.withValues(
+                            alpha: dark ? .10 : .08,
+                          ),
+                          blurRadius: 26,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
+                    ),
+                    child: NavigationBar(
+                      height: 80,
+                      selectedIndex: switch (currentRoute) {
+                        '/chat' => 1,
+                        '/study' => 1,
+                        '/files' => 1,
+                        '/automations' => 2,
+                        '/memory' => 3,
+                        '/library' => 3,
+                        '/settings' => 4,
+                        _ => 0,
+                      },
+                      onDestinationSelected: (i) {
+                        final route = [
+                          '/home',
+                          '/chat',
+                          '/automations',
+                          '/memory',
+                          '/settings',
+                        ][i];
+                        if (currentRoute != route) {
+                          Navigator.pushReplacementNamed(context, route);
+                        }
+                      },
+                      destinations: const [
+                        NavigationDestination(
+                          icon: Icon(Icons.home_outlined),
+                          selectedIcon: Icon(Icons.home_rounded),
+                          label: 'Home',
+                        ),
+                        NavigationDestination(
+                          icon: Icon(Icons.chat_bubble_outline),
+                          selectedIcon: Icon(Icons.chat_bubble_rounded),
+                          label: 'Chat',
+                        ),
+                        NavigationDestination(
+                          icon: Icon(Icons.bolt_outlined),
+                          selectedIcon: Icon(Icons.bolt_rounded),
+                          label: 'Actions',
+                        ),
+                        NavigationDestination(
+                          icon: Icon(Icons.auto_awesome_outlined),
+                          selectedIcon: Icon(Icons.auto_awesome),
+                          label: 'Memory',
+                        ),
+                        NavigationDestination(
+                          icon: Icon(Icons.tune_rounded),
+                          selectedIcon: Icon(Icons.tune_rounded),
+                          label: 'Settings',
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-              NavigationDestination(
-                icon: Icon(Icons.chat_bubble_outline),
-                label: 'Chat',
+            ),
+      appBar: AppBar(
+        title: Text(title),
+        actions: actions,
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
+        titleSpacing: 20,
+      ),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: dark
+                    ? const [
+                        Color(0xff101322),
+                        Color(0xff151b2b),
+                        Color(0xff101a20),
+                      ]
+                    : const [
+                        Color(0xffe8edff),
+                        Color(0xfff8f7fc),
+                        Color(0xffe6f4f1),
+                      ],
               ),
-              NavigationDestination(
-                icon: Icon(Icons.bolt_outlined),
-                label: 'Automations',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.library_books_outlined),
-                label: 'Memory & Library',
-              ),
-              NavigationDestination(icon: Icon(Icons.tune), label: 'Settings'),
-            ],
+            ),
           ),
-    appBar: AppBar(
-      title: Text(title),
-      actions: actions,
-      backgroundColor: Colors.transparent,
+          const Positioned.fill(child: _AmbientGlow()),
+          SafeArea(
+            top: false,
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 700),
+                child: child,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+ThemeData _assistantTheme(Brightness brightness) {
+  final dark = brightness == Brightness.dark;
+  final scheme = ColorScheme.fromSeed(
+    seedColor: dark ? const Color(0xffc1b5ff) : const Color(0xff6557c8),
+    brightness: brightness,
+  );
+  final fieldRadius = BorderRadius.circular(18);
+  final outline = OutlineInputBorder(
+    borderRadius: fieldRadius,
+    borderSide: BorderSide(
+      color: scheme.outlineVariant.withValues(alpha: dark ? .48 : .54),
     ),
-    body: Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: Theme.of(context).brightness == Brightness.dark
-              ? const [Color(0xff19283e), Color(0xff111722), Color(0xff263139)]
-              : const [Color(0xffe4ecfc), Color(0xfff5f6fb), Color(0xffe1efec)],
+  );
+  return ThemeData(
+    colorScheme: scheme,
+    brightness: brightness,
+    scaffoldBackgroundColor: dark
+        ? const Color(0xff101322)
+        : const Color(0xfff7f7fb),
+    useMaterial3: true,
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: {
+        TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+      },
+    ),
+    appBarTheme: AppBarTheme(
+      backgroundColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      centerTitle: false,
+      titleTextStyle: TextStyle(
+        color: scheme.onSurface,
+        fontSize: 20,
+        fontWeight: FontWeight.w600,
+        letterSpacing: -.35,
+      ),
+      iconTheme: IconThemeData(color: scheme.onSurface),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      indicatorColor: scheme.primary.withValues(alpha: dark ? .28 : .13),
+      labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+      iconTheme: WidgetStateProperty.resolveWith(
+        (states) => IconThemeData(
+          color: states.contains(WidgetState.selected)
+              ? scheme.primary
+              : scheme.onSurfaceVariant,
         ),
       ),
-      child: SafeArea(
-        top: false,
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 700),
-            child: child,
-          ),
+      labelTextStyle: WidgetStateProperty.resolveWith(
+        (states) => TextStyle(
+          color: states.contains(WidgetState.selected)
+              ? scheme.primary
+              : scheme.onSurfaceVariant,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          letterSpacing: .1,
         ),
       ),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: scheme.surfaceContainerHighest.withValues(
+        alpha: dark ? .42 : .52,
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+      border: outline,
+      enabledBorder: outline,
+      focusedBorder: OutlineInputBorder(
+        borderRadius: fieldRadius,
+        borderSide: BorderSide(color: scheme.primary, width: 1.5),
+      ),
+      hintStyle: TextStyle(
+        color: scheme.onSurfaceVariant.withValues(alpha: .78),
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(0, 48),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        textStyle: const TextStyle(fontWeight: FontWeight.w600),
+      ),
+    ),
+    iconButtonTheme: IconButtonThemeData(
+      style: IconButton.styleFrom(
+        foregroundColor: scheme.onSurfaceVariant,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+    ),
+    dividerTheme: DividerThemeData(
+      color: scheme.outlineVariant.withValues(alpha: dark ? .36 : .48),
+      thickness: 1,
+      space: 20,
+    ),
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: dark ? const Color(0xff292d40) : const Color(0xff25263a),
+      contentTextStyle: const TextStyle(color: Colors.white),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+    ),
+    textSelectionTheme: TextSelectionThemeData(
+      cursorColor: scheme.primary,
+      selectionColor: scheme.primary.withValues(alpha: .24),
+      selectionHandleColor: scheme.primary,
     ),
   );
 }
 
-class Glass extends StatelessWidget {
-  final Widget child;
-  const Glass({super.key, required this.child});
+class _AmbientGlow extends StatefulWidget {
+  const _AmbientGlow();
+
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 14),
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface.withValues(alpha: .75),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: Theme.of(context).colorScheme.outline
-                  .withValues(alpha: .25),
-            ),
-          ),
-          child: Material(type: MaterialType.transparency, child: child),
-        ),
+  State<_AmbientGlow> createState() => _AmbientGlowState();
+}
+
+class _AmbientGlowState extends State<_AmbientGlow>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  )..forward();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _controller,
+    builder: (context, _) => CustomPaint(
+      painter: _AmbientPainter(
+        progress: MediaQuery.disableAnimationsOf(context)
+            ? .45
+            : _controller.value,
+        scheme: Theme.of(context).colorScheme,
       ),
+      child: const SizedBox.expand(),
     ),
   );
+}
+
+class _AmbientPainter extends CustomPainter {
+  final double progress;
+  final ColorScheme scheme;
+  const _AmbientPainter({required this.progress, required this.scheme});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    final dark = scheme.brightness == Brightness.dark;
+    final phase = progress * math.pi * 2;
+    void glow(Offset center, double radius, Color color, double opacity) {
+      final bounds = Rect.fromCircle(center: center, radius: radius);
+      final paint = Paint()
+        ..shader = RadialGradient(
+          colors: [
+            color.withValues(alpha: opacity),
+            color.withValues(alpha: 0),
+          ],
+        ).createShader(bounds);
+      canvas.drawCircle(center, radius, paint);
+    }
+
+    glow(
+      Offset(size.width * (.20 + .10 * math.sin(phase)), size.height * .14),
+      size.width * .70,
+      scheme.primary,
+      dark ? .19 : .20,
+    );
+    glow(
+      Offset(size.width * (.88 - .11 * math.sin(phase)), size.height * .68),
+      size.width * .58,
+      scheme.tertiary,
+      dark ? .13 : .15,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_AmbientPainter oldDelegate) =>
+      oldDelegate.progress != progress || oldDelegate.scheme != scheme;
+}
+
+class Glass extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final Color? tintColor;
+  final double bottomSpacing;
+  final BorderRadius borderRadius;
+
+  const Glass({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(20),
+    this.tintColor,
+    this.bottomSpacing = 14,
+    this.borderRadius = const BorderRadius.all(Radius.circular(24)),
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final surface = tintColor == null
+        ? theme.colorScheme.surface
+        : Color.alphaBlend(
+            tintColor!.withValues(alpha: dark ? .24 : .12),
+            theme.colorScheme.surface,
+          );
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomSpacing),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: borderRadius,
+          boxShadow: [
+            BoxShadow(
+              color: theme.colorScheme.primary.withValues(
+                alpha: dark ? .08 : .07,
+              ),
+              blurRadius: 28,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: borderRadius,
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withValues(alpha: dark ? .12 : .70),
+                    surface.withValues(alpha: dark ? .62 : .62),
+                    theme.colorScheme.surfaceContainerHighest.withValues(
+                      alpha: dark ? .28 : .42,
+                    ),
+                  ],
+                ),
+                borderRadius: borderRadius,
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: dark ? .18 : .82),
+                  width: 1,
+                ),
+              ),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.center,
+                            colors: [
+                              Colors.white.withValues(alpha: dark ? .07 : .30),
+                              Colors.transparent,
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: padding,
+                    child: Material(
+                      type: MaterialType.transparency,
+                      child: child,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class SoftEntrance extends StatefulWidget {
+  final Widget child;
+  final Duration delay;
+
+  const SoftEntrance({
+    super.key,
+    required this.child,
+    this.delay = Duration.zero,
+  });
+
+  @override
+  State<SoftEntrance> createState() => _SoftEntranceState();
+}
+
+class _SoftEntranceState extends State<SoftEntrance>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 560),
+  );
+  Timer? _delayTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.delay == Duration.zero) {
+      _controller.forward();
+    } else {
+      _delayTimer = Timer(widget.delay, () {
+        if (mounted) _controller.forward();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _delayTimer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reduced = MediaQuery.disableAnimationsOf(context);
+    return AnimatedBuilder(
+      animation: _controller,
+      child: widget.child,
+      builder: (context, child) {
+        final value = reduced
+            ? 1.0
+            : Curves.easeOutCubic.transform(_controller.value);
+        return Opacity(
+          opacity: value,
+          child: Transform.translate(
+            offset: Offset(0, 16 * (1 - value)),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
 }
 
 void notice(BuildContext context, Object text) {
@@ -528,178 +904,404 @@ class Home extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => Shell(
-    title: state.assistantName,
-    actions: [
-      IconButton(
-        tooltip: 'Settings',
-        onPressed: () => Navigator.pushNamed(context, '/settings'),
-        icon: const Icon(Icons.tune),
-      ),
-    ],
-    child: ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        Center(child: AssistantOrb(busy: state.busy)),
-        const SizedBox(height: 12),
-        Text(
-          'A clearer day,\none thought at a time.',
-          style: Theme.of(context).textTheme.headlineLarge,
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final openTasks = state.local
+        .rows('tasks')
+        .where((r) => !r['done'])
+        .toList();
+    final attempts = state.local.rows('attempts');
+    final upcomingReminders = state.local
+        .rows('actions')
+        .where(
+          (r) =>
+              r['status'] == 'scheduled' &&
+              r['action']['at_ms'] > DateTime.now().millisecondsSinceEpoch,
+        )
+        .take(3)
+        .toList();
+    return Shell(
+      title: state.assistantName,
+      actions: [
+        IconButton(
+          tooltip: 'Settings',
+          onPressed: () => Navigator.pushNamed(context, '/settings'),
+          icon: const Icon(Icons.tune_rounded),
         ),
-        const SizedBox(height: 12),
-        Text(
-          'PERSONAL ASSISTANT  /  PRIVATE TEST',
-          style: Theme.of(context).textTheme.labelSmall,
-        ),
-        const SizedBox(height: 24),
-        Glass(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Your local overview',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              Text(
-                '${state.local.rows('tasks').where((r) => !r['done']).length} open tasks · ${state.local.rows('attempts').length} recorded study attempts',
-              ),
-              for (final task
-                  in state.local.rows('tasks').where((r) => !r['done']).take(3))
-                Text('— ${task['title']}'),
-              for (final reminder
-                  in state.local
-                      .rows('actions')
-                      .where(
-                        (r) =>
-                            r['status'] == 'scheduled' &&
-                            r['action']['at_ms'] >
-                                DateTime.now().millisecondsSinceEpoch,
-                      )
-                      .take(3))
-                Text(
-                  'Reminder: ${reminder['action']['title']} · ${DateTime.fromMillisecondsSinceEpoch(reminder['action']['at_ms'])}',
-                ),
-              const Text(
-                'Only actual local records. Calendar and automatic briefings are not connected.',
-              ),
-            ],
-          ),
-        ),
-        Glass(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Icon(Icons.auto_awesome_outlined, size: 36),
-              const SizedBox(height: 16),
-              Text(
-                'What’s on your mind?',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '${state.config.description}. Local notes, memory, tasks and progress work without a server. Online sends always need review.',
-              ),
-              const SizedBox(height: 18),
-              FilledButton.icon(
-                onPressed: () => Navigator.pushNamed(context, '/chat'),
-                icon: const Icon(Icons.arrow_forward),
-                label: const Text('Open conversation'),
-              ),
-            ],
-          ),
-        ),
-        Glass(
-          child: Column(
-            children: [
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.book_outlined),
-                title: const Text('Offline notebook'),
-                subtitle: const Text('A note that stays on this device'),
-                onTap: () => notebook(context),
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.psychology_outlined),
-                title: const Text('Chosen memories'),
-                subtitle: const Text('Local · inspect, edit, export or forget'),
-                onTap: () => Navigator.pushNamed(context, '/memory'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.checklist),
-                title: const Text('Tasks & history'),
-                subtitle: const Text(
-                  'Local tasks, chat search and data export',
-                ),
-                onTap: () => Navigator.pushNamed(context, '/library'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.school_outlined),
-                title: const Text('Study mode'),
-                subtitle: const Text(
-                  'Tutoring prompts and recorded practice attempts',
-                ),
-                onTap: () => Navigator.pushNamed(context, '/study'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.description_outlined),
-                title: const Text('Selected files'),
-                subtitle: const Text(
-                  'Open only a file you choose; no broad storage access',
-                ),
-                onTap: () => Navigator.pushNamed(context, '/files'),
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.notifications_outlined),
-                title: const Text('Set a reminder'),
-                subtitle: const Text('Choose the details, then approve'),
-                onTap: () => reminder(context),
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.open_in_new),
-                title: const Text('Open an Android app'),
-                subtitle: const Text('Only supported installed apps'),
-                onTap: () async {
-                  final package = await showModalBottomSheet<String>(
-                    context: context,
-                    builder: (c) => SafeArea(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          for (final entry in const {
-                            'Settings': 'com.android.settings',
-                            'Chrome': 'com.android.chrome',
-                            'YouTube': 'com.google.android.youtube',
-                            'Calculator': 'com.google.android.calculator',
-                          }.entries)
-                            ListTile(
-                              title: Text(entry.key),
-                              onTap: () => Navigator.pop(c, entry.value),
+      ],
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 112),
+        children: [
+          SoftEntrance(
+            child: Glass(
+              tintColor: theme.colorScheme.primary,
+              padding: const EdgeInsets.fromLTRB(22, 18, 22, 22),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.auto_awesome_rounded,
+                        size: 16,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'YOUR PRIVATE SPACE',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.0,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surface.withValues(
+                            alpha: .55,
+                          ),
+                          borderRadius: BorderRadius.circular(30),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: .44),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.phone_android_rounded,
+                              size: 14,
+                              color: theme.colorScheme.primary,
                             ),
+                            const SizedBox(width: 5),
+                            Text(
+                              'ON DEVICE',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: .6,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Center(child: AssistantOrb(busy: state.busy)),
+                  const SizedBox(height: 14),
+                  Text(
+                    'A clearer day,\none thought at a time.',
+                    style: theme.textTheme.headlineMedium?.copyWith(
+                      fontSize: 32,
+                      height: 1.06,
+                      letterSpacing: -1.05,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'A calm space for conversations, notes and small plans.',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      height: 1.45,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  FilledButton.icon(
+                    onPressed: () => Navigator.pushNamed(context, '/chat'),
+                    icon: const Icon(Icons.chat_bubble_outline_rounded),
+                    label: const Text('Open conversation'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SoftEntrance(
+            delay: const Duration(milliseconds: 90),
+            child: Glass(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.dashboard_outlined,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Your local overview',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _MetricPill(
+                        icon: Icons.check_circle_outline_rounded,
+                        value: '${openTasks.length}',
+                        label: 'open tasks',
+                      ),
+                      _MetricPill(
+                        icon: Icons.school_outlined,
+                        value: '${attempts.length}',
+                        label: 'study attempts',
+                      ),
+                    ],
+                  ),
+                  if (openTasks.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      'UP NEXT',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        letterSpacing: 1.0,
+                        fontWeight: FontWeight.w700,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    for (final task in openTasks.take(3))
+                      Padding(
+                        padding: const EdgeInsets.only(top: 7),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(
+                              Icons.circle,
+                              size: 7,
+                              color: theme.colorScheme.primary,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(child: Text(task['title'])),
+                          ],
+                        ),
+                      ),
+                  ] else ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'No open tasks saved on this phone.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                  for (final reminder in upcomingReminders)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 9),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.alarm_rounded,
+                            size: 17,
+                            color: theme.colorScheme.secondary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '${reminder['action']['title']} · ${DateTime.fromMillisecondsSinceEpoch(reminder['action']['at_ms'])}',
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ),
                         ],
                       ),
                     ),
-                  );
-                  if (package != null && context.mounted) {
-                    await action(context, {
-                      'kind': 'open_app',
-                      'package': package,
-                    });
-                  }
-                },
+                  const SizedBox(height: 12),
+                  Text(
+                    'Only actual local records. Calendar and automatic briefings are not connected.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
-        const Text(
-          'Device actions need your review. The AI cannot run shell commands or send messages.',
-          textAlign: TextAlign.center,
-        ),
-      ],
-    ),
-  );
+          SoftEntrance(
+            delay: const Duration(milliseconds: 180),
+            child: Glass(
+              padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.grid_view_rounded,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        'Your toolkit',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: -.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.book_outlined),
+                    title: const Text('Offline notebook'),
+                    subtitle: const Text('A note that stays on this device'),
+                    onTap: () => notebook(context),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.psychology_outlined),
+                    title: const Text('Chosen memories'),
+                    subtitle: const Text(
+                      'Local · inspect, edit, export or forget',
+                    ),
+                    onTap: () => Navigator.pushNamed(context, '/memory'),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.checklist_rounded),
+                    title: const Text('Tasks & history'),
+                    subtitle: const Text(
+                      'Local tasks, chat search and data export',
+                    ),
+                    onTap: () => Navigator.pushNamed(context, '/library'),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.school_outlined),
+                    title: const Text('Study mode'),
+                    subtitle: const Text(
+                      'Tutoring prompts and recorded practice attempts',
+                    ),
+                    onTap: () => Navigator.pushNamed(context, '/study'),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.description_outlined),
+                    title: const Text('Selected files'),
+                    subtitle: const Text(
+                      'Open only a file you choose; no broad storage access',
+                    ),
+                    onTap: () => Navigator.pushNamed(context, '/files'),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.notifications_outlined),
+                    title: const Text('Set a reminder'),
+                    subtitle: const Text('Choose the details, then approve'),
+                    onTap: () => reminder(context),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.open_in_new_rounded),
+                    title: const Text('Open an Android app'),
+                    subtitle: const Text('Only supported installed apps'),
+                    onTap: () async {
+                      final package = await showModalBottomSheet<String>(
+                        context: context,
+                        builder: (c) => SafeArea(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              for (final entry in const {
+                                'Settings': 'com.android.settings',
+                                'Chrome': 'com.android.chrome',
+                                'YouTube': 'com.google.android.youtube',
+                                'Calculator': 'com.google.android.calculator',
+                              }.entries)
+                                ListTile(
+                                  title: Text(entry.key),
+                                  onTap: () => Navigator.pop(c, entry.value),
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                      if (package != null && context.mounted) {
+                        await action(context, {
+                          'kind': 'open_app',
+                          'package': package,
+                        });
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
+            child: Text(
+              'Device actions need your review. The AI cannot run shell commands or send messages.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetricPill extends StatelessWidget {
+  final IconData icon;
+  final String value;
+  final String label;
+
+  const _MetricPill({
+    required this.icon,
+    required this.value,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: scheme.surface.withValues(alpha: .45),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: .42)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: scheme.primary),
+          const SizedBox(width: 8),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.titleSmall
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(width: 5),
+          Text(label, style: Theme.of(context).textTheme.bodySmall),
+        ],
+      ),
+    );
+  }
 }
 
 class ChatScreen extends StatefulWidget {
@@ -1126,15 +1728,39 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-              child: Text(
-                '${state.config.description} · ${state.language} · ${state.specialist}. No automatic online fallback. Memory scope: ${state.conversation}',
-                style: Theme.of(context).textTheme.bodySmall,
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+              child: Glass(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
+                bottomSpacing: 2,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.shield_outlined,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        '${state.config.description} · ${state.language} · ${state.specialist}. No automatic online fallback. Memory scope: ${state.conversation}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             Expanded(
               child: ListView(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
                 children: [
                   if (state.messages.isEmpty)
                     const Glass(
@@ -1143,55 +1769,62 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       ),
                     ),
                   for (final m in state.messages)
-                    Align(
-                      alignment: m['role'] == 'user'
-                          ? Alignment.centerRight
-                          : Alignment.centerLeft,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 560),
-                        child: Glass(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                m['role'] == 'user'
-                                    ? 'YOU'
-                                    : state.assistantName,
-                                style: Theme.of(context).textTheme.labelSmall,
-                              ),
-                              const SizedBox(height: 6),
-                              MarkdownBody(
-                                data: m['text'] as String,
-                                selectable: true,
-                                imageBuilder: (_, _, _) => const Text(
-                                  '[Remote image blocked — no automatic network fetch]',
+                    SoftEntrance(
+                      child: Align(
+                        alignment: m['role'] == 'user'
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 560),
+                          child: Glass(
+                            tintColor: m['role'] == 'user'
+                                ? Theme.of(context).colorScheme.primary
+                                : null,
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  m['role'] == 'user'
+                                      ? 'YOU'
+                                      : state.assistantName,
+                                  style: Theme.of(context).textTheme.labelSmall,
                                 ),
-                                onTapLink: (_, _, _) => notice(
-                                  context,
-                                  'Links are not opened automatically. Review and copy the destination if needed.',
-                                ),
-                              ),
-                              if (m['state'] == 'complete' &&
-                                  m['role'] == 'assistant')
-                                TextButton.icon(
-                                  onPressed: () =>
-                                      playExpressiveVoice(m['text'] as String),
-                                  icon: Icon(
-                                    speaking
-                                        ? Icons.stop_circle_outlined
-                                        : Icons.record_voice_over,
+                                const SizedBox(height: 6),
+                                MarkdownBody(
+                                  data: m['text'] as String,
+                                  selectable: true,
+                                  imageBuilder: (_, _, _) => const Text(
+                                    '[Remote image blocked — no automatic network fetch]',
                                   ),
-                                  label: Text(
-                                    speaking
-                                        ? 'Stop voice'
-                                        : 'Play expressive voice',
+                                  onTapLink: (_, _, _) => notice(
+                                    context,
+                                    'Links are not opened automatically. Review and copy the destination if needed.',
                                   ),
                                 ),
-                              if (m['state'] != 'complete')
-                                const Text(
-                                  'Interrupted • not a completed reply',
-                                ),
-                            ],
+                                if (m['state'] == 'complete' &&
+                                    m['role'] == 'assistant')
+                                  TextButton.icon(
+                                    onPressed: () => playExpressiveVoice(
+                                      m['text'] as String,
+                                    ),
+                                    icon: Icon(
+                                      speaking
+                                          ? Icons.stop_circle_outlined
+                                          : Icons.record_voice_over,
+                                    ),
+                                    label: Text(
+                                      speaking
+                                          ? 'Stop voice'
+                                          : 'Play expressive voice',
+                                    ),
+                                  ),
+                                if (m['state'] != 'complete')
+                                  const Text(
+                                    'Interrupted • not a completed reply',
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -1228,61 +1861,110 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ],
               ),
             ),
-            if (listening)
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Column(
-                  children: [
-                    const Text('Microphone on • listening'),
-                    SizedBox(
-                      height: 28,
-                      child: CustomPaint(
-                        size: const Size(180, 28),
-                        painter: WavePainter(
-                          level,
-                          Theme.of(context).colorScheme.primary,
+            AnimatedSwitcher(
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 240),
+              transitionBuilder: (child, animation) => SizeTransition(
+                sizeFactor: animation,
+                alignment: Alignment.topCenter,
+                child: FadeTransition(opacity: animation, child: child),
+              ),
+              child: listening
+                  ? Padding(
+                      key: const ValueKey('listening'),
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+                      child: Glass(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 10,
                         ),
+                        bottomSpacing: 0,
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.mic_rounded,
+                              color: Theme.of(context).colorScheme.primary,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 10),
+                            const Text('Microphone on · listening'),
+                            const Spacer(),
+                            SizedBox(
+                              width: 110,
+                              height: 28,
+                              child: CustomPaint(
+                                painter: WavePainter(
+                                  level,
+                                  Theme.of(context).colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : const SizedBox(key: ValueKey('not-listening')),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: Glass(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                bottomSpacing: 0,
+                borderRadius: BorderRadius.circular(28),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    IconButton.filledTonal(
+                      tooltip: listening ? 'Stop microphone' : 'Use microphone',
+                      onPressed: listen,
+                      icon: Icon(
+                        listening ? Icons.mic_rounded : Icons.mic_none_rounded,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: TextField(
+                        controller: input,
+                        minLines: 1,
+                        maxLines: 5,
+                        maxLength: 8000,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: const InputDecoration(
+                          hintText: 'Message your assistant…',
+                          filled: false,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 14,
+                          ),
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          counterText: '',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    IconButton.filled(
+                      tooltip: state.busy || speaking
+                          ? 'Stop response'
+                          : 'Send message',
+                      onPressed: state.busy || speaking ? stopAll : send,
+                      style: IconButton.styleFrom(
+                        fixedSize: const Size(48, 48),
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor: Theme.of(context)
+                            .colorScheme
+                            .onPrimary,
+                      ),
+                      icon: Icon(
+                        state.busy || speaking
+                            ? Icons.stop_rounded
+                            : Icons.arrow_upward_rounded,
                       ),
                     ),
                   ],
                 ),
-              ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  IconButton(
-                    tooltip: listening ? 'Stop microphone' : 'Use microphone',
-                    onPressed: listen,
-                    icon: Icon(listening ? Icons.mic : Icons.mic_none),
-                  ),
-                  Expanded(
-                    child: TextField(
-                      controller: input,
-                      minLines: 1,
-                      maxLines: 5,
-                      maxLength: 8000,
-                      decoration: const InputDecoration(
-                        hintText: 'Write a message…',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.all(Radius.circular(24)),
-                        ),
-                        counterText: '',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton.filled(
-                    tooltip: state.busy || speaking
-                        ? 'Stop response'
-                        : 'Send message',
-                    onPressed: state.busy || speaking ? stopAll : send,
-                    icon: Icon(
-                      state.busy || speaking ? Icons.stop : Icons.arrow_upward,
-                    ),
-                  ),
-                ],
               ),
             ),
           ],
