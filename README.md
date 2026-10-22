@@ -29,10 +29,11 @@ for genuinely missing essentials, not routine implementation choices. Present th
 final action for approval before a message, payment, deletion, access change, or other
 consequential external effect. An edit invalidates the old approval.
 
-This release implements that contract in a small scope: up to four validated tool steps,
+This starter implements that contract in a small scope: up to four validated tool steps,
 auto-running calculation/search/local notes, and exact message-draft review. It **cannot
-send a message**, even after approval. Real research and account connections are future
-work, not secretly enabled features.
+send a real message**, even after approval. The separate [fake-only executor note](docs/FAKE_EXECUTOR.md)
+describes a disabled-by-default state-machine seam for local tests; it has no real provider
+or live-send path. Real research and account connections are future work, not secretly enabled features.
 
 ## Install a release package
 
@@ -185,7 +186,7 @@ scheduler, device control, autonomous shell, deployment, or payment handler.
 | Agent loop | Up to 4 steps; safe preparation runs automatically; side-effect-free offline plan preview | Infinite autonomy, retries, cross-step model replanning |
 | Memory | Persistent local SQLite notes and review audit | Encrypted vault, semantic search, cloud sync |
 | Connections | Explicit allowlisted tool registry; separate owner-rooted local text-search CLI | Model-selected filesystem access or live email, calendar, browser, WhatsApp or bank access |
-| Final review | Exact message draft, expiry, single use, edit invalidation | Sending a message after approval |
+| Final review | Exact message draft, expiry, single use, edit invalidation; fake-only execution state seam | Live messaging, delivery confirmation, authenticated sender/account binding |
 | Offline | Complete demo works without a model or network | A downloaded LLM bundled in this repo |
 | Local LLM | Optional Ollama-style loopback adapter, mocked tests | Real model tested or installed on your device |
 | Cloud | Optional OpenAI chat-completions adapter, mocked tests | A deployed service, free usage, or tested account integration |
@@ -241,8 +242,9 @@ not a live cloud account or installed local model. The [comparison record](docs/
 explains the boundary and the reproduced error-handling fix.
 
 The checked result and test scope are in [verification](docs/VERIFICATION.md).
-Tests cover local execution, approval boundaries, exact payloads, edits, expiry,
-malicious/invalid plans, bounded calculator inputs, and mocked provider protocols.
+Tests cover local execution, approval boundaries, exact payloads, edits, expiry, the fake-only
+executor's claim/idempotency/unknown-reconciliation paths, malicious/invalid plans, bounded
+calculator inputs, and mocked provider protocols.
 They do not establish production security, real-model accuracy, or Android compatibility.
 
 ## Read and build next
