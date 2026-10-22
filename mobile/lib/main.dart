@@ -1756,7 +1756,7 @@ class Home extends StatelessWidget {
     final modeLabel = state.engine == 'offline'
         ? state.experimentalOfflineChatEnabled
             ? 'Experimental Gemma · local only'
-            : 'Offline AI · opt-in needed'
+            : 'Gemma opt-in needed'
         : 'Online mode selected';
     return Shell(
       title: state.assistantName,
