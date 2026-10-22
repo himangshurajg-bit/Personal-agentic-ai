@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'phone_data.dart';
 import 'app_lock.dart';
 import 'engines.dart';
+import 'mcp_servers.dart';
 import 'visual_theme.dart';
 
 class ServiceException implements Exception {
@@ -71,6 +72,9 @@ class AssistantState extends ChangeNotifier {
   }) : clientFactory = clientFactory ?? http.Client.new,
        authenticator = authenticator ?? LocalAuthDeviceAuthenticator();
   late final PhoneData local = PhoneData(storage);
+  late final McpServerStore mcpStore = McpServerStore(storage, clientFactory);
+  List<McpServer> customMcpServers = [];
+  String mcpLoadError = '';
   String speechMode = 'offline';
   String assistantName = 'Personal assistant';
   String engine = 'offline',
@@ -122,6 +126,11 @@ class AssistantState extends ChangeNotifier {
       appLockEnabled = savedLock == 'yes';
       appLocked = appLockEnabled;
       await local.load();
+      try {
+        customMcpServers = await mcpStore.load();
+      } catch (_) {
+        mcpLoadError = 'Saved MCP server settings could not be loaded.';
+      }
       assistantName =
           await storage.read(key: 'assistant_name') ?? 'Personal assistant';
       speechMode = await storage.read(key: 'speech_mode') ?? 'offline';
@@ -316,6 +325,46 @@ class AssistantState extends ChangeNotifier {
       privateServiceToken = '';
     }
     notifyListeners();
+  }
+
+  Future<void> addMcpServer(String name, String endpoint, String token) async {
+    validateMcpServer(name, endpoint);
+    if (customMcpServers.length >= 25) {
+      throw const McpException('You can add up to 25 MCP servers.');
+    }
+    if (customMcpServers.any((s) => s.name.toLowerCase() == name.trim().toLowerCase())) {
+      throw const McpException('A server with that name already exists.');
+    }
+    final server = McpServer(
+      id: 'mcp-${DateTime.now().microsecondsSinceEpoch}',
+      name: name.trim(),
+      endpoint: endpoint.trim(),
+    );
+    final next = [...customMcpServers, server];
+    await mcpStore.save(next);
+    try {
+      await mcpStore.setBearerToken(server.id, token.trim());
+    } catch (_) {
+      await mcpStore.remove(server, next);
+      rethrow;
+    }
+    customMcpServers = next;
+    mcpLoadError = '';
+    notifyListeners();
+  }
+
+  Future<void> removeMcpServer(String id) async {
+    final server = customMcpServers.where((s) => s.id == id).firstOrNull;
+    if (server == null) return;
+    await mcpStore.remove(server, customMcpServers);
+    customMcpServers = customMcpServers.where((s) => s.id != id).toList();
+    notifyListeners();
+  }
+
+  Future<List<McpToolInfo>> discoverMcpTools(String id) async {
+    final server = customMcpServers.where((s) => s.id == id).firstOrNull;
+    if (server == null) throw const McpException('MCP server is no longer configured.');
+    return mcpStore.discoverTools(server);
   }
 
   Future<void> saveNote(String value) async {

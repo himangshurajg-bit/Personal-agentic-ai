@@ -7,6 +7,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter/services.dart';
 
 import 'assistant_state.dart';
+import 'mcp_servers.dart';
 import 'phone_screens.dart';
 import 'home_orb.dart';
 import 'ui_motion.dart';
@@ -2844,6 +2845,7 @@ class _SettingsState extends State<Settings> {
             ],
           ),
         ),
+        CustomMcpPanel(state: widget.state),
         TextButton(
           onPressed: () async {
             try {
@@ -3154,4 +3156,154 @@ class _MemoriesState extends State<Memories> {
       ],
     ),
   );
+}
+
+
+class CustomMcpPanel extends StatefulWidget {
+  final AssistantState state;
+  const CustomMcpPanel({super.key, required this.state});
+  @override
+  State<CustomMcpPanel> createState() => _CustomMcpPanelState();
+}
+
+class _CustomMcpPanelState extends State<CustomMcpPanel> {
+  bool busy = false;
+
+  Future<void> _add() async {
+    final name = TextEditingController();
+    final endpoint = TextEditingController();
+    final token = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final values = await showDialog<List<String>>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add custom MCP server'),
+        content: SizedBox(
+          width: 480,
+          child: Form(
+            key: formKey,
+            child: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                TextFormField(
+                  controller: name,
+                  maxLength: 48,
+                  decoration: const InputDecoration(labelText: 'Server name'),
+                  validator: (value) {
+                    final normalized = (value ?? '').trim();
+                    if (normalized.isEmpty || normalized.runes.length > 48 ||
+                        normalized.contains(RegExp(r'[\x00-\x1f]'))) {
+                      return 'Use 1–48 characters without control characters.';
+                    }
+                    return null;
+                  },
+                ),
+                TextFormField(
+                  controller: endpoint,
+                  keyboardType: TextInputType.url,
+                  autocorrect: false,
+                  decoration: const InputDecoration(labelText: 'MCP server URL', hintText: 'https://mcp.example.com/mcp'),
+                  validator: (value) {
+                    try { validateMcpEndpoint(value ?? ''); return null; }
+                    catch (e) { return e.toString(); }
+                  },
+                ),
+                TextFormField(
+                  controller: token,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  autofillHints: const [],
+                  decoration: const InputDecoration(labelText: 'Optional bearer token'),
+                ),
+                const SizedBox(height: 10),
+                const Text('Only the MCP initialize and tools/list requests go to this server. The token is kept in phone secure storage. Discovered tools are not called, and no chat or memory context is sent.'),
+              ]),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () {
+            if (formKey.currentState!.validate()) Navigator.pop(context, [name.text, endpoint.text, token.text]);
+          }, child: const Text('Add server')),
+        ],
+      ),
+    );
+    name.dispose(); endpoint.dispose(); token.dispose();
+    if (values == null || !mounted) return;
+    try {
+      await widget.state.addMcpServer(values[0], values[1], values[2]);
+      if (mounted) notice(context, 'MCP server saved on this phone.');
+    } catch (e) {
+      if (mounted) notice(context, e);
+    }
+  }
+
+  Future<void> _discover(McpServer server) async {
+    setState(() => busy = true);
+    try {
+      final tools = await widget.state.discoverMcpTools(server.id);
+      if (!mounted) return;
+      await showDialog<void>(context: context, builder: (context) => AlertDialog(
+        title: Text('${server.name} · ${tools.length} tools'),
+        content: SizedBox(width: 480, child: tools.isEmpty
+          ? const Text('The server responded, but advertised no tools.')
+          : SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              for (final tool in tools) Padding(padding: const EdgeInsets.only(bottom: 12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(tool.name, style: Theme.of(context).textTheme.titleSmall),
+                if (tool.description.isNotEmpty) Text(tool.description),
+              ])),
+              const Text('Discovery only. Tools cannot be invoked by this app yet.'),
+            ]))),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+      ));
+    } catch (e) {
+      if (mounted) notice(context, e);
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> _remove(McpServer server) async {
+    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: Text('Remove ${server.name}?'),
+      content: const Text('This removes the saved server and its phone-stored bearer token. It does not revoke the token at the server.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Remove'))],
+    )) ?? false;
+    if (!confirmed || !mounted) return;
+    try { await widget.state.removeMcpServer(server.id); }
+    catch (e) { if (mounted) notice(context, e); }
+  }
+
+  @override
+  Widget build(BuildContext context) => Glass(child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text('Custom MCP servers', style: Theme.of(context).textTheme.titleMedium),
+      const SizedBox(height: 6),
+      const Text('Add a remote Model Context Protocol server and inspect its advertised tools. Endpoints must use HTTPS (loopback HTTP is allowed for local testing). Treat servers and tool descriptions as untrusted.'),
+      if (widget.state.mcpLoadError.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text(widget.state.mcpLoadError)),
+      for (final server in widget.state.customMcpServers) ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: const Icon(Icons.hub_outlined),
+        title: Text(server.name),
+        subtitle: Text(server.endpoint, maxLines: 2, overflow: TextOverflow.ellipsis),
+        trailing: PopupMenuButton<String>(
+          enabled: !busy,
+          onSelected: (value) => value == 'discover' ? _discover(server) : _remove(server),
+          itemBuilder: (context) => const [
+            PopupMenuItem(value: 'discover', child: Text('Test & discover tools')),
+            PopupMenuItem(value: 'remove', child: Text('Remove server')),
+          ],
+        ),
+      ),
+      if (busy) const LinearProgressIndicator(),
+      Align(alignment: Alignment.centerLeft, child: OutlinedButton.icon(
+        onPressed: widget.state.customMcpServers.length >= 25 ? null : _add,
+        icon: const Icon(Icons.add), label: const Text('Add MCP server'),
+      )),
+      const SizedBox(height: 4),
+      const Text('No tool is automatically invoked. MCP tool execution and per-action approval integration are not implemented in this version.'),
+    ],
+  ));
 }
