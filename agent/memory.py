@@ -48,6 +48,11 @@ class Memory:
             id INTEGER PRIMARY KEY, event TEXT NOT NULL, detail TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS executions (
+            proposal_id TEXT PRIMARY KEY, payload_hash TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL UNIQUE, state TEXT NOT NULL,
+            resolution TEXT, claimed_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
         ''')
         self.db.commit()
         try:
@@ -108,10 +113,23 @@ class Memory:
             if datetime.fromisoformat(row['expires_at']) > current]
 
     def reject(self, token):
-        with self.db:
-            cursor = self.db.execute("UPDATE proposals SET status='rejected' WHERE id=? AND status='pending'", (token,))
-            if cursor.rowcount != 1:
-                raise ValueError('No pending proposal with that ID')
+        """Reject a pending or approved review unless execution was already claimed."""
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            row = self.db.execute('SELECT status FROM proposals WHERE id=?', (token,)).fetchone()
+            if not row:
+                raise ValueError('No rejectable proposal with that ID')
+            if self.db.execute('SELECT 1 FROM executions WHERE proposal_id=?', (token,)).fetchone():
+                raise ValueError('Execution already claimed; rejection cannot cancel an in-flight outcome')
+            if row['status'] not in ('pending', 'approved_not_sent'):
+                raise ValueError('No rejectable proposal with that ID')
+            self.db.execute("UPDATE proposals SET status='rejected' WHERE id=?", (token,))
+            self.db.execute('INSERT INTO audit(event,detail,created_at) VALUES(?,?,?)',
+                            ('review.reject', canonical({'proposal_id': token}), now().isoformat()))
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
 
     def revise(self, token, step, validator):
         """Editing creates a new review and invalidates the old one atomically."""
@@ -120,7 +138,8 @@ class Memory:
             raise ValueError('Only message drafts have a review')
         with self.db:
             cursor = self.db.execute("UPDATE proposals SET status='superseded' WHERE id=? AND status IN ('pending','approved_not_sent')", (token,))
-            if cursor.rowcount != 1:
+            if cursor.rowcount != 1 or self.db.execute(
+                    'SELECT 1 FROM executions WHERE proposal_id=?', (token,)).fetchone():
                 raise ValueError('No editable proposal with that ID')
             return self._insert_proposal(step)
 
@@ -149,3 +168,121 @@ class Memory:
         except Exception:
             self.db.rollback()
             raise
+
+
+    def claim_execution(self, token, validator):
+        """Atomically reserve one exact, unexpired approval before any provider call.
+
+        Existing claims are returned as non-dispatchable records. They are never reset or
+        reissued, including after a crash or an unknown provider outcome.
+        """
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            prior = self.db.execute('SELECT * FROM executions WHERE proposal_id=?', (token,)).fetchone()
+            if prior:
+                proposal = self.db.execute('SELECT payload,payload_hash FROM proposals WHERE id=?',
+                                           (token,)).fetchone()
+                if not proposal or proposal['payload_hash'] != prior['payload_hash']:
+                    raise ValueError('Execution no longer matches its saved proposal')
+                if digest(proposal['payload']) != prior['payload_hash']:
+                    raise ValueError('Payload changed; execution is blocked')
+                self.db.commit()
+                return {'claimed': False, 'state': prior['state'],
+                        'idempotency_key': prior['idempotency_key'],
+                        'payload_hash': prior['payload_hash'], 'exact_action': None}
+
+            row = self.db.execute('SELECT * FROM proposals WHERE id=?', (token,)).fetchone()
+            if not row or row['status'] != 'approved_not_sent':
+                raise ValueError('No approved, unclaimed proposal with that ID')
+            if datetime.fromisoformat(row['expires_at']) <= now():
+                raise ValueError('Proposal expired; request a fresh review')
+            if digest(row['payload']) != row['payload_hash']:
+                raise ValueError('Payload changed; review a new proposal')
+            step = json.loads(row['payload'])
+            validator(step)
+            if step['tool'] != 'message.prepare':
+                raise ValueError('Only prepared demo messages have an execution review')
+            key = digest('fake-message-execution:' + token + ':' + row['payload_hash'])
+            stamp = now().isoformat()
+            self.db.execute('INSERT INTO executions(proposal_id,payload_hash,idempotency_key,state,claimed_at,updated_at) '
+                            "VALUES(?,?,?,'claimed',?,?)",
+                            (token, row['payload_hash'], key, stamp, stamp))
+            self.db.execute("UPDATE proposals SET status='execution_claimed' WHERE id=? AND status='approved_not_sent'",
+                            (token,))
+            self.db.execute('INSERT INTO audit(event,detail,created_at) VALUES(?,?,?)',
+                            ('execution.claim', canonical({'proposal_id': token,
+                                                           'payload_hash': row['payload_hash'],
+                                                           'idempotency_key': key}), stamp))
+            self.db.commit()
+            return {'claimed': True, 'state': 'claimed', 'idempotency_key': key,
+                    'payload_hash': row['payload_hash'], 'exact_action': step}
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def record_execution_outcome(self, token, idempotency_key, outcome):
+        """Persist one provider-facing outcome; acceptance is not proof of delivery."""
+        states = {'accepted': 'provider_accepted', 'rejected': 'provider_rejected',
+                  'unknown': 'unknown'}
+        if outcome not in states:
+            raise ValueError('Unsupported execution outcome')
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            row = self.db.execute('SELECT * FROM executions WHERE proposal_id=?', (token,)).fetchone()
+            if not row or row['idempotency_key'] != idempotency_key:
+                raise ValueError('No matching execution claim')
+            if row['state'] != 'claimed':
+                raise ValueError('Execution outcome is already final or awaiting reconciliation')
+            state = states[outcome]
+            stamp = now().isoformat()
+            self.db.execute("UPDATE executions SET state=?,updated_at=? WHERE proposal_id=? AND state='claimed'",
+                            (state, stamp, token))
+            self.db.execute("UPDATE proposals SET status=? WHERE id=? AND status='execution_claimed'",
+                            (state, token))
+            self.db.execute('INSERT INTO audit(event,detail,created_at) VALUES(?,?,?)',
+                            ('execution.' + state, canonical({'proposal_id': token,
+                                                              'payload_hash': row['payload_hash'],
+                                                              'idempotency_key': idempotency_key}), stamp))
+            self.db.commit()
+            return self.execution_status(token)
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def reconcile_execution(self, token, idempotency_key, resolution):
+        """Resolve a claimed/unknown record with a constrained operator-supplied outcome.
+
+        This records an assertion for local recovery; it does not contact or authenticate a
+        messaging provider and cannot authorize a retry.
+        """
+        states = {'accepted': 'reconciled_accepted', 'not_accepted': 'reconciled_not_accepted'}
+        if resolution not in states:
+            raise ValueError('Resolution must be accepted or not_accepted')
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            row = self.db.execute('SELECT * FROM executions WHERE proposal_id=?', (token,)).fetchone()
+            if not row or row['idempotency_key'] != idempotency_key:
+                raise ValueError('No matching execution claim')
+            if row['state'] not in ('claimed', 'unknown'):
+                raise ValueError('Only an unresolved execution can be reconciled')
+            state = states[resolution]
+            stamp = now().isoformat()
+            self.db.execute('UPDATE executions SET state=?,resolution=?,updated_at=? WHERE proposal_id=?',
+                            (state, resolution, stamp, token))
+            self.db.execute('UPDATE proposals SET status=? WHERE id=?', (state, token))
+            self.db.execute('INSERT INTO audit(event,detail,created_at) VALUES(?,?,?)',
+                            ('execution.' + state, canonical({'proposal_id': token,
+                                                              'payload_hash': row['payload_hash'],
+                                                              'idempotency_key': idempotency_key}), stamp))
+            self.db.commit()
+            return self.execution_status(token)
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def execution_status(self, token):
+        """Return non-secret execution metadata, never payload contents."""
+        row = self.db.execute('SELECT proposal_id,payload_hash,idempotency_key,state,resolution,'
+                              'claimed_at,updated_at FROM executions WHERE proposal_id=?',
+                              (token,)).fetchone()
+        return dict(row) if row else None
