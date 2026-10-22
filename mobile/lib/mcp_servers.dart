@@ -158,7 +158,7 @@ class McpServerStore {
         throw const McpException('This build supports bounded JSON MCP responses, not SSE streams.');
       }
       final bytes = <int>[];
-      final readResponse = () async {
+      Future<List<int>> readResponse() async {
         await for (final chunk in response.stream) {
           if (bytes.length + chunk.length > 256 * 1024) {
             throw const McpException('MCP response exceeded the 256 KB safety limit.');
@@ -166,7 +166,7 @@ class McpServerStore {
           bytes.addAll(chunk);
         }
         return bytes;
-      };
+      }
       final boundedBytes = await readResponse().timeout(const Duration(seconds: 15));
       final text = utf8.decode(boundedBytes, allowMalformed: false);
       final dynamic decoded = jsonDecode(text);
@@ -191,7 +191,8 @@ class McpServerStore {
       final cursors = <String>{};
       String? cursor;
       for (var page = 0; page < 5; page++) {
-        final params = <String, dynamic>{if (cursor != null) 'cursor': cursor};
+        final params = <String, dynamic>{};
+        if (cursor != null) params['cursor'] = cursor;
         final result = await post('tools/list', params);
         final rawTools = result?['tools'];
         if (rawTools is! List || tools.length + rawTools.length > 200) {
