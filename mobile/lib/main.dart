@@ -4,6 +4,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:record/record.dart';
 import 'package:flutter/services.dart';
 
 import 'assistant_state.dart';
@@ -14,6 +15,7 @@ import 'phone_screens.dart';
 import 'safe_workflows.dart';
 import 'ui_motion.dart';
 import 'visual_theme.dart';
+import 'voice_services.dart';
 
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
@@ -2259,6 +2261,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   static const voiceEvents = MethodChannel('personal_assistant/voice');
   static const audioEvents = MethodChannel('personal_assistant/audio');
   final tts = FlutterTts();
+  final _deepgramRecorder = AudioRecorder();
+  final _deepgram = DeepgramTranscriber();
+  StreamSubscription<Uint8List>? _deepgramSubscription;
+  final List<Uint8List> _deepgramChunks = [];
+  Timer? _deepgramLimit;
+  int _deepgramBytes = 0;
+  bool _deepgramLimitHit = false;
   bool listening = false, speaking = false;
   bool _draftApplied = false;
   bool _initialVoiceStarted = false;
@@ -2335,6 +2344,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
       AssistantState.device.invokeMethod('voice_cancel');
+      unawaited(_cancelDeepgramRecording());
+      _deepgram.cancel();
       tts.stop();
       if (speaking) unawaited(stopExpressiveAudio());
       widget.state.stop();
@@ -2358,6 +2369,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> stopAll() async {
+    if (listening && widget.state.speechMode == 'deepgram') {
+      await _cancelDeepgramRecording();
+    }
     widget.state.stop();
     await AssistantState.device.invokeMethod('voice_cancel');
     await tts.stop();
@@ -2371,13 +2385,210 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _cancelDeepgramRecording() async {
+    _deepgramLimit?.cancel();
+    _deepgramLimit = null;
+    _deepgram.cancel();
+    try {
+      await _deepgramRecorder.stop();
+    } catch (_) {
+      // No active recording or platform service unavailable.
+    }
+    await _deepgramSubscription?.cancel();
+    _deepgramSubscription = null;
+    _deepgramChunks.clear();
+    _deepgramBytes = 0;
+    _deepgramLimitHit = false;
+    if (mounted) {
+      setState(() {
+        listening = false;
+        level = 0;
+      });
+    }
+  }
+
+  Future<void> _startDeepgramRecording() async {
+    if (widget.state.deepgramApiKey.isEmpty) {
+      notice(
+        context,
+        'Add your Deepgram API key in Settings before using Deepgram voice input.',
+      );
+      return;
+    }
+    var approved = false;
+    approved =
+        await showDialog<bool>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: const Text('Record speech for Deepgram?'),
+            content: const Text(
+              'Recording starts only after you approve and stays on while this screen is open. When you tap Stop, the audio is sent once to Deepgram for transcription; it may be processed under your Deepgram plan. The transcript is placed in the message box and is not sent to the chat until you press Send. No recording is uploaded in the background.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(c, true),
+                child: const Text('Record with Deepgram'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!approved || !mounted) return;
+    try {
+      if (!await _deepgramRecorder.hasPermission()) {
+        if (mounted) {
+          notice(
+            context,
+            'Allow microphone access in Android to record speech.',
+          );
+        }
+        return;
+      }
+      _deepgramChunks.clear();
+      _deepgramBytes = 0;
+      _deepgramLimitHit = false;
+      final stream = await _deepgramRecorder.startStream(
+        const RecordConfig(
+          encoder: AudioEncoder.pcm16bits,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+      );
+      if (!mounted) {
+        await _deepgramRecorder.stop();
+        return;
+      }
+      _deepgramSubscription = stream.listen(
+        (chunk) {
+          if (!mounted || _deepgramLimitHit) return;
+          _deepgramBytes += chunk.length;
+          // 60 seconds of 16 kHz mono PCM16 is about 1.9 MB.
+          if (_deepgramBytes > 16000 * 2 * 60) {
+            _deepgramLimitHit = true;
+            unawaited(_cancelDeepgramRecording());
+            if (mounted) {
+              notice(
+                context,
+                'Recording limit reached; audio was discarded. Tap the microphone to start again.',
+              );
+            }
+            return;
+          }
+          _deepgramChunks.add(chunk);
+        },
+        onError: (_) {
+          unawaited(_cancelDeepgramRecording());
+          if (mounted) {
+            notice(
+              context,
+              'Microphone recording stopped. Nothing was uploaded.',
+            );
+          }
+        },
+      );
+      _deepgramLimit = Timer(const Duration(seconds: 60), () {
+        if (!mounted) return;
+        unawaited(_cancelDeepgramRecording());
+        notice(
+          context,
+          'Recording limit reached; audio was discarded. Tap the microphone to start again.',
+        );
+      });
+      setState(() {
+        listening = true;
+        level = 0;
+      });
+      if (mounted) {
+        notice(
+          context,
+          'Recording on. Tap Stop to send this clip to Deepgram.',
+        );
+      }
+    } on PlatformException catch (e) {
+      if (mounted) {
+        notice(
+          context,
+          e.message ?? 'Microphone unavailable. Nothing was uploaded.',
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        notice(
+          context,
+          'Could not start microphone recording. Nothing was uploaded.',
+        );
+      }
+    }
+  }
+
+  Future<void> _stopDeepgramRecording() async {
+    _deepgramLimit?.cancel();
+    _deepgramLimit = null;
+    try {
+      await _deepgramRecorder.stop();
+      await _deepgramSubscription?.cancel();
+      _deepgramSubscription = null;
+      if (!mounted) return;
+      final size = _deepgramBytes;
+      final audio = Uint8List(size);
+      var offset = 0;
+      for (final chunk in _deepgramChunks) {
+        audio.setRange(offset, offset + chunk.length, chunk);
+        offset += chunk.length;
+      }
+      _deepgramChunks.clear();
+      _deepgramBytes = 0;
+      setState(() {
+        listening = false;
+        level = 0;
+      });
+      notice(
+        context,
+        'Sending this recording once to Deepgram for transcription…',
+      );
+      final transcript = await _deepgram.transcribe(
+        pcm16le: audio,
+        apiKey: widget.state.deepgramApiKey,
+        locale: widget.state.language,
+      );
+      if (mounted) {
+        input.text = [
+          input.text.trim(),
+          transcript,
+        ].where((part) => part.isNotEmpty).join(' ');
+        notice(
+          context,
+          'Transcript added to the message box. Review it before sending.',
+        );
+      }
+    } catch (e) {
+      if (mounted) notice(context, e);
+    } finally {
+      _deepgramChunks.clear();
+      _deepgramBytes = 0;
+      _deepgramLimitHit = false;
+    }
+  }
+
   Future<void> listen() async {
+    if (listening && widget.state.speechMode == 'deepgram') {
+      await _stopDeepgramRecording();
+      return;
+    }
     if (listening) {
       await stopAll();
       return;
     }
     await stopAll();
     if (!mounted) return;
+    if (widget.state.speechMode == 'deepgram') {
+      await _startDeepgramRecording();
+      return;
+    }
     var approved = false;
     if (widget.state.speechMode == 'online') {
       approved =
@@ -2584,6 +2795,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     voiceEvents.setMethodCallHandler(null);
     audioEvents.setMethodCallHandler(null);
     if (speaking) unawaited(stopExpressiveAudio());
+    _deepgramLimit?.cancel();
+    unawaited(_deepgramSubscription?.cancel());
+    unawaited(_deepgramRecorder.dispose());
+    _deepgram.cancel();
     AssistantState.device.invokeMethod('voice_cancel');
     tts.stop();
     widget.state.stop(notify: false);
@@ -3472,6 +3687,7 @@ class Settings extends StatefulWidget {
 }
 
 class _SettingsState extends State<Settings> {
+  final deepgramSecret = TextEditingController();
   late String speechMode = widget.state.speechMode;
   late String theme = widget.state.theme;
   late String language = widget.state.language;
@@ -3491,6 +3707,7 @@ class _SettingsState extends State<Settings> {
   @override
   void dispose() {
     widget.state.removeListener(_stateChanged);
+    deepgramSecret.dispose();
     name.dispose();
     super.dispose();
   }
@@ -3685,6 +3902,10 @@ class _SettingsState extends State<Settings> {
                 ),
                 items: const [
                   DropdownMenuItem(
+                    value: 'openai',
+                    child: Text('Online · OpenAI ChatGPT'),
+                  ),
+                  DropdownMenuItem(
                     value: 'offline',
                     child: Text('Offline · installed on-device service'),
                   ),
@@ -3692,12 +3913,50 @@ class _SettingsState extends State<Settings> {
                     value: 'online',
                     child: Text('Online · Android recognition provider'),
                   ),
+                  DropdownMenuItem(
+                    value: 'deepgram',
+                    child: Text('Deepgram · online speech-to-text'),
+                  ),
                 ],
                 onChanged: (v) => setState(() => speechMode = v!),
               ),
               const Text(
                 'Offline requires a verified installed language on Android 13+. Unsupported devices/languages stay unavailable. Online asks before microphone use. No silent network fallback.',
               ),
+              if (speechMode == 'deepgram') ...[
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Deepgram speech-to-text · not an LLM'),
+                ),
+                Text(
+                  'API key: ${widget.state.deepgramApiKey.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
+                ),
+                TextField(
+                  controller: deepgramSecret,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  autofillHints: const [],
+                  decoration: const InputDecoration(
+                    labelText: 'Deepgram API key',
+                    hintText:
+                        'Enter a new key or leave blank to keep the saved one',
+                  ),
+                ),
+                const Text(
+                  'Deepgram transcription is user-started, foreground-only, and currently supports English and Hindi. Audio is sent only after you tap Stop; transcript stays in the draft until you press Send.',
+                ),
+                if (widget.state.deepgramApiKey.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () =>
+                          widget.state.clearCloudProviderKey('deepgram'),
+                      icon: const Icon(Icons.key_off),
+                      label: const Text('Clear Deepgram key'),
+                    ),
+                  ),
+              ],
               TextField(
                 controller: name,
                 maxLength: 40,
@@ -3746,6 +4005,12 @@ class _SettingsState extends State<Settings> {
                     await widget.state.saveTheme(theme);
                     await widget.state.setAssistantName(name.text);
                     await widget.state.saveSpeechMode(speechMode);
+                    if (speechMode == 'deepgram') {
+                      await widget.state.saveCloudProviderKey(
+                        'deepgram', deepgramSecret.text,
+                      );
+                    }
+                    deepgramSecret.clear();
                     await widget.state.saveEngine(
                       widget.state.engine,
                       widget.state.model,
@@ -3938,8 +4203,11 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
   Future<void> _clearCredential({
     required bool compatible,
     bool gemini = false,
+    String? cloudProvider,
   }) async {
-    final label = gemini
+    final label = cloudProvider != null
+        ? '${cloudProvider == 'openai' ? 'OpenAI' : cloudProvider} API key'
+        : gemini
         ? 'Gemini API key'
         : compatible
         ? 'API key'
@@ -3966,10 +4234,14 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
         ) ??
         false;
     if (!remove || !mounted) return;
-    await widget.state.clearProviderCredential(
-      compatible: compatible,
-      gemini: gemini,
-    );
+    if (cloudProvider != null) {
+      await widget.state.clearCloudProviderKey(cloudProvider);
+    } else {
+      await widget.state.clearProviderCredential(
+        compatible: compatible,
+        gemini: gemini,
+      );
+    }
     if (mounted) {
       setState(() {
         connectionStatus = 'Credential cleared; connection is not configured.';
@@ -3988,6 +4260,11 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
           'gemini',
           AssistantState.geminiModel,
           widget.state.language,
+        );
+      } else if (engine == 'openai') {
+        await widget.state.saveCloudProviderKey('openai', compatibleSecret.text);
+        await widget.state.saveEngine(
+          'openai', model.text, widget.state.language,
         );
       } else {
         await widget.state.saveSettings(
@@ -4036,6 +4313,14 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
       await _save(showNotice: false);
       if (engine == 'gemini') {
         final result = await widget.state.testGeminiApi();
+        if (mounted) {
+          setState(() {
+            connectionStatus = result;
+            connectionSucceeded = true;
+          });
+        }
+      } else if (engine == 'openai') {
+        final result = await widget.state.testOpenAiApi();
         if (mounted) {
           setState(() {
             connectionStatus = result;
@@ -4128,7 +4413,13 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
                 ],
                 onChanged: saving || testing
                     ? null
-                    : (value) => setState(() => engine = value ?? 'gemini'),
+                    : (value) => setState(() {
+                        engine = value ?? 'gemini';
+                        if (engine == 'openai' &&
+                            widget.state.engine != 'openai') {
+                          model.text = 'gpt-4o-mini';
+                        }
+                      }),
               ),
               const SizedBox(height: 10),
               if (engine == 'gemini') ...[
@@ -4162,6 +4453,46 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
                             ),
                       icon: const Icon(Icons.key_off),
                       label: const Text('Clear Gemini API key'),
+                    ),
+                  ),
+              ] else if (engine == 'openai') ...[
+                Text(
+                  'API key: ${widget.state.openAiApiKey.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
+                ),
+                TextField(
+                  controller: model,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: const InputDecoration(
+                    labelText: 'OpenAI model ID',
+                    hintText: 'gpt-4o-mini',
+                  ),
+                ),
+                TextField(
+                  controller: compatibleSecret,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  autofillHints: const [],
+                  decoration: const InputDecoration(
+                    labelText: 'OpenAI API key',
+                    hintText: 'Leave blank to keep the saved key',
+                  ),
+                ),
+                const Text(
+                  'The key is stored in Android secure storage. Test connection only lists models from OpenAI; chat text is sent only when you submit a prompt. OpenAI account pricing and data handling apply.',
+                ),
+                if (widget.state.openAiApiKey.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: saving || testing
+                          ? null
+                          : () => _clearCredential(
+                              compatible: false, cloudProvider: 'openai',
+                            ),
+                      icon: const Icon(Icons.key_off),
+                      label: const Text('Clear OpenAI API key'),
                     ),
                   ),
               ] else if (engine == 'compatible') ...[

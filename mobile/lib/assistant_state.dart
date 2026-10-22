@@ -103,24 +103,28 @@ class AssistantState extends ChangeNotifier {
   String privateServiceToken = '';
   String compatibleApiKey = '';
   String geminiApiKey = '';
+  String openAiApiKey = '';
+  String deepgramApiKey = '';
   static const geminiModel = 'gemini-2.5-flash';
   static const geminiEndpoint =
       'https://generativelanguage.googleapis.com/v1beta/models/$geminiModel';
   String get endpoint => switch (engine) {
     'gemini' => geminiEndpoint,
+    'openai' => 'https://api.openai.com',
     'compatible' => compatibleApiEndpoint,
     _ => privateServiceEndpoint,
   };
   set endpoint(String value) {
     if (engine == 'compatible') {
       compatibleApiEndpoint = value;
-    } else if (engine != 'gemini') {
+    } else if (!['gemini', 'openai'].contains(engine)) {
       privateServiceEndpoint = value;
     }
   }
 
   String get token => switch (engine) {
     'gemini' => geminiApiKey,
+    'openai' => openAiApiKey,
     'compatible' => compatibleApiKey,
     _ => privateServiceToken,
   };
@@ -129,6 +133,8 @@ class AssistantState extends ChangeNotifier {
       compatibleApiKey = value;
     } else if (engine == 'gemini') {
       geminiApiKey = value;
+    } else if (engine == 'openai') {
+      openAiApiKey = value;
     } else {
       privateServiceToken = value;
     }
@@ -168,6 +174,9 @@ class AssistantState extends ChangeNotifier {
       assistantName =
           await storage.read(key: 'assistant_name') ?? 'Personal assistant';
       speechMode = await storage.read(key: 'speech_mode') ?? 'offline';
+      if (!['offline', 'online', 'deepgram'].contains(speechMode)) {
+        speechMode = 'offline';
+      }
       speakReplies = await storage.read(key: 'speak_replies') == 'yes';
       engine = await storage.read(key: 'engine') ?? 'gemini';
       experimentalOfflineChatEnabled =
@@ -186,6 +195,8 @@ class AssistantState extends ChangeNotifier {
       }
       model = await storage.read(key: 'model') ?? geminiModel;
       geminiApiKey = await storage.read(key: 'gemini_api_key') ?? '';
+      openAiApiKey = await storage.read(key: 'openai_api_key') ?? '';
+      deepgramApiKey = await storage.read(key: 'deepgram_api_key') ?? '';
       if (engine == 'gemini') model = geminiModel;
       final savedLanguage = await storage.read(key: 'language') ?? 'en-IN';
       language = languageLabels.containsKey(savedLanguage)
@@ -457,6 +468,40 @@ class AssistantState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> saveCloudProviderKey(String provider, String value) async {
+    final storageKey = switch (provider) {
+      'openai' => 'openai_api_key',
+      'gemini' => 'gemini_api_key',
+      'deepgram' => 'deepgram_api_key',
+      _ => throw ServiceException('Unsupported provider credential.'),
+    };
+    final key = value.trim();
+    if (key.isEmpty) return;
+    await storage.write(key: storageKey, value: key);
+    switch (provider) {
+      case 'openai': openAiApiKey = key; break;
+      case 'gemini': geminiApiKey = key; break;
+      case 'deepgram': deepgramApiKey = key; break;
+    }
+    notifyListeners();
+  }
+
+  Future<void> clearCloudProviderKey(String provider) async {
+    final storageKey = switch (provider) {
+      'openai' => 'openai_api_key',
+      'gemini' => 'gemini_api_key',
+      'deepgram' => 'deepgram_api_key',
+      _ => throw ServiceException('Unsupported provider credential.'),
+    };
+    await storage.delete(key: storageKey);
+    switch (provider) {
+      case 'openai': openAiApiKey = ''; break;
+      case 'gemini': geminiApiKey = ''; break;
+      case 'deepgram': deepgramApiKey = ''; break;
+    }
+    notifyListeners();
+  }
+
   Future<String> testGeminiApi() async {
     if (geminiApiKey.isEmpty) {
       throw ServiceException(
@@ -552,6 +597,52 @@ class AssistantState extends ChangeNotifier {
       throw ServiceException(
         'Gemini returned invalid JSON for the connection test. No chat content was sent.',
       );
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<String> testOpenAiApi() async {
+    if (openAiApiKey.isEmpty) {
+      throw ServiceException('Add your OpenAI API key first. No request was sent.');
+    }
+    final client = clientFactory();
+    try {
+      final request = http.Request(
+        'GET',
+        Uri.parse('https://api.openai.com/v1/models'),
+      )..followRedirects = false;
+      request.headers['Authorization'] = 'Bearer $openAiApiKey';
+      final response = await client.send(request).timeout(
+        const Duration(seconds: 12),
+      );
+      final status = response.statusCode;
+      if (status == 401 || status == 403) {
+        await response.stream.drain<void>();
+        throw ServiceException('OpenAI rejected this key. Check it and try again; no chat prompt was sent.');
+      }
+      if (status == 429) {
+        await response.stream.drain<void>();
+        throw ServiceException('OpenAI rate-limited the connection test. Nothing was retried.');
+      }
+      if (status < 200 || status >= 300) {
+        await response.stream.drain<void>();
+        throw ServiceException('OpenAI returned HTTP $status for the connection test. No chat prompt was sent.');
+      }
+      final body = await response.stream.bytesToString().timeout(
+        const Duration(seconds: 12),
+      );
+      final decoded = jsonDecode(body);
+      if (decoded is! Map || decoded['data'] is! List) {
+        throw ServiceException('OpenAI returned an unexpected model-list response.');
+      }
+      return 'Connected · OpenAI accepted the key and returned its model list. No chat prompt was sent.';
+    } on TimeoutException {
+      throw ServiceException('OpenAI connection test timed out. No chat prompt was sent.');
+    } on http.ClientException {
+      throw ServiceException('Could not reach the OpenAI API. No chat prompt was sent.');
+    } on FormatException {
+      throw ServiceException('OpenAI returned invalid JSON for the connection test. No chat prompt was sent.');
     } finally {
       client.close();
     }
@@ -678,7 +769,7 @@ class AssistantState extends ChangeNotifier {
   }
 
   Future<void> saveSpeechMode(String mode) async {
-    if (!['offline', 'online'].contains(mode)) {
+    if (!['offline', 'online', 'deepgram'].contains(mode)) {
       throw ServiceException('Unsupported speech mode');
     }
     await storage.write(key: 'speech_mode', value: mode);
@@ -690,12 +781,16 @@ class AssistantState extends ChangeNotifier {
     mode: engine,
     origin: engine == 'gemini'
         ? geminiEndpoint
+        : engine == 'openai'
+        ? 'https://api.openai.com'
         : engine == 'compatible'
         ? compatibleApiEndpoint
         : privateServiceEndpoint,
     model: engine == 'gemini' ? geminiModel : model,
     token: engine == 'gemini'
         ? geminiApiKey
+        : engine == 'openai'
+        ? openAiApiKey
         : engine == 'compatible'
         ? compatibleApiKey
         : privateServiceToken,
@@ -729,6 +824,7 @@ class AssistantState extends ChangeNotifier {
       'private_service',
       'compatible',
       'gemini',
+      'openai',
     ].contains(selected)) {
       throw ServiceException('Unsupported engine.');
     }
@@ -739,6 +835,8 @@ class AssistantState extends ChangeNotifier {
     await storage.write(key: 'engine', value: selected);
     final effectiveModel = selected == 'gemini'
         ? geminiModel
+        : selected == 'openai' && modelName.trim().isEmpty
+        ? 'gpt-4o-mini'
         : modelName.trim();
     await storage.write(key: 'model', value: effectiveModel);
     await storage.write(key: 'language', value: locale);
