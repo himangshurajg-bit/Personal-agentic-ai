@@ -30,9 +30,13 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
-      final state = AssistantState();
-      await state.initialize();
-      await state.finishOnboarding();
+      // This test covers Home navigation, not secure-setting hydration; seed
+      // the app-lock gate explicitly so secure-storage timing cannot hide Home.
+      final state = AssistantState()
+        ..ready = true
+        ..appLockConfigurationReady = true
+        ..onboarded = true;
+      await state.local.load();
       await state.remember('Synthetic navigation memory');
       await tester.pumpWidget(AssistantApp(state: state));
       await tester.pumpAndSettle();
