@@ -1,5 +1,6 @@
 package dev.personalagent.personal_assistant
 
+import android.app.ActivityManager
 import android.content.Context
 import android.os.Debug
 import android.os.Handler
@@ -165,6 +166,10 @@ internal class Gemma4OfflineCoordinator(
     @Volatile private var activeConversation: Conversation? = null
     @Volatile private var inferenceActive = false
     @Volatile private var runtimeOperation = false
+    @Volatile private var activePurpose: String? = null
+    @Volatile private var inferenceCancelRequested = false
+    @Volatile private var activeChatCancellation: AtomicBoolean? = null
+    @Volatile private var experimentalChatEnabled = false
     private val disposed = AtomicBoolean(false)
 
     private val modelFile get() = File(appContext.filesDir, Gemma4Artifact.MODEL_FILE)
@@ -172,6 +177,7 @@ internal class Gemma4OfflineCoordinator(
 
     fun status(): Map<String, Any?> {
         val available = try { StatFs(appContext.filesDir.path).availableBytes } catch (_: Exception) { 0L }
+        val memory = memorySnapshot()
         val partialBytes: Long = partialFile.takeIf { it.isFile }?.length()
             ?.coerceAtMost(Gemma4Artifact.MODEL_BYTES) ?: 0L
         return mapOf<String, Any?>(
@@ -184,10 +190,20 @@ internal class Gemma4OfflineCoordinator(
             "runtime_loaded" to (engine != null),
             "inference_active" to inferenceActive,
             "runtime_busy" to runtimeOperation,
-            "chat_available" to false,
+            "experimental_chat_enabled" to experimentalChatEnabled,
+            "chat_available" to (experimentalChatEnabled && engine != null),
+            "chat_qualified" to false,
+            "available_memory_bytes" to memory.availableBytes,
+            "total_memory_bytes" to memory.totalBytes,
+            "low_memory" to memory.lowMemory,
             "model_id" to Gemma4Artifact.MODEL_ID,
             "license" to Gemma4Artifact.LICENSE,
         )
+    }
+
+    fun setExperimentalChatEnabled(enabled: Boolean) {
+        experimentalChatEnabled = enabled
+        emit("status", *status().toList().toTypedArray())
     }
 
     fun startDownload() {
@@ -235,7 +251,7 @@ internal class Gemma4OfflineCoordinator(
                 }
                 if (downloadCancelled.get()) throw DownloadPaused()
                 Gemma4FileIntegrity.installAtomically(part, modelFile, Gemma4Artifact.MODEL_BYTES, Gemma4Artifact.SHA256)
-                emit("download_state", "state" to "complete", "bytes" to Gemma4Artifact.MODEL_BYTES, "total" to Gemma4Artifact.MODEL_BYTES, "message" to "Verified model saved in app-private storage. It is not enabled for chat.")
+                emit("download_state", "state" to "complete", "bytes" to Gemma4Artifact.MODEL_BYTES, "total" to Gemma4Artifact.MODEL_BYTES, "message" to "Verified model saved in app-private storage. Loading and a separate experimental-chat opt-in are still required.")
                 return
             }
             if (downloadCancelled.get()) throw DownloadPaused()
@@ -301,7 +317,7 @@ internal class Gemma4OfflineCoordinator(
             }
             if (downloadCancelled.get()) throw DownloadPaused()
             Gemma4FileIntegrity.installAtomically(partialFile, modelFile, Gemma4Artifact.MODEL_BYTES, Gemma4Artifact.SHA256)
-            emit("download_state", "state" to "complete", "bytes" to Gemma4Artifact.MODEL_BYTES, "total" to Gemma4Artifact.MODEL_BYTES, "message" to "Verified model saved in app-private storage. It is not enabled for chat.")
+            emit("download_state", "state" to "complete", "bytes" to Gemma4Artifact.MODEL_BYTES, "total" to Gemma4Artifact.MODEL_BYTES, "message" to "Verified model saved in app-private storage. Loading and a separate experimental-chat opt-in are still required.")
         } catch (_: DownloadPaused) {
             emit("download_state", "state" to "paused", "bytes" to (partialFile.takeIf(File::isFile)?.length() ?: 0L), "total" to Gemma4Artifact.MODEL_BYTES, "message" to "Download paused; verified progress stays in app-private storage. Resume is user-started.")
         } catch (error: Exception) {
@@ -376,7 +392,7 @@ internal class Gemma4OfflineCoordinator(
         inferenceScope.launch {
             runtimeMutex.withLock {
                 if (engine != null) {
-                    emit("runtime_state", "state" to "loaded", "message" to "Candidate is loaded for screening only; normal chat remains unavailable.")
+                    emit("runtime_state", "state" to "loaded", "message" to if (experimentalChatEnabled) "Gemma is loaded for fixed screening and explicitly opted-in experimental chat; it is not qualified." else "Gemma is loaded for screening. Turn on experimental chat in Settings if you want to use it for normal chat.")
                     return@withLock
                 }
                 if (runtimeOperation || inferenceActive) {
@@ -384,8 +400,12 @@ internal class Gemma4OfflineCoordinator(
                     return@withLock
                 }
                 runtimeOperation = true
-                emit("runtime_state", "state" to "verifying", "message" to "Rechecking the pinned model size and SHA-256 before local loading.")
+                val memory = memorySnapshot()
+                emit("runtime_state", "state" to "preflight", "available_memory_bytes" to memory.availableBytes, "low_memory" to memory.lowMemory, "message" to "Checking Android's memory warning before loading. The reading is not a guarantee of fit.")
                 try {
+                    if (memory.lowMemory) {
+                        throw IllegalStateException("Android currently reports low memory. Close other apps and try later; loading is not guaranteed even when this warning clears. No network fallback was used.")
+                    }
                     if (!Gemma4FileIntegrity.verify(modelFile, Gemma4Artifact.MODEL_BYTES, Gemma4Artifact.SHA256)) {
                         throw IllegalStateException("The installed model failed its size or SHA-256 check. Remove it and download again.")
                     }
@@ -404,7 +424,9 @@ internal class Gemma4OfflineCoordinator(
                         throw IllegalStateException("The model could not initialize on this device. It remains unqualified; no online fallback was used.", error)
                     }
                     engine = candidate
-                    emit("runtime_state", "state" to "loaded", "message" to "Candidate loaded for local screening only. It is not available in normal chat.")
+                    emit("runtime_state", "state" to "loaded", "message" to if (experimentalChatEnabled) "Gemma is loaded for fixed screening and explicitly opted-in experimental chat. Quality and Redmi/HyperOS behavior are unqualified." else "Gemma is loaded for screening; normal chat needs separate opt-in in Settings. The model is not qualified.")
+                } catch (error: OutOfMemoryError) {
+                    emit("runtime_state", "state" to "error", "message" to "Android ran out of memory while loading Gemma. The model remains unqualified; close other apps and retry only if you choose. No online fallback was used.")
                 } catch (error: Exception) {
                     emit("runtime_state", "state" to "error", "message" to (error.message ?: "The model could not be loaded locally."))
                 } finally {
@@ -432,7 +454,13 @@ internal class Gemma4OfflineCoordinator(
                     emit("inference_state", "state" to "error", "message" to "Another local model operation is already running.")
                     return@withLock
                 }
+                if (memorySnapshot().lowMemory) {
+                    emit("inference_state", "state" to "error", "message" to "Android reports low memory, so screening did not start. The candidate remains unqualified.")
+                    return@withLock
+                }
                 inferenceActive = true
+                activePurpose = "screening"
+                inferenceCancelRequested = false
                 val memoryBefore = currentPssMb()
                 val thermalBefore = currentThermalStatus()
                 val startedAt = SystemClock.elapsedRealtime()
@@ -444,6 +472,7 @@ internal class Gemma4OfflineCoordinator(
                         ConversationConfig(maxOutputToken = 256, automaticToolCalling = false),
                     )
                     activeConversation = conversation
+                    if (inferenceCancelRequested) throw CancellationException()
                     conversation.sendMessageAsync(prompt.text).collect { chunk ->
                         val text = chunk.toString()
                         output.append(text)
@@ -464,23 +493,134 @@ internal class Gemma4OfflineCoordinator(
                     )
                 } catch (_: CancellationException) {
                     emit("inference_state", "state" to "cancelled", "fixture_id" to prompt.id, "text" to output.toString(), "message" to "Local inference was cancelled. This candidate remains unqualified.")
+                } catch (error: OutOfMemoryError) {
+                    emit("inference_state", "state" to "error", "fixture_id" to prompt.id, "text" to output.toString(), "message" to "Android ran out of memory during local screening. The candidate remains unqualified; no network fallback was used.")
                 } catch (error: Exception) {
                     emit("inference_state", "state" to "error", "fixture_id" to prompt.id, "text" to output.toString(), "message" to (error.message ?: "Local inference failed; no network fallback was used."))
                 } finally {
                     activeConversation = null
                     try { conversation?.close() } catch (_: Exception) {}
                     inferenceActive = false
+                    activePurpose = null
                     emit("status", *status().toList().toTypedArray())
                 }
             }
         }
     }
 
+    /** Run an arbitrary user chat prompt only after explicit opt-in and explicit model loading. */
+    fun runChat(
+        prompt: String,
+        optedIn: Boolean,
+        complete: (String?, String?, String?) -> Unit,
+    ) {
+        val delivered = AtomicBoolean(false)
+        val finish: (String?, String?, String?) -> Unit = { text, code, message ->
+            if (delivered.compareAndSet(false, true)) {
+                mainHandler.post { complete(text, code, message) }
+            }
+        }
+        if (disposed.get()) {
+            finish(null, "unavailable", "The local model runtime is closing. No online fallback was used.")
+            return
+        }
+        if (!optedIn || !experimentalChatEnabled) {
+            finish(null, "opt_in_required", "Turn on experimental Gemma chat in Settings first. No online fallback was used.")
+            return
+        }
+        if (prompt.isBlank() || prompt.toByteArray(Charsets.UTF_8).size > 48 * 1024) {
+            finish(null, "invalid_prompt", "The local prompt is empty or too large. Shorten it and try again; no online fallback was used.")
+            return
+        }
+        val requestCancelled = AtomicBoolean(false)
+        activeChatCancellation = requestCancelled
+        inferenceScope.launch {
+            try {
+                runtimeMutex.withLock {
+                    if (requestCancelled.get()) {
+                        finish(null, "cancelled", "Local generation was cancelled before it started. Nothing was sent online.")
+                        return@withLock
+                    }
+                    val activeEngine = engine
+                    if (activeEngine == null) {
+                        finish(null, "model_unavailable", "Download and load Gemma from Settings > Offline Model & Experimental Chat first. No online fallback was used.")
+                        return@withLock
+                    }
+                    if (inferenceActive || runtimeOperation) {
+                        finish(null, "busy", "The local model is busy with another operation. Wait for it to finish and retry explicitly.")
+                        return@withLock
+                    }
+                    val memory = memorySnapshot()
+                    if (memory.lowMemory) {
+                        finish(null, "memory_preflight", "Android reports low memory, so local chat did not start. Close other apps and retry when the warning clears; no online fallback was used.")
+                        return@withLock
+                    }
+                    if (requestCancelled.get()) {
+                        finish(null, "cancelled", "Local generation was cancelled before it started. Nothing was sent online.")
+                        return@withLock
+                    }
+                    inferenceCancelRequested = false
+                    inferenceActive = true
+                    activePurpose = "chat"
+                    emit("inference_state", "state" to "running", "purpose" to "chat", "message" to "Generating locally with experimental Gemma. No prompt is sent to a service.")
+                    var conversation: Conversation? = null
+                    val output = StringBuilder()
+                    var finalState = "error"
+                    try {
+                        if (requestCancelled.get() || inferenceCancelRequested) throw CancellationException()
+                        conversation = activeEngine.createConversation(
+                            ConversationConfig(maxOutputToken = 512, automaticToolCalling = false),
+                        )
+                        activeConversation = conversation
+                        if (requestCancelled.get() || inferenceCancelRequested) throw CancellationException()
+                        conversation.sendMessageAsync(prompt).collect { chunk -> output.append(chunk.toString()) }
+                        val answer = output.toString()
+                        if (answer.isBlank()) {
+                            finish(null, "empty_response", "The local model returned no text. No online fallback was used.")
+                        } else {
+                            finalState = "complete"
+                            finish(answer, null, null)
+                        }
+                    } catch (_: CancellationException) {
+                        finalState = "cancelled"
+                        finish(null, "cancelled", "Local generation was cancelled. Nothing was sent online.")
+                    } catch (error: OutOfMemoryError) {
+                        finish(null, "memory_exhausted", "Android ran out of memory during local generation. The model is still unqualified; no online fallback was used.")
+                    } catch (error: Exception) {
+                        finish(null, "inference_failed", error.message ?: "Local generation failed. No online fallback was used.")
+                    } finally {
+                        activeConversation = null
+                        try { conversation?.close() } catch (_: Exception) {}
+                        inferenceActive = false
+                        activePurpose = null
+                        inferenceCancelRequested = false
+                        emit("inference_state", "state" to finalState, "purpose" to "chat")
+                        emit("status", *status().toList().toTypedArray())
+                    }
+                }
+            } catch (_: CancellationException) {
+                finish(null, "cancelled", "Local generation was cancelled. Nothing was sent online.")
+            } catch (error: Exception) {
+                finish(null, "inference_failed", error.message ?: "Local generation failed. No online fallback was used.")
+            } finally {
+                if (activeChatCancellation === requestCancelled) activeChatCancellation = null
+            }
+        }
+    }
+
+    fun cancelChat() {
+        activeChatCancellation?.set(true)
+        if (activePurpose == "chat") cancelInference()
+    }
+
     fun cancelInference() {
         if (!inferenceActive) return
+        inferenceCancelRequested = true
+        // Capture the current conversation so a delayed cancellation cannot hit a later turn.
+        val conversation = activeConversation ?: return
         controlScope.launch {
             try {
-                activeConversation?.cancelProcess()
+                conversation.cancelProcess()
             } catch (_: Exception) {
                 // The stream's completion handler owns cleanup and reports the final state.
             }
@@ -504,6 +644,7 @@ internal class Gemma4OfflineCoordinator(
 
     fun onAppPaused() {
         cancelDownload()
+        cancelChat()
         cancelInference()
         unloadCandidate()
     }
@@ -511,6 +652,7 @@ internal class Gemma4OfflineCoordinator(
     fun shutdown() {
         if (!disposed.compareAndSet(false, true)) return
         cancelDownload()
+        cancelChat()
         cancelInference()
         val cleanup = inferenceScope.launch {
             runtimeMutex.withLock { closeEngineOnce() }
@@ -531,6 +673,17 @@ internal class Gemma4OfflineCoordinator(
         val oldEngine = engine
         engine = null
         try { oldEngine?.close() } catch (_: Exception) {}
+    }
+
+    private data class MemorySnapshot(val availableBytes: Long, val totalBytes: Long, val lowMemory: Boolean)
+
+    private fun memorySnapshot(): MemorySnapshot = try {
+        val manager = appContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val info = ActivityManager.MemoryInfo()
+        manager.getMemoryInfo(info)
+        MemorySnapshot(info.availMem, info.totalMem, info.lowMemory)
+    } catch (_: Exception) {
+        MemorySnapshot(-1L, -1L, true)
     }
 
     private fun currentPssMb(): Long = try {

@@ -116,8 +116,34 @@ void main() {
       });
       expect(bad!['result'], 'failed');
       await s.send('No network should be used');
-      expect(s.error, contains('Offline AI is not installed'));
-      phase('offline mode failed closed without a network');
+      expect(s.error, contains('Experimental Gemma chat is off'));
+      phase('unopted offline chat failed closed');
+      final modelStatus = await AssistantState.offlineModel
+          .invokeMapMethod<String, dynamic>('status');
+      expect(modelStatus?['runtime_loaded'], false);
+      expect(modelStatus?['chat_qualified'], false);
+      await AssistantState.offlineModel.invokeMethod<void>(
+        'set_experimental_chat_enabled',
+        {'enabled': true},
+      );
+      await expectLater(
+        AssistantState.offlineModel.invokeMethod<String>('run_chat', {
+          'prompt': 'API36 local-channel smoke test',
+          'experimental_opt_in': true,
+        }),
+        throwsA(
+          isA<PlatformException>().having(
+            (error) => error.code,
+            'code',
+            'model_unavailable',
+          ),
+        ),
+      );
+      await AssistantState.offlineModel.invokeMethod<void>(
+        'set_experimental_chat_enabled',
+        {'enabled': false},
+      );
+      phase('opt-in local channel rejected an absent model without fallback');
       await tester.pumpWidget(AssistantApp(state: s));
       await pumpRouteFrames(tester);
       expect(find.text('API36 Test assistant'), findsOneWidget);
