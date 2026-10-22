@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; font-src 'none'; media-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<style>
+:root {
+  color-scheme: dark;
+  --ink: #e5fff9;
+  --muted: #9ab8b1;
+  --core-rgb: 34, 203, 209;
+  --core-bright: 205, 255, 251;
+  --core-deep: 10, 83, 95;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: #06110f;
+  color: var(--ink);
+}
+* { box-sizing: border-box; }
+body {
+  min-height: 100svh;
+  margin: 0;
+  padding: max(20px, env(safe-area-inset-top)) 18px max(20px, env(safe-area-inset-bottom));
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(ellipse at 50% 45%, rgba(10, 100, 92, .24), transparent 54%),
+    radial-gradient(ellipse at 80% 10%, rgba(37, 109, 103, .18), transparent 42%),
+    #06110f;
+}
+.widget { width: min(100%, 760px); }
+.widget-heading { padding: 0 8px; }
+.eyebrow, .fallback-label { letter-spacing: .2em; font-size: .68rem; color: #83d8cf; }
+h1 { margin: 9px 0 4px; font-size: clamp(1.6rem, 5vw, 2.4rem); font-weight: 560; letter-spacing: -.04em; }
+.note, .hint { color: var(--muted); line-height: 1.55; font-size: .9rem; }
+.hero-art {
+  position: relative;
+  width: 100%;
+  height: min(68svh, 560px);
+  min-height: 330px;
+  margin: 12px 0;
+  overflow: hidden;
+  isolation: isolate;
+  perspective: 1100px;
+  border: 1px solid rgba(117, 224, 212, .18);
+  border-radius: 30px;
+  background: radial-gradient(ellipse at 50% 53%, rgba(8, 45, 48, .72), rgba(5, 18, 17, .2) 62%, transparent 78%);
+  box-shadow: inset 0 0 70px rgba(45, 206, 196, .05), 0 20px 80px rgba(0, 0, 0, .22);
+}
+.depth-scene { position: absolute; inset: 0; display: grid; place-items: center; }
+.ai-core { position: relative; width: min(82%, 410px); aspect-ratio: 1; color: rgb(var(--core-rgb)); }
+.core-aura { position: absolute; inset: 19%; border-radius: 50%; background: radial-gradient(circle, rgba(var(--core-bright), .18), rgba(var(--core-rgb), .07) 58%, transparent 72%); filter: blur(12px); }
+.core-assembly { position: absolute; inset: 10%; transform-style: preserve-3d; animation: fallback-float 8s ease-in-out infinite; }
+.core-shell { position: absolute; inset: 24%; overflow: hidden; border: 1px solid rgba(182, 255, 250, .7); border-radius: 50%; background: radial-gradient(circle at 34% 26%, rgba(230,255,252,.87), rgba(61,205,206,.29) 29%, rgba(10,77,88,.66) 78%); box-shadow: inset -15px -18px 32px rgba(1, 15, 25, .55), inset 8px 9px 20px rgba(238,255,255,.4), 0 0 36px rgba(36,229,224,.25); }
+.core-grid { position: absolute; inset: 4%; border: 1px solid rgba(156,255,248,.32); border-radius: 50%; transform: rotateX(60deg) rotateZ(-20deg); }
+.core-grid::before, .core-grid::after { content: ""; position: absolute; inset: -1px 25%; border: 1px solid rgba(156,255,248,.24); border-radius: 50%; }
+.core-grid::after { transform: rotate(90deg); }
+.core-light { position: absolute; width: 19%; aspect-ratio: 1; top: 40%; left: 40%; border-radius: 50%; background: radial-gradient(circle at 30% 28%, #efffff, #47f4e9 32%, #087c8a 82%); box-shadow: 0 0 28px rgba(61,246,235,.9), 0 0 70px rgba(24,195,199,.45); }
+.core-scan, .core-reflection, .core-dial, .core-readout { display: none; }
+.core-ring { position: absolute; left: 2%; top: 35%; width: 96%; height: 30%; border: 2px solid rgba(100,243,237,.86); border-radius: 50%; box-shadow: 0 0 13px rgba(50,228,221,.5); }
+.ring-alpha { transform: rotateX(67deg) rotateZ(-24deg); }
+.ring-beta { transform: rotateX(67deg) rotateZ(46deg); border-color: rgba(174,255,250,.74); }
+.ring-gamma { transform: rotateY(68deg) rotateZ(13deg); border-color: rgba(47,187,197,.95); }
+.core-satellite { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #83fff3; box-shadow: 0 0 15px #29dcd7; }
+.satellite-one { left: 9%; top: 46%; }
+.satellite-two { right: 12%; top: 26%; width: 8px; height: 8px; }
+.core-equator { position: absolute; inset: 25%; border-top: 1px solid rgba(194,255,249,.46); border-radius: 50%; transform: rotateX(70deg); }
+.hero-neural-stage { position: absolute; inset: 0 0 36px; z-index: 4; pointer-events: none; contain: layout paint; }
+.hero-neural-canvas { display: block; width: 100%; height: 100%; pointer-events: none; }
+.hero-art.hero-webgl .depth-scene, .hero-art.hero-webgl .fallback-label { visibility: hidden; }
+.hero-art.hero-webgl .depth-scene * { animation: none !important; }
+.hero-neural-caption { position: absolute; z-index: 5; left: 22px; bottom: 18px; color: rgba(173, 238, 231, .65); font-size: .61rem; letter-spacing: .18em; pointer-events: none; }
+.glass-control, .hero-quality-control, .motion-toggle {
+  color: #e6fffa;
+  border: 1px solid rgba(124, 225, 214, .36);
+  border-radius: 999px;
+  background: rgba(6, 30, 29, .76);
+  box-shadow: inset 0 1px rgba(255,255,255,.12), 0 6px 22px rgba(0,0,0,.23);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.hero-art .hero-signal-toggle { position: absolute; z-index: 6; right: 20px; top: 18px; padding: 10px 14px; cursor: pointer; pointer-events: auto; font: inherit; font-size: .78rem; }
+.hero-quality-control { position: absolute; z-index: 6; right: 20px; top: 64px; display: flex; align-items: center; gap: 8px; padding: 8px 12px; color: #b8d9d3; font-size: .75rem; }
+.hero-quality-control select { max-width: 112px; color: #e6fffa; border: 0; background: transparent; font: inherit; }
+.hero-quality-control option { color: #10211f; }
+.motion-toggle { padding: 11px 16px; cursor: pointer; font: inherit; font-size: .84rem; }
+.motion-toggle[aria-pressed="true"] { border-color: #78e4d6; }
+button:focus-visible, select:focus-visible { outline: 3px solid #69eee0; outline-offset: 3px; }
+.hint { margin: 11px 8px 0; font-size: .78rem; }
+.fallback-label { position: absolute; z-index: 2; left: 22px; bottom: 19px; }
+@keyframes fallback-float { 0%,100% { transform: rotateX(-8deg) rotateY(-10deg) translateY(-6px); } 50% { transform: rotateX(5deg) rotateY(12deg) translateY(7px); } }
+@media (max-width: 520px) {
+  body { padding-left: 12px; padding-right: 12px; }
+  .hero-art { min-height: 300px; height: 56svh; border-radius: 23px; }
+  .hero-art .hero-signal-toggle { right: 10px; top: 10px; padding: 8px 10px; }
+  .hero-quality-control { right: 10px; top: 52px; padding: 7px 9px; }
+  .hero-neural-caption, .fallback-label { left: 13px; bottom: 13px; font-size: .54rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}
+
+html, body { width:100%; height:100%; min-height:0; margin:0; padding:0; overflow:hidden; background:transparent; }
+body { display:block; }
+.widget { width:100%; height:100%; }
+.hero-art { width:100%; height:100%; min-height:0; margin:0; border:0; border-radius:0; box-shadow:none; }
+.hero-art .hero-neural-stage { inset:0 0 32px; }
+.hero-neural-caption, .fallback-label { left:14px; bottom:10px; font-size:.52rem; }
+.hero-art .hero-signal-toggle { right:10px; top:9px; padding:7px 10px; font-size:.68rem; }
+.hero-quality-control { right:10px; top:49px; padding:6px 8px; font-size:.66rem; }
+.hero-quality-control select { max-width:85px; }
+@media (prefers-reduced-motion: reduce) {
+  .core-assembly { animation:none !important; }
+  *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; }
+}
+</style>
+</head>
+<body>
+<main class="widget">
+  <section class="hero-art" aria-label="Decorative animated neural orb">
+    <div class="depth-scene" aria-hidden="true"><div class="ai-core"><div class="core-aura"></div><div class="core-assembly"><div class="core-ring ring-alpha"></div><div class="core-ring ring-beta"></div><div class="core-ring ring-gamma"></div><div class="core-shell"><div class="core-grid"></div><div class="core-light"></div><div class="core-scan"></div><div class="core-reflection"></div></div><div class="core-satellite satellite-one"></div><div class="core-satellite satellite-two"></div><div class="core-equator"></div></div></div></div>
+    <span class="fallback-label" aria-hidden="true">DECORATIVE ART · NOT AI ACTIVITY</span>
+  </section>
+</main>
+<script>
+// Home scene is decorative and never captures touch/wheel events. Only one scene animates at a time.
+let heroMounted=false;
+function mountHeroOrb(){
+ if(heroMounted)return;heroMounted=true;
+ const art=document.querySelector('.hero-art'),root=document.documentElement,motion=matchMedia('(prefers-reduced-motion: reduce)');
+ const stage=document.createElement('div');stage.className='hero-neural-stage';stage.setAttribute('aria-hidden','true');
+ const canvas=document.createElement('canvas');canvas.className='hero-neural-canvas';stage.append(canvas);art.prepend(stage);
+ const caption=document.createElement('span');caption.className='hero-neural-caption';caption.textContent='NEURAL LIGHT / GENERATIVE ART';caption.setAttribute('aria-hidden','true');
+ const toggle=document.createElement('button');toggle.className='hero-signal-toggle glass-control';toggle.type='button';toggle.setAttribute('aria-label','Toggle home orb neural light');
+ const qualityLabel=document.createElement('label');qualityLabel.className='hero-quality-control glass-control';qualityLabel.textContent='Render ';const qualitySelect=document.createElement('select');qualitySelect.setAttribute('aria-label','Home orb render quality');qualitySelect.innerHTML='<option value="auto">Adaptive</option><option value="high">Ultra detail</option><option value="low">Battery</option>';qualityLabel.append(qualitySelect);let preference='auto';try{preference=localStorage.getItem('home-orb-quality')||'auto'}catch{}if(!['auto','high','low'].includes(preference))preference='auto';qualitySelect.value=preference;
+ let renderer,frame=0,last=0,angle=.65,frames=0,inView=false,low=matchMedia('(pointer:coarse)').matches,slow=0,signals=true,failed=false;
+ const allowed=()=>!failed&&inView&&!document.hidden&&!root.classList.contains('orb-exploring')&&!root.classList.contains('previewing');
+ const animated=()=>allowed()&&!motion.matches&&!root.classList.contains('ambient-paused');
+ function stop(){cancelAnimationFrame(frame);frame=0;last=0;stage.dataset.loop='stopped'}
+ function draw(t){frame=0;if(!allowed()||!renderer)return;const elapsed=last?t-last:0;if(animated()){angle+=Math.min(elapsed,70)*.00022;if(elapsed>27&&++slow>18)low=true}else slow=0;last=t;
+  renderer({x:-10,y:-15,z:.87,panX:0,panY:0,angle,wire:false,exploded:false,signals,part:'whole',low:preference==='low'||(preference==='auto'&&low),ratio:preference==='high'?1.5:(preference==='low'||low)?.7:1.25});
+  stage.dataset.renderFrames=String(++frames);stage.dataset.loop=animated()?'active':'paused';
+  if(animated())frame=requestAnimationFrame(draw);
+ }
+ function sync(){stop();if(allowed()&&renderer)frame=requestAnimationFrame(draw)}
+ function fail(){failed=true;stop();canvas.hidden=true;art.classList.remove('hero-webgl');caption.remove();toggle.remove();qualityLabel.remove();stage.dataset.renderer='css-fallback'}
+ try{const gl=canvas.getContext('webgl',{alpha:true,antialias:true,powerPreference:'high-performance'});if(!gl)throw Error('No WebGL');renderer=createRenderer(gl,canvas,{set textContent(v){stage.dataset.renderInfo=v}});stage.dataset.renderer='webgl';art.classList.add('hero-webgl');art.append(caption,toggle,qualityLabel)}catch{fail();return}
+ qualitySelect.addEventListener('change',()=>{preference=qualitySelect.value;try{localStorage.setItem('home-orb-quality',preference)}catch{}sync()});
+ function toggleUI(){toggle.textContent=signals?'Neural light: on':'Neural light: off';toggle.setAttribute('aria-pressed',String(signals))}toggleUI();toggle.addEventListener('click',()=>{signals=!signals;toggleUI();sync()});
+ new IntersectionObserver(es=>{inView=es[0].isIntersecting;sync()},{threshold:.05}).observe(stage);
+ new ResizeObserver(sync).observe(stage);
+ // Theme/class changes include global ambient pause and explorer/modal transitions.
+ new MutationObserver(sync).observe(root,{attributes:true,attributeFilter:['class','data-theme']});
+ motion.addEventListener('change',sync);document.addEventListener('visibilitychange',sync);
+ canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();fail()});
+ // A lost home context stays in CSS fallback for this visit; no repeated GPU reinitialization.
+
+}
+// Matrices use column-major storage; all surfaces have actual depth-tested vertices.
+function createRenderer(gl,canvas,info){
+ // Lit per vertex on smooth meshes: less fragment overdraw cost for transparent glass.
+ const vs=`attribute vec3 p;attribute vec3 n;uniform mat4 model;uniform mat4 vp;varying vec3 lighting;varying float rim;void main(){vec4 w=model*vec4(p,1.);vec3 N=normalize(mat3(model)*n),V=normalize(vec3(0.,0.,5.5)-w.xyz),L=vec3(-.3714,.5571,.7428);float e=1.-abs(dot(N,V));rim=e*e;float spec=pow(max(dot(reflect(-L,N),V),0.),35.);lighting=vec3(.25+.7*abs(dot(N,L)),spec*.8+rim*.75,0.);gl_Position=vp*w;}`;
+ const fs=`precision mediump float;varying vec3 lighting;varying float rim;uniform vec3 tint;uniform float alpha;uniform float glow;void main(){vec3 c=tint*(lighting.x+glow)+vec3(.75,.9,1.)*lighting.y;gl_FragColor=vec4(c,clamp(alpha+rim*.38,0.,1.));}`;
+ const shader=(type,src)=>{const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s};
+ const program=gl.createProgram();gl.attachShader(program,shader(gl.VERTEX_SHADER,vs));gl.attachShader(program,shader(gl.FRAGMENT_SHADER,fs));gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error('3D program failed');gl.useProgram(program);
+ const loc=Object.fromEntries(['model','vp','tint','alpha','glow'].map(k=>[k,gl.getUniformLocation(program,k)])),pa=gl.getAttribLocation(program,'p'),na=gl.getAttribLocation(program,'n');
+ const ident=()=>[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];
+ const mul=(a,b)=>{const r=new Array(16).fill(0);for(let c=0;c<4;c++)for(let row=0;row<4;row++)for(let k=0;k<4;k++)r[c*4+row]+=a[k*4+row]*b[c*4+k];return r};
+ const trans=(x,y,z)=>{const m=ident();m[12]=x;m[13]=y;m[14]=z;return m},scale=s=>[s,0,0,0,0,s,0,0,0,0,s,0,0,0,0,1];
+ const rx=t=>[1,0,0,0,0,Math.cos(t),Math.sin(t),0,0,-Math.sin(t),Math.cos(t),0,0,0,0,1],ry=t=>[Math.cos(t),0,-Math.sin(t),0,0,1,0,0,Math.sin(t),0,Math.cos(t),0,0,0,0,1],rz=t=>[Math.cos(t),Math.sin(t),0,0,-Math.sin(t),Math.cos(t),0,0,0,0,1,0,0,0,0,1];
+ function mesh(kind,u,v){const vertices=[],indices=[],lines=[];for(let i=0;i<=u;i++)for(let j=0;j<=v;j++){const a=i/u*Math.PI*2,b=j/v*(kind==='sphere'?Math.PI:Math.PI*2);let x,y,z,nx,ny,nz;if(kind==='sphere'){nx=Math.cos(a)*Math.sin(b);ny=Math.cos(b);nz=Math.sin(a)*Math.sin(b);x=nx;y=ny;z=nz}else{nx=Math.cos(a)*Math.cos(b);ny=Math.sin(b);nz=Math.sin(a)*Math.cos(b);x=Math.cos(a)*(1.28+.022*Math.cos(b));y=.022*Math.sin(b);z=Math.sin(a)*(1.28+.022*Math.cos(b))}vertices.push(x,y,z,nx,ny,nz);if(i<u&&j<v){const k=i*(v+1)+j;indices.push(k,k+1,k+v+1,k+1,k+v+2,k+v+1);if(i%4===0||j%4===0)lines.push(k,k+1,k,k+v+1)}}const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(vertices),gl.STATIC_DRAW);const ib=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(indices),gl.STATIC_DRAW);const lb=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,lb);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(lines),gl.STATIC_DRAW);return{buffer,ib,lb,count:indices.length,lineCount:lines.length}}
+ const satellite=mesh('sphere',10,6);
+ const levels={low:{sphere:mesh('sphere',32,16),torus:mesh('torus',48,8)},high:{sphere:mesh('sphere',56,32),torus:mesh('torus',96,12)}};
+ // A fixed spatial graph: all lightning filaments are bounded triangle tubes, never DOM particles.
+ // q stores travel distance and root phase so pulses cross each fork in the outward direction.
+ const energyVS=`attribute vec3 ep;attribute vec3 en;attribute vec2 q;uniform mat4 model;uniform mat4 vp;uniform float clock;uniform float thickness;varying vec2 travel;varying vec3 normal;varying vec3 world;void main(){vec3 pos=ep+en*thickness;vec4 w=model*vec4(pos,1.);world=w.xyz;normal=normalize(mat3(model)*en);travel=q;gl_Position=vp*w;}`;
+ const energyFS=`precision mediump float;varying vec2 travel;varying vec3 normal;varying vec3 world;uniform float clock;uniform float halo;uniform vec3 tint;uniform float strength;uniform float lightMode;void main(){float pulse=pow(max(0.,cos((travel.x-clock*.32+travel.y)*6.283185)),12.);vec3 V=normalize(vec3(0.,0.,5.5)-world);float edge=pow(1.-abs(dot(normalize(normal),V)),1.7);float a=mix(.40+pulse*.58,.025+pulse*.11,halo)*strength;vec3 light=mix(tint,vec3(.85,.98,1.),.34+pulse*.58);light=mix(light,mix(tint*.38,vec3(.05,.5,.52),pulse*.65),lightMode);gl_FragColor=vec4(light*(.65+pulse*.7+edge*.25),a);}`;
+ const energyProgram=gl.createProgram();gl.attachShader(energyProgram,shader(gl.VERTEX_SHADER,energyVS));gl.attachShader(energyProgram,shader(gl.FRAGMENT_SHADER,energyFS));gl.linkProgram(energyProgram);if(!gl.getProgramParameter(energyProgram,gl.LINK_STATUS))throw Error('Neural light shader failed');
+ const eloc=Object.fromEntries(['model','vp','clock','thickness','halo','tint','strength','lightMode'].map(k=>[k,gl.getUniformLocation(energyProgram,k)])),ea=gl.getAttribLocation(energyProgram,'ep'),ena=gl.getAttribLocation(energyProgram,'en'),qa=gl.getAttribLocation(energyProgram,'q');
+ const add=(a,b)=>a.map((v,i)=>v+b[i]),times=(a,t)=>a.map(v=>v*t),norm=a=>times(a,1/Math.hypot(...a)),cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+ function neuralMesh(roots,sides,steps){const vertices=[],indices=[];let paths=0,nodes=0;const ends=[];
+  function tube(points,distances,phase,radius){const start=vertices.length/8;paths++;for(let i=0;i<points.length;i++){const tangent=norm(points[Math.min(i+1,points.length-1)].map((v,k)=>v-points[Math.max(0,i-1)][k])),u=norm(cross(tangent,Math.abs(tangent[1])>.9?[1,0,0]:[0,1,0])),v=cross(tangent,u);for(let j=0;j<sides;j++){const a=j/sides*Math.PI*2,n=add(times(u,Math.cos(a)),times(v,Math.sin(a))),p=add(points[i],times(n,radius*(1-i/points.length*.58)));vertices.push(...p,...n,distances[i],phase);if(i<points.length-1){const k=start+i*sides+j,next=start+i*sides+(j+1)%sides;indices.push(k,next,k+sides,next,next+sides,k+sides)}}}ends.push({p:points.at(-1),d:distances.at(-1),phase});}
+  for(let root=0;root<roots;root++){const h=1-2*(root+.5)/roots,a=root*2.399963+1.15,d=norm([Math.cos(a)*Math.sqrt(1-h*h),h,Math.sin(a)*Math.sqrt(1-h*h)]),u=norm(cross(d,Math.abs(h)>.9?[1,0,0]:[0,1,0])),v=cross(d,u),phase=root*.071;
+   const position=t=>{const radius=.29+t*1.45,w=Math.sin(t*17+root*2.1)*(.016+t*.024),w2=Math.cos(t*23+root)*(.012+t*.018);return add(times(d,radius),add(times(u,w+Math.sin(t*3.4+root)*t*.13),times(v,w2+Math.cos(t*4.2+root)*t*.1)))};
+   const pts=[],ds=[];for(let i=0;i<=steps;i++){const t=i/steps;pts.push(position(t));ds.push(t)}tube(pts,ds,phase,.012);
+   for(let fork=0;fork<(roots>6?3:2);fork++){const t0=.29+fork*.19,origin=position(t0),angle=root*1.77+fork*2.5,bend=norm(add(times(d,.48),add(times(u,Math.cos(angle)),times(v,Math.sin(angle))))),branch=[],bd=[];for(let j=0;j<=7;j++){const t=j/7,length=.42+fork*.09;branch.push(add(origin,add(times(bend,length*t),times(v,Math.sin(t*14+root)*t*.028))));bd.push(t0+t*.4)}tube(branch,bd,phase,.009);}
+  }
+  // Interlaced cross-links bridge spatial roots, adding a tangled signal cortex in one batch.
+  for(let k=0;k<roots;k++){const a=k*2.399963,b=(k+3)*2.399963,pts=[],ds=[];for(let j=0;j<=12;j++){const t=j/12,theta=a+(b-a)*t,r=.7+.24*Math.sin(t*Math.PI);pts.push([Math.cos(theta)*r,Math.sin(k*1.7)*.5+Math.sin(t*6.28+k)*.25,Math.sin(theta)*r]);ds.push(t*1.3)}tube(pts,ds,k*.071,.0065)}
+  // Small terminal synapses are also one static batched triangle mesh, not extra draw calls.
+  for(const {p,d,phase} of ends){nodes++;const start=vertices.length/8,radius=.018;for(let y=0;y<=4;y++)for(let x=0;x<=6;x++){const a=x/6*Math.PI*2,b=y/4*Math.PI,n=[Math.cos(a)*Math.sin(b),Math.cos(b),Math.sin(a)*Math.sin(b)];vertices.push(...add(p,times(n,radius)),...n,d,phase);if(y<4&&x<6){const k=start+y*7+x;indices.push(k,k+1,k+7,k+1,k+8,k+7)}}}
+  const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(vertices),gl.STATIC_DRAW);const ib=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(indices),gl.STATIC_DRAW);return{buffer,ib,count:indices.length,vertices:vertices.length/8,paths,nodes};
+ }
+ const neural={low:neuralMesh(10,3,10),high:neuralMesh(20,5,18)};
+ function drawNeural(s,base,vp,color){const m=s.low?neural.low:neural.high,visible=s.signals&&(s.part==='whole'||s.part==='neural');canvas.dataset.signalPaths=String(visible?m.paths:0);canvas.dataset.signalVertices=String(m.vertices);canvas.dataset.signalPhase=(s.angle*2.6).toFixed(4);canvas.dataset.orbFloat=(Math.sin(s.angle*1.7)*.045).toFixed(5);canvas.dataset.coreBreath=(1+Math.sin(s.angle*4.8)*.065).toFixed(5);if(!visible)return;gl.useProgram(energyProgram);gl.uniformMatrix4fv(eloc.model,false,new Float32Array(base));gl.uniformMatrix4fv(eloc.vp,false,new Float32Array(vp));gl.uniform3fv(eloc.tint,color);gl.uniform1f(eloc.clock,s.angle*2.6);gl.uniform1f(eloc.strength,s.part==='neural'?1:.85);const lightMode=document.documentElement.dataset.theme==='light';gl.uniform1f(eloc.lightMode,lightMode?1:0);gl.bindBuffer(gl.ARRAY_BUFFER,m.buffer);for(const [attr,size,offset]of[[ea,3,0],[ena,3,12],[qa,2,24]]){gl.enableVertexAttribArray(attr);gl.vertexAttribPointer(attr,size,gl.FLOAT,false,32,offset)}gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,m.ib);gl.depthMask(false);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+  gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.uniform1f(eloc.halo,0);gl.uniform1f(eloc.thickness,0);gl.drawElements(gl.TRIANGLES,m.count,gl.UNSIGNED_SHORT,0);
+  gl.disableVertexAttribArray(qa);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(true);gl.useProgram(program);
+ }
+
+ gl.enable(gl.DEPTH_TEST);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.clearColor(0,0,0,0);
+ const draw=(m,model,color,alpha,glow=0,line=false)=>{gl.bindBuffer(gl.ARRAY_BUFFER,m.buffer);gl.enableVertexAttribArray(pa);gl.vertexAttribPointer(pa,3,gl.FLOAT,false,24,0);gl.enableVertexAttribArray(na);gl.vertexAttribPointer(na,3,gl.FLOAT,false,24,12);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,line?m.lb:m.ib);gl.uniformMatrix4fv(loc.model,false,new Float32Array(model));gl.uniform3fv(loc.tint,color);gl.uniform1f(loc.alpha,alpha);gl.uniform1f(loc.glow,glow);gl.drawElements(line?gl.LINES:gl.TRIANGLES,line?m.lineCount:m.count,gl.UNSIGNED_SHORT,0)};
+ let rect=canvas.parentElement.getBoundingClientRect(),palette=[.25,.65,.6];
+ const refreshPalette=()=>{const rgb=getComputedStyle(document.documentElement).getPropertyValue('--core-rgb').trim().split(',').map(Number).map(x=>x/255);if(rgb.length===3)palette=rgb};refreshPalette();new MutationObserver(refreshPalette).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});new ResizeObserver(()=>{rect=canvas.parentElement.getBoundingClientRect()}).observe(canvas.parentElement);canvas.dataset.error=String(gl.getError());
+ return s=>{const r=rect,ratio=Math.min(devicePixelRatio||1,s.ratio);const w=Math.round(r.width*ratio),h=Math.round(r.height*ratio);if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h)}gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.useProgram(program);const f=1/Math.tan(Math.PI/8),aspect=w/h,p=[f/aspect,0,0,0,0,f,0,0,0,0,-(100+.1)/(100-.1),-1,0,0,-20/(100-.1),0];const vp=mul(p,trans(0,0,-5.5));gl.uniformMatrix4fv(loc.vp,false,new Float32Array(vp));const color=palette;const base=mul(trans(s.panX/r.height*4.5,-s.panY/r.height*4.5+Math.sin(s.angle*1.7)*.045,0),mul(scale(s.z),mul(rx(s.x*Math.PI/180),ry(s.y*Math.PI/180+s.angle*.32))));const meshes=s.low?levels.low:levels.high;const ex=s.exploded?.8:0;
+ gl.depthMask(true);draw(meshes.sphere,mul(base,mul(trans(0,0,0),scale((s.part==='core'?.32:.24)*(1+Math.sin(s.angle*4.8)*.065)))),color,1,.7);
+ for(let i=0;i<3;i++){const ring=mul(base,mul(trans(ex*(i-1)*.5,ex*(i-1)*.3,0),mul(ry(s.angle*(i%2?-.45:.6)+i),mul(rx([.3,1.1,-.7][i]),rz([.8,-.6,.2][i])))));draw(meshes.torus,ring,color,s.part==='shell'||s.part==='grid'?.2:.86,.18)}
+ for(let i=0;i<5;i++){const a=s.angle*.5+i*Math.PI*2/5;const sat=mul(base,mul(trans(Math.cos(a)*1.12,Math.sin(a*1.3)*.5,Math.sin(a)*1.12),scale(.045)));draw(satellite,sat,color,.9,.3)}drawNeural(s,base,vp,color);gl.depthMask(false);const shell=mul(base,mul(trans(-ex*.75,0,0),scale(.93+Math.sin(s.angle*4.8-.4)*.009)));gl.enable(gl.CULL_FACE);gl.cullFace(gl.FRONT);draw(meshes.sphere,shell,color,s.part==='core'||s.part==='neural'?.025:s.part==='rings'?.06:.15);gl.cullFace(gl.BACK);draw(meshes.sphere,shell,color,s.part==='core'||s.part==='neural'?.025:s.part==='rings'?.06:.13);gl.disable(gl.CULL_FACE);if(s.wire||s.part==='grid')draw(meshes.sphere,shell,color,.65,.3,true);gl.depthMask(true);canvas.dataset.meshVertices=String((s.low?33*17:57*33)+(s.low?49*9:97*13)*3);canvas.dataset.quality=s.low?'battery':'detailed';canvas.dataset.pixelRatio=String(ratio);info.textContent=`WebGL 3D · ${s.low?'battery-friendly':'detailed'} · ${ratio.toFixed(1)}× pixels · ${s.signals&&(s.part==='whole'||s.part==='neural')?(s.low?neural.low.paths:neural.high.paths)+' neural paths · ':''}display-paced motion`;};
+}
+
+mountHeroOrb();
+</script>
+</body>
+</html>

@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import 'assistant_state.dart';
 import 'phone_screens.dart';
+import 'home_orb.dart';
 import 'ui_motion.dart';
 
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -87,7 +88,6 @@ class _AssistantAppState extends State<AssistantApp>
     ),
   );
 }
-
 
 class _AppLockGate extends StatelessWidget {
   final AssistantState state;
@@ -1122,6 +1122,10 @@ class Home extends StatelessWidget {
                 ],
               ),
             ),
+          ),
+          SoftEntrance(
+            delay: const Duration(milliseconds: 60),
+            child: const DecorativeHomeOrb(),
           ),
           SoftEntrance(
             delay: const Duration(milliseconds: 90),
