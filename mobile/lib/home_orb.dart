@@ -44,10 +44,9 @@ class _DecorativeHomeOrbState extends State<DecorativeHomeOrb> {
       await controller.setJavaScriptMode(JavaScriptMode.unrestricted);
       await controller.setNavigationDelegate(
         NavigationDelegate(
-          onNavigationRequest: (request) =>
-              homeOrbAllowsNavigation(request.url)
-                  ? NavigationDecision.navigate
-                  : NavigationDecision.prevent,
+          onNavigationRequest: (request) => homeOrbAllowsNavigation(request.url)
+              ? NavigationDecision.navigate
+              : NavigationDecision.prevent,
           onWebResourceError: (error) {
             if (error.isForMainFrame == true && mounted) {
               setState(() => _failed = true);
@@ -75,7 +74,9 @@ class _DecorativeHomeOrbState extends State<DecorativeHomeOrb> {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: .48),
+          color: theme.colorScheme.surfaceContainerHighest.withValues(
+            alpha: .48,
+          ),
           borderRadius: BorderRadius.circular(24),
           border: Border.all(color: theme.colorScheme.outlineVariant),
         ),
@@ -148,7 +149,11 @@ class _DecorativeHomeOrbState extends State<DecorativeHomeOrb> {
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
               gradient: RadialGradient(
-                colors: [Color(0xffe3fff8), Color(0xff4bcac5), Color(0xff125165)],
+                colors: [
+                  Color(0xffe3fff8),
+                  Color(0xff4bcac5),
+                  Color(0xff125165),
+                ],
               ),
             ),
           ),

@@ -89,7 +89,6 @@ class _AssistantAppState extends State<AssistantApp>
   );
 }
 
-
 class _AppLockGate extends StatelessWidget {
   final AssistantState state;
   final Widget child;
