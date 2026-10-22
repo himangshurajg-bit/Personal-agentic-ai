@@ -170,10 +170,12 @@ internal class Gemma4OfflineCoordinator(
 
     fun status(): Map<String, Any?> {
         val available = try { StatFs(appContext.filesDir.path).availableBytes } catch (_: Exception) { 0L }
-        return mapOf(
+        val partialBytes: Long = partialFile.takeIf { it.isFile }?.length()
+            ?.coerceAtMost(Gemma4Artifact.MODEL_BYTES) ?: 0L
+        return mapOf<String, Any?>(
             "model_bytes" to Gemma4Artifact.MODEL_BYTES,
             "available_bytes" to available,
-            "partial_bytes" to partialFile.takeIf(File::isFile)?.length()?.coerceAtMost(Gemma4Artifact.MODEL_BYTES) ?: 0L,
+            "partial_bytes" to partialBytes,
             "model_present" to modelFile.isFile,
             "model_size_matches" to (modelFile.isFile && modelFile.length() == Gemma4Artifact.MODEL_BYTES),
             "download_active" to downloadActive,
