@@ -158,6 +158,8 @@ internal class Gemma4OfflineCoordinator(
     private val inferenceExecutor = Executors.newSingleThreadExecutor()
     private val inferenceDispatcher = inferenceExecutor.asCoroutineDispatcher()
     private val inferenceScope = CoroutineScope(SupervisorJob() + inferenceDispatcher)
+    // Cancellation must not queue behind the single-threaded inference stream it is stopping.
+    private val controlScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val runtimeMutex = Mutex()
     @Volatile private var engine: Engine? = null
     @Volatile private var activeConversation: Conversation? = null
@@ -476,7 +478,7 @@ internal class Gemma4OfflineCoordinator(
 
     fun cancelInference() {
         if (!inferenceActive) return
-        inferenceScope.launch {
+        controlScope.launch {
             try {
                 activeConversation?.cancelProcess()
             } catch (_: Exception) {
@@ -514,6 +516,7 @@ internal class Gemma4OfflineCoordinator(
             runtimeMutex.withLock { closeEngineOnce() }
         }
         cleanup.invokeOnCompletion {
+            controlScope.cancel()
             inferenceScope.cancel()
             inferenceDispatcher.close()
             inferenceExecutor.shutdown()
