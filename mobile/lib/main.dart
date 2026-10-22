@@ -266,7 +266,7 @@ class Shell extends StatelessWidget {
                   icon: const Icon(Icons.menu_rounded),
                 ),
               ),
-        title: Text(title),
+        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: actions,
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,

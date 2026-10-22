@@ -63,6 +63,7 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
               children: [
                 DropdownButtonFormField<String>(
                   initialValue: _kind,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Draft type'),
                   items: const [
                     DropdownMenuItem(value: 'whatsapp', child: Text('WhatsApp reply')),

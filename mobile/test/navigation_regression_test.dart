@@ -62,12 +62,14 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text(entry.$1).last);
         await tester.pumpAndSettle();
+        final screenEvidence = find.text(entry.$2);
         await tester.scrollUntilVisible(
-          find.text(entry.$2),
+          screenEvidence,
           240,
           scrollable: find.byType(Scrollable).last,
         );
-        expect(find.text(entry.$2), findsOneWidget);
+        await tester.pumpAndSettle();
+        expect(screenEvidence, findsOneWidget);
         expect(tester.takeException(), isNull, reason: 'Entering ${entry.$1}');
       }
 

@@ -42,9 +42,10 @@ void main() {
     expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNotNull);
     expect(calls, isEmpty);
 
-    await tester.ensureVisible(find.byType(FilledButton));
+    final replyShareButton = find.text('Choose app to review reply');
+    await tester.ensureVisible(replyShareButton);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose app to review reply'));
+    await tester.tap(replyShareButton);
     await tester.pumpAndSettle();
     expect(calls, hasLength(1));
     expect(calls.single.method, 'share_text');
@@ -67,9 +68,10 @@ void main() {
       'A small study step today.',
     );
     await tester.pump();
-    await tester.ensureVisible(find.text('Choose app to review caption'));
+    final captionShareButton = find.text('Choose app to review caption');
+    await tester.ensureVisible(captionShareButton);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose app to review caption'));
+    await tester.tap(captionShareButton);
     await tester.pumpAndSettle();
     expect(calls.single.arguments, {
       'title': 'Review social caption',
