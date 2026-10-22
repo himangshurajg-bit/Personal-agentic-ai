@@ -2,6 +2,7 @@
 import http.client
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -33,8 +34,11 @@ class ProviderUnavailable(ValueError):
     """Local/runtime transport could not be reached; no provider body is exposed."""
 
 
-def local_config():
-    endpoint = os.environ.get('LOCAL_AGENT_URL', 'http://127.0.0.1:11434').rstrip('/')
+def _local_origin(endpoint):
+    """Validate an HTTP origin without permitting credentials, paths or remote hosts."""
+    if not isinstance(endpoint, str):
+        raise ValueError('Local provider must use an HTTP loopback origin, without a path or credentials')
+    endpoint = endpoint.rstrip('/')
     try:
         parsed = urllib.parse.urlsplit(endpoint)
         port = parsed.port
@@ -45,6 +49,11 @@ def local_config():
         valid = False
     if not valid:
         raise ValueError('Local provider must use an HTTP loopback origin, without a path or credentials')
+    return endpoint
+
+
+def local_config():
+    endpoint = _local_origin(os.environ.get('LOCAL_AGENT_URL', 'http://127.0.0.1:11434'))
     model = os.environ.get('LOCAL_AGENT_MODEL', '')
     if not model:
         raise ValueError('Set LOCAL_AGENT_MODEL to an already installed local model')
@@ -80,6 +89,40 @@ def post_json(url, data, headers):
     except (ValueError, RecursionError):
         # Decoder limits differ by Python version (nesting, integer digits, encoding).
         raise ValueError('Provider returned invalid JSON') from None
+
+
+_OLLAMA_VERSION = re.compile(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z')
+
+
+def local_runtime_version(endpoint):
+    """Best-effort Ollama version discovery on a validated loopback origin only.
+
+    Unsupported endpoints, redirects, invalid/unbounded responses, and unavailable
+    runtimes return None. Version strings are restricted to numeric major.minor.patch
+    form so arbitrary provider content cannot be copied into diagnostic output.
+    """
+    try:
+        origin = _local_origin(endpoint)
+        request = urllib.request.Request(origin + '/api/version',
+                                         headers={'Accept': 'application/json'}, method='GET')
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        with opener.open(request, timeout=2) as response:
+            raw = response.read(4097)
+        if len(raw) > 4096:
+            return None
+        payload = json.loads(raw, object_pairs_hook=_unique_object)
+        if not isinstance(payload, dict):
+            return None
+        version = payload.get('version')
+        if not isinstance(version, str) or not _OLLAMA_VERSION.fullmatch(version):
+            return None
+        return version
+    except urllib.error.HTTPError as exc:
+        exc.close()
+        return None
+    except (urllib.error.URLError, OSError, http.client.HTTPException,
+            ValueError, RecursionError):
+        return None
 
 
 def plan_with_provider(request, provider):

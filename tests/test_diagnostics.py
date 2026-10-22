@@ -22,12 +22,17 @@ class DiagnosticTests(unittest.TestCase):
                                           'LOCAL_AGENT_URL': 'http://127.0.0.1:11434'})
         self.env.start()
         self.addCleanup(self.env.stop)
+        self.version_probe_patcher = patch('agent.diagnostics.local_runtime_version', return_value=None)
+        self.version_probe = self.version_probe_patcher.start()
+        self.addCleanup(self.version_probe_patcher.stop)
 
     def test_missing_model_skips_without_network(self):
         with patch.dict(os.environ, {'LOCAL_AGENT_MODEL': ''}), patch('agent.diagnostics.plan_with_provider') as call:
             result = check_local()
         self.assertEqual(result['status'], 'skipped')
         self.assertEqual(result['attempts'], 0)
+        self.assertEqual(result['runtime_version_status'], 'not_attempted')
+        self.version_probe.assert_not_called()
         call.assert_not_called()
 
     def test_invalid_config_fails_before_network(self):
@@ -38,7 +43,9 @@ class DiagnosticTests(unittest.TestCase):
                 result = check_local()
                 self.assertEqual(result['status'], 'failed')
                 self.assertEqual(result['attempts'], 0)
+                self.assertEqual(result['runtime_version_status'], 'not_attempted')
                 self.assertNotIn('secret', json.dumps(result))
+                self.version_probe.assert_not_called()
                 call.assert_not_called()
 
     def test_fixed_prompt_one_attempt_and_no_step_arguments_in_report(self):
@@ -50,7 +57,18 @@ class DiagnosticTests(unittest.TestCase):
         self.assertEqual(result['attempts'], 1)
         self.assertFalse(result['executed'])
         self.assertIsNone(result['runtime_version'])
+        self.assertEqual(result['runtime_version_status'], 'unavailable_or_unrecognized')
+        self.version_probe.assert_called_once_with('http://127.0.0.1:11434')
         self.assertNotIn('expression', json.dumps(result))
+
+    def test_numeric_ollama_runtime_version_is_reported(self):
+        self.version_probe.return_value = '0.6.2'
+        with patch('agent.diagnostics.plan_with_provider', return_value=VALID):
+            result = check_local()
+        self.assertEqual(result['status'], 'schema_valid')
+        self.assertEqual(result['runtime_version'], '0.6.2')
+        self.assertEqual(result['runtime_version_status'], 'reported')
+        self.assertEqual(result['attempts'], 1)
 
     def test_no_safe_or_external_steps_are_executed(self):
         plan = {'steps': [{'tool': 'notes.add', 'args': {'text': 'private-marker'}},

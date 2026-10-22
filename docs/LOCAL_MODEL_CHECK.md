@@ -58,12 +58,17 @@ executed. The ordinary offline `plan` command remains offline.
   readiness. `executed` remains false.
 
 Skipped checks also exit 0; automation must inspect `status` rather than treating
-exit code 0 as successful inference. `attempts` counts inference attempts, not received
-responses or completed inference. The endpoint and configured model name plus Python
-version are reported; do not put secrets in model names. `runtime_version` is null
-because this check does not probe runtime administration endpoints. Record the actual
-runtime version separately when reporting real compatibility; never infer it from a
-fixture or model label.
+exit code 0 as successful inference. `attempts` counts inference POSTs, not metadata
+GETs, responses or completed inference. With valid configuration, a best-effort `GET /api/version` runs first against the same validated loopback origin. It uses no model,
+credential, proxy or redirect; the response is capped at 4 KiB and the socket-operation
+timeout is two seconds. Only a numeric `major.minor.patch` value is reported.
+
+`runtime_version_status` is `not_attempted` when configuration is missing/invalid,
+`reported` when that strict version format is returned, and
+`unavailable_or_unrecognized` when the optional endpoint fails, is unsupported, or
+returns an unrecognized value. In the last case `runtime_version` remains null and the
+inference check continues. This best-effort metadata probe does not qualify a runtime or
+model; never infer a version from a fixture or model label.
 
 ## Verification scope
 

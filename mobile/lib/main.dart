@@ -88,6 +88,7 @@ class _AssistantAppState extends State<AssistantApp>
   );
 }
 
+
 class _AppLockGate extends StatelessWidget {
   final AssistantState state;
   final Widget child;
@@ -2119,8 +2120,14 @@ class Settings extends StatefulWidget {
 }
 
 class _SettingsState extends State<Settings> {
-  late final url = TextEditingController(text: widget.state.endpoint);
-  late final token = TextEditingController(text: widget.state.token);
+  late final serviceUrl = TextEditingController(
+    text: widget.state.privateServiceEndpoint,
+  );
+  late final compatibleUrl = TextEditingController(
+    text: widget.state.compatibleApiEndpoint,
+  );
+  final serviceSecret = TextEditingController();
+  final compatibleSecret = TextEditingController();
   late String speechMode = widget.state.speechMode;
   late String theme = widget.state.theme;
   late String engine = widget.state.engine, language = widget.state.language;
@@ -2139,11 +2146,41 @@ class _SettingsState extends State<Settings> {
   @override
   void dispose() {
     widget.state.removeListener(_stateChanged);
-    url.dispose();
-    token.dispose();
+    serviceUrl.dispose();
+    compatibleUrl.dispose();
+    serviceSecret.dispose();
+    compatibleSecret.dispose();
     model.dispose();
     name.dispose();
     super.dispose();
+  }
+
+  Future<void> _clearCredential({required bool compatible}) async {
+    final label = compatible ? 'API key' : 'private service token';
+    final remove =
+        await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('Clear $label?'),
+            content: const Text(
+              'This removes the saved credential from this phone. It does not revoke it at the provider.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Keep'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Clear'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!remove || !mounted) return;
+    await widget.state.clearProviderCredential(compatible: compatible);
+    if (mounted) notice(context, '$label cleared from this phone.');
   }
 
   @override
@@ -2228,10 +2265,7 @@ class _SettingsState extends State<Settings> {
                   }.entries)
                     DropdownMenuItem(value: item.key, child: Text(item.value)),
                 ],
-                onChanged: (v) => setState(() {
-                  engine = v!;
-                  token.clear();
-                }),
+                onChanged: (v) => setState(() => engine = v!),
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
@@ -2240,21 +2274,14 @@ class _SettingsState extends State<Settings> {
                 decoration: const InputDecoration(
                   labelText: 'Conversation / voice language',
                 ),
-                items: const [
-                  DropdownMenuItem(value: 'en-IN', child: Text('English')),
-                  DropdownMenuItem(
-                    value: 'as-IN',
-                    child: Text('অসমীয়া · Assamese'),
-                  ),
+                items: [
+                  for (final entry in AssistantState.languageLabels.entries)
+                    DropdownMenuItem(
+                      value: entry.key,
+                      child: Text(entry.value),
+                    ),
                 ],
                 onChanged: (v) => setState(() => language = v!),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: model,
-                decoration: const InputDecoration(
-                  labelText: 'Model identifier (compatible provider)',
-                ),
               ),
               const SizedBox(height: 16),
               const Text(
@@ -2264,21 +2291,104 @@ class _SettingsState extends State<Settings> {
               const Text(
                 'Online providers may retain submitted content and charge your account. Configure only your own authorized service. Offline never falls back online.',
               ),
-              TextField(
-                controller: url,
-                decoration: const InputDecoration(labelText: 'Service origin'),
-                keyboardType: TextInputType.url,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: token,
-                obscureText: true,
-                autocorrect: false,
-                enableSuggestions: false,
-                decoration: const InputDecoration(
-                  labelText: 'Provider / private-service token',
+              if (engine == 'compatible') ...[
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('OpenAI-compatible API'),
                 ),
-              ),
+                TextField(
+                  controller: compatibleUrl,
+                  keyboardType: TextInputType.url,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'HTTPS API origin',
+                    hintText: 'https://api.example.com',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: model,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Model ID',
+                    hintText: 'Use the exact model name from your provider',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'API key: ${widget.state.compatibleApiKey.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
+                ),
+                TextField(
+                  controller: compatibleSecret,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  autofillHints: const [],
+                  decoration: const InputDecoration(
+                    labelText: 'API key',
+                    hintText: 'Enter a new key to replace the saved key',
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Keys are kept in Android secure storage, are not shown again, and are sent only as authentication when you approve an online request. Leave blank to keep the saved key.',
+                ),
+                if (widget.state.compatibleApiKey.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => _clearCredential(compatible: true),
+                      icon: const Icon(Icons.key_off),
+                      label: const Text('Clear API key'),
+                    ),
+                  ),
+              ] else if (engine == 'private_service') ...[
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Private FastAPI service'),
+                ),
+                TextField(
+                  controller: serviceUrl,
+                  keyboardType: TextInputType.url,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Service origin',
+                    hintText: 'https://your-private-service.example',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Service token: ${widget.state.privateServiceToken.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
+                ),
+                TextField(
+                  controller: serviceSecret,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  autofillHints: const [],
+                  decoration: const InputDecoration(
+                    labelText: 'Private service token',
+                    hintText: 'Enter a new token to replace the saved token',
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Leave blank to keep the saved token. The service remains separate from public provider credentials.',
+                ),
+                if (widget.state.privateServiceToken.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => _clearCredential(compatible: false),
+                      icon: const Icon(Icons.key_off),
+                      label: const Text('Clear service token'),
+                    ),
+                  ),
+              ] else
+                const Text(
+                  'Offline AI is unavailable: no model is installed. No online fallback will be used.',
+                ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
                 isExpanded: true,
@@ -2295,10 +2405,14 @@ class _SettingsState extends State<Settings> {
                 onPressed: () async {
                   try {
                     await widget.state.saveSettings(
-                      url.text,
-                      token.text,
+                      serviceUrl.text,
+                      serviceSecret.text,
                       theme,
+                      compatibleUrl: compatibleUrl.text,
+                      compatibleSecret: compatibleSecret.text,
                     );
+                    serviceSecret.clear();
+                    compatibleSecret.clear();
                     await widget.state.setAssistantName(name.text);
                     await widget.state.saveSpeechMode(speechMode);
                     await widget.state.saveEngine(engine, model.text, language);
@@ -2313,26 +2427,30 @@ class _SettingsState extends State<Settings> {
                 },
                 child: const Text('Save settings'),
               ),
-              TextButton(
-                onPressed: () async {
-                  try {
-                    final result = await widget.state.request('GET', '/health');
-                    if (context.mounted) {
-                      notice(
-                        context,
-                        result['provider_configured'] == true
-                            ? 'Service reachable; model configured.'
-                            : 'Service reachable; no AI provider configured.',
+              if (engine == 'private_service')
+                TextButton(
+                  onPressed: () async {
+                    try {
+                      final result = await widget.state.request(
+                        'GET',
+                        '/health',
                       );
+                      if (context.mounted) {
+                        notice(
+                          context,
+                          result['provider_configured'] == true
+                              ? 'Service reachable; model configured.'
+                              : 'Service reachable; no AI provider configured.',
+                        );
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        notice(context, e);
+                      }
                     }
-                  } catch (e) {
-                    if (context.mounted) {
-                      notice(context, e);
-                    }
-                  }
-                },
-                child: const Text('Test private FastAPI connection'),
-              ),
+                  },
+                  child: const Text('Test private FastAPI connection'),
+                ),
             ],
           ),
         ),
@@ -2345,7 +2463,7 @@ class _SettingsState extends State<Settings> {
               if (context.mounted) {
                 notice(
                   context,
-                  'Android API ${info?['sdk']} · installed on-device recognizer: ${info?['on_device_recognizer']} · system recognizer: ${info?['system_recognizer']}. These flags do not verify Assamese or installed language models.',
+                  'Android API ${info?['sdk']} · installed on-device recognizer: ${info?['on_device_recognizer']} · system recognizer: ${info?['system_recognizer']}. These flags do not verify speech quality or installed support for any selected language.',
                 );
               }
             } catch (e) {

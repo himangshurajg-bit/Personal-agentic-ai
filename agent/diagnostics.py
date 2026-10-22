@@ -3,7 +3,8 @@ import os
 import platform
 
 from .core import validate_plan
-from .providers import ProviderUnavailable, local_config, plan_with_provider
+from .providers import (ProviderUnavailable, local_config, local_runtime_version,
+                        plan_with_provider)
 
 CHECK_REQUEST = 'Calculate 2 + 2 using the calculator tool. Return one step only.'
 
@@ -15,7 +16,8 @@ def check_local():
     unsupported plan fails. There is one inference attempt and no automatic retry.
     """
     report = {'provider': 'local', 'python_version': platform.python_version(),
-              'runtime_version': None, 'executed': False, 'attempts': 0,
+              'runtime_version': None, 'runtime_version_status': 'not_attempted',
+              'executed': False, 'attempts': 0,
               'notice': 'Schema check only; no tools, database or approvals used. '
                         'A valid plan does not prove task accuracy or production readiness.'}
     if not os.environ.get('LOCAL_AGENT_MODEL', ''):
@@ -25,6 +27,9 @@ def check_local():
     except ValueError:
         return {**report, 'status': 'failed', 'reason': 'Invalid local provider configuration'}
     report.update(endpoint=endpoint, model=model, attempts=1)
+    report['runtime_version'] = local_runtime_version(endpoint)
+    report['runtime_version_status'] = ('reported' if report['runtime_version'] is not None
+                                        else 'unavailable_or_unrecognized')
     try:
         steps = validate_plan(plan_with_provider(CHECK_REQUEST, 'local'))
     except ProviderUnavailable:

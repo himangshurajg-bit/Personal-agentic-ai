@@ -294,6 +294,25 @@ states `schema_valid`, not task success, and leaves unknown runtime version null
 No cloud call, external executor, Android/emulator, deployment or account change was
 made. Existing Android and liquid-glass UI source files are unchanged.
 
+## Loopback runtime-version metadata follow-up (issue #2)
+
+On 22 October 2026, the opt-in check was extended with a best-effort Ollama version
+probe. The implementation supports the repository's existing Ollama-compatible local
+transport only (`POST /api/chat`); it requests `GET /api/version` from the same validated
+HTTP loopback origin. The request has no model or credentials, bypasses proxies, rejects
+redirects, reads at most 4 KiB, and uses a two-second socket-operation timeout. Only a
+numeric `major.minor.patch` version is included in the report. Unsupported, unavailable,
+oversized or unrecognized responses remain null and do not block inference. Non-loopback
+origins are rejected before opening a connection; unconfigured checks still make zero
+requests. `runtime_version_status` distinguishes not attempted, reported, and unavailable
+or unrecognized metadata. The existing inference attempt count continues to count only
+`/api/chat` POSTs.
+
+This was verified with loopback fixtures, not an installed runtime/model. It records a
+reported runtime version only when the local endpoint actually responds with the accepted
+format; no real inference, cloud call, Android change, release, or deployment is established
+by the fixture tests.
+
 ## Local UI JSON boundary follow-up (bug #8)
 
 Fresh remote main matched `3c105217a6e994d89ac50086db5837f83f3dc559`; the working

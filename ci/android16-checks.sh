@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
-mkdir -p evidence
+repo_root="$PWD"
+evidence_dir="$repo_root/evidence"
+mkdir -p "$evidence_dir"
+# Preserve device diagnostics before the emulator runner tears down a failed test.
+trap 'status=$?; trap - EXIT; if ((status != 0)); then timeout 10s adb devices -l > "$evidence_dir/adb-state-on-failure.txt" 2>&1 || true; timeout 10s adb logcat -d -t 4000 > "$evidence_dir/logcat-on-failure.txt" 2>&1 || true; fi; exit "$status"' EXIT
 adb shell getprop > evidence/device-properties.txt
 adb shell getprop ro.build.version.sdk | grep '^36'
 cd mobile

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
@@ -11,11 +12,15 @@ void main() {
   testWidgets(
     'API36 native storage, safe modes, navigation and action boundary',
     (tester) async {
+      void phase(String name) => debugPrint('API36_PHASE: $name');
+
       const secure = FlutterSecureStorage();
+      phase('clear isolated secure storage');
       // Isolated disposable emulator; never run against the owner's existing app data.
       await secure.deleteAll();
       final s = AssistantState();
       await s.initialize();
+      phase('native storage and local state initialized');
       await s.setAssistantName('API36 Test assistant');
       await s.finishOnboarding();
       await s.saveNote('Synthetic local-only note');
@@ -55,6 +60,7 @@ void main() {
       expect(restored.local.studyDecks.single['title'], 'Synthetic API36 deck');
       expect(restored.local.cardsForDeck(deckId).single['review_count'], 1);
       expect(restored.local.rows('study_reviews'), hasLength(1));
+      phase('persisted records restored and checked');
       final status = await AssistantState.device.invokeMapMethod(
         'device_status',
       );
@@ -81,6 +87,7 @@ void main() {
           isA<PlatformException>().having((e) => e.code, 'code', 'invalid'),
         ),
       );
+      phase('native device, auth, and voice safety checks passed');
       final bad = await AssistantState.device.invokeMapMethod('execute', {
         'kind': 'shell',
         'command': 'never-run',
@@ -88,13 +95,17 @@ void main() {
       expect(bad!['result'], 'failed');
       await s.send('No network should be used');
       expect(s.error, contains('Offline AI is not installed'));
+      phase('offline mode failed closed without a network');
       await tester.pumpWidget(AssistantApp(state: s));
       await tester.pumpAndSettle();
       expect(find.text('API36 Test assistant'), findsOneWidget);
+      phase('initial app frame settled');
+      // Exercise the labels the glass dock actually exposes; Actions opens
+      // automations and Memory opens the combined memory/library destination.
       for (final label in [
         'Chat',
-        'Automations',
-        'Memory & Library',
+        'Actions',
+        'Memory',
         'Settings',
         'Home',
       ]) {
@@ -102,6 +113,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
       }
+      phase('glass dock navigation passed');
       final draft = await s.prepareAction({
         'kind': 'reminder',
         'title': 'Synthetic API36 test',
@@ -110,6 +122,7 @@ void main() {
             .millisecondsSinceEpoch,
       });
       // CI grants only notifications after asserting microphone was not granted.
+      phase('reminder action prepared; executing approved local action');
       final receipt = await s.executeApproved(draft['id']);
       expect(receipt['result'], 'scheduled');
       await expectLater(
@@ -117,6 +130,7 @@ void main() {
         throwsA(isA<ServiceException>()),
       );
       await tester.pumpAndSettle();
+      phase('all Android 16 integration assertions passed');
     },
   );
 }

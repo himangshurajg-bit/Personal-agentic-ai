@@ -192,23 +192,77 @@ void main() {
     await s.forget(id);
     expect(s.local.relevant('blue', 'personal'), isEmpty);
   });
-  test('offline AI blocked without any network fallback and online requires payload approval', () async {
-    var calls = 0;
-    final s = AssistantState(
-      clientFactory: () => MockClient((_) async {
-        calls++;
-        return http.Response('{}', 200);
-      }),
-    );
-    await s.initialize();
-    await s.send('hello');
-    expect(s.error, contains('Offline AI is not installed'));
-    expect(calls, 0);
-    s.engine = 'compatible';
-    await s.send('hello');
-    expect(s.error, contains('Review and approve'));
-    expect(calls, 0);
-  });
+  test(
+    'offline AI stays unavailable for every language without network fallback',
+    () async {
+      var calls = 0;
+      final s = AssistantState(
+        clientFactory: () => MockClient((_) async {
+          calls++;
+          return http.Response('{}', 200);
+        }),
+      );
+      await s.initialize();
+      for (final locale in AssistantState.languageLabels.keys) {
+        await s.saveEngine('offline', '', locale);
+        await s.send('Explain Newton’s second law with a worked example.');
+        expect(
+          s.error,
+          contains('Offline AI is not installed'),
+          reason:
+              'locale $locale remains behind the offline qualification gate',
+        );
+        expect(
+          calls,
+          0,
+          reason: 'locale $locale must not trigger network fallback',
+        );
+      }
+      await s.saveEngine('compatible', 'test-model', 'en-IN');
+      await s.send('hello');
+      expect(s.error, contains('Review and approve'));
+      expect(calls, 0);
+      s.dispose();
+    },
+  );
+
+  for (final entry in const {
+    'en-IN': 'English',
+    'as-IN': 'Assamese (অসমীয়া)',
+    'hi-IN': 'Hindi in Devanagari script',
+    'hi-Latn-IN': 'natural Hinglish, mixing Hindi and English in Latin script',
+  }.entries) {
+    test('online tutor request names ${entry.value}', () async {
+      http.Request? sent;
+      final s = AssistantState(
+        clientFactory: () => MockClient((request) async {
+          sent = request;
+          return http.Response(
+            'data: {"choices":[{"delta":{"content":"Test"},"finish_reason":null}]}\n\n'
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+            'data: [DONE]\n\n',
+            200,
+          );
+        }),
+      );
+      await s.initialize();
+      await s.saveEngine('compatible', 'test-model', entry.key);
+      s.compatibleApiEndpoint = 'https://provider.example';
+      s.compatibleApiKey = 'test-only-key';
+      await s.send(
+        'Explain Newton’s second law with a worked example.',
+        approvedOnline: true,
+      );
+      final body = jsonDecode(sent!.body) as Map<String, dynamic>;
+      final messages = body['messages'] as List;
+      final prompt = jsonDecode(
+        messages.single['content'] as String,
+      ) as Map<String, dynamic>;
+      expect(prompt['instruction'], contains(entry.value));
+      expect(s.error, isEmpty);
+      s.dispose();
+    });
+  }
   test('compatible SSE handles chunk boundaries, errors and completion', () async {
     const c = EngineConfig(
       mode: 'compatible',
