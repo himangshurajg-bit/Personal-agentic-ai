@@ -1,3 +1,5 @@
+import 'study_quiz.dart';
+
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -334,6 +336,10 @@ class _LocalFlashcardsState extends State<LocalFlashcards> {
   List<Map<String, dynamic>> queue = [];
   bool revealed = false;
   bool reviewing = false;
+  List<PracticeQuizQuestion> quiz = [];
+  int quizIndex = 0, quizScore = 0;
+  String? quizChoice;
+  bool quizFinished = false;
 
   Future<String?> _textDialog({
     required String title,
@@ -469,6 +475,44 @@ class _LocalFlashcardsState extends State<LocalFlashcards> {
     });
   }
 
+  void _startQuiz(List<Map<String, dynamic>> cards) {
+    final questions = buildPracticeQuiz(cards);
+    if (questions.isEmpty) {
+      notice(
+        context,
+        'Add two cards with different answers to practise a quiz.',
+      );
+      return;
+    }
+    setState(() {
+      quiz = questions;
+      quizIndex = 0;
+      quizScore = 0;
+      quizChoice = null;
+      quizFinished = false;
+      reviewing = false;
+    });
+  }
+
+  void _chooseQuizAnswer(String choice) {
+    if (quizChoice != null || quizFinished) return;
+    setState(() {
+      quizChoice = choice;
+      if (choice == quiz[quizIndex].answer) quizScore++;
+    });
+  }
+
+  void _nextQuizQuestion() {
+    setState(() {
+      if (quizIndex + 1 == quiz.length) {
+        quizFinished = true;
+      } else {
+        quizIndex++;
+        quizChoice = null;
+      }
+    });
+  }
+
   Future<void> _rate(String rating) async {
     if (queue.isEmpty) return;
     try {
@@ -491,6 +535,99 @@ class _LocalFlashcardsState extends State<LocalFlashcards> {
     final allCards = widget.data.rows('flashcards');
     final due = widget.data.dueFlashcards();
     final reviews = widget.data.rows('study_reviews');
+    if (quiz.isNotEmpty) {
+      final question = quiz[quizIndex];
+      return Glass(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    quizFinished
+                        ? 'Practice complete'
+                        : 'Practice · ${quizIndex + 1} of ${quiz.length}',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => setState(() {
+                    quiz = [];
+                    quizChoice = null;
+                    quizFinished = false;
+                  }),
+                  child: const Text('Exit'),
+                ),
+              ],
+            ),
+            if (quizFinished) ...[
+              const SizedBox(height: 12),
+              Text(
+                '$quizScore of ${quiz.length} correct',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: () => setState(() {
+                  quiz = [];
+                  quizFinished = false;
+                }),
+                child: const Text('Done'),
+              ),
+            ] else ...[
+              const SizedBox(height: 12),
+              Text(
+                question.prompt,
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 14),
+              for (final choice in question.choices)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: quizChoice == null
+                          ? () => _chooseQuizAnswer(choice)
+                          : null,
+                      style: OutlinedButton.styleFrom(
+                        backgroundColor: quizChoice == choice
+                            ? (choice == question.answer
+                                  ? Colors.green.withValues(alpha: .14)
+                                  : Theme.of(context).colorScheme.error
+                                        .withValues(alpha: .12))
+                            : choice == question.answer && quizChoice != null
+                            ? Colors.green.withValues(alpha: .14)
+                            : null,
+                      ),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(choice),
+                      ),
+                    ),
+                  ),
+                ),
+              if (quizChoice != null) ...[
+                Text(
+                  quizChoice == question.answer
+                      ? 'Correct'
+                      : 'Answer: ${question.answer}',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                FilledButton(
+                  onPressed: _nextQuizQuestion,
+                  child: Text(
+                    quizIndex + 1 == quiz.length ? 'See score' : 'Next',
+                  ),
+                ),
+              ],
+            ],
+          ],
+        ),
+      );
+    }
     if (reviewing && queue.isNotEmpty) {
       final card = queue.first;
       final remaining = queue.length;
@@ -645,6 +782,12 @@ class _LocalFlashcardsState extends State<LocalFlashcards> {
                               icon: const Icon(Icons.add),
                               label: const Text('Add card'),
                             ),
+                            if (canBuildPracticeQuiz(cards))
+                              OutlinedButton.icon(
+                                onPressed: () => _startQuiz(cards),
+                                icon: const Icon(Icons.quiz_outlined),
+                                label: const Text('Practice quiz'),
+                              ),
                             if (deckDue > 0)
                               OutlinedButton.icon(
                                 onPressed: () =>
@@ -728,7 +871,7 @@ class _StudyScreenState extends State<StudyScreen> {
         const SizedBox(height: 24),
         const Glass(
           child: Text(
-            'Practice cards and review progress stay on this phone. Tutor prompts and quiz generation require a configured engine; model answers are not automatically verified.',
+            'Your saved cards can make a local practice quiz, with no AI or network. Tutor prompts and AI-generated quizzes require a configured engine; model answers are not automatically verified.',
           ),
         ),
         TextField(

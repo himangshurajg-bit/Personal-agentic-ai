@@ -16,12 +16,17 @@ from contextlib import closing, contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
-from agent.providers import post_json
+from agent.providers import local_runtime_version, post_json
 
 
 @contextmanager
-def fixture(status=200, body=b'{"steps":[]}', headers=None, raw_status=False):
-    requests = []
+def fixture(status=200, body=b'{"steps":[]}', headers=None, raw_status=False,
+            version_status=200, version_body=b'{"version":"0.6.2"}', version_headers=None):
+    class RequestLog(list):
+        pass
+
+    requests = RequestLog()
+    requests.get = []
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
@@ -37,6 +42,16 @@ def fixture(status=200, body=b'{"steps":[]}', headers=None, raw_status=False):
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def do_GET(self):
+            requests.get.append((self.path, dict(self.headers)))
+            response = version_body if self.path == '/api/version' else b'{}'
+            self.send_response(version_status if self.path == '/api/version' else 404)
+            for name, value in (version_headers or {}).items():
+                self.send_header(name, value)
+            self.send_header('Content-Length', str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
 
         def log_message(self, *args):
             pass
@@ -99,6 +114,62 @@ class TransportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, '^Provider request failed; check model, credentials and endpoint$'):
                 post_json(url, {}, {})
         self.assertEqual(len(requests), 1)
+
+    def test_version_probe_reports_only_numeric_ollama_version(self):
+        with fixture(version_body=b'{"version":"0.6.2"}') as (url, requests), patch.dict('os.environ', {
+            'http_proxy': 'http://127.0.0.1:1', 'HTTP_PROXY': 'http://127.0.0.1:1',
+            'https_proxy': 'http://127.0.0.1:1', 'HTTPS_PROXY': 'http://127.0.0.1:1',
+            'no_proxy': '', 'NO_PROXY': '',
+        }):
+            version = local_runtime_version(url)
+        self.assertEqual(version, '0.6.2')
+        self.assertEqual(len(requests.get), 1)
+        path, headers = requests.get[0]
+        self.assertEqual(path, '/api/version')
+        self.assertEqual(headers['Accept'], 'application/json')
+        self.assertNotIn('Authorization', headers)
+
+    def test_version_probe_never_opens_non_loopback_or_credentialed_endpoint(self):
+        from unittest.mock import patch
+        for endpoint in ('http://example.test', 'https://127.0.0.1:11434',
+                         'http://user:private-marker@localhost:11434'):
+            with self.subTest(endpoint=endpoint), patch('agent.providers.urllib.request.build_opener') as opener:
+                self.assertIsNone(local_runtime_version(endpoint))
+                opener.assert_not_called()
+
+    def test_version_probe_does_not_follow_redirect(self):
+        with fixture() as (destination, destination_requests):
+            with fixture(version_status=302, version_body=b'',
+                         version_headers={'Location': destination + '/api/version'}) as (source, source_requests):
+                self.assertIsNone(local_runtime_version(source))
+        self.assertEqual(source_requests.get[0][0], '/api/version')
+        self.assertEqual(destination_requests.get, [])
+
+    def test_check_cli_does_not_echo_version_response_secrets(self):
+        inference_body = json.dumps({'message': {'content': json.dumps({
+            'steps': [{'tool': 'notes.add', 'args': {'text': 'fixture'}}]})}}).encode()
+        with fixture(version_body=b'{"version":"private-marker-token"}',
+                     body=inference_body) as (url, _):
+            env = {**os.environ, 'LOCAL_AGENT_URL': url, 'LOCAL_AGENT_MODEL': 'fixture-model',
+                   'AGENT_DB': '/tmp/unused-local-version-check.sqlite'}
+            result = subprocess.run([sys.executable, '-m', 'agent', 'check-local'], env=env,
+                                    capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('private-marker-token', result.stdout + result.stderr)
+        report = json.loads(result.stdout)
+        self.assertIsNone(report['runtime_version'])
+        self.assertEqual(report['runtime_version_status'], 'unavailable_or_unrecognized')
+
+    def test_version_probe_ignores_unsupported_or_secret_shaped_responses(self):
+        for body in (b'{"unexpected":"private-marker"}',
+                     b'{"version":"private-marker-token"}',
+                     b'{"version":"0.6.2\\nprivate-marker"}',
+                     b'{' + b' ' * 4097):
+            with self.subTest(body=body[:40]), fixture(version_body=body) as (url, requests):
+                result = local_runtime_version(url)
+                self.assertIsNone(result)
+                self.assertEqual(len(requests.get), 1)
+                self.assertNotIn('private-marker', str(result))
 
     def test_deep_json_cli_fails_cleanly_without_local_effects(self):
         # Python 3.11's decoder raises RecursionError; newer decoders may parse it.
@@ -177,9 +248,14 @@ class DiagnosticTransportTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             report = json.loads(result.stdout)
             self.assertEqual(report['status'], 'schema_valid')
+            self.assertEqual(report['runtime_version'], '0.6.2')
+            self.assertEqual(report['runtime_version_status'], 'reported')
+            self.assertEqual(report['attempts'], 1)
             self.assertFalse(report['executed'])
             self.assertFalse(db.parent.exists())
-            self.assertEqual(len(requests), 1)
+            self.assertEqual(len(requests), 1)  # One inference POST; the metadata GET is separate.
+            self.assertEqual(len(requests.get), 1)
+            self.assertEqual(requests.get[0][0], '/api/version')
             path, _, raw = requests[0]
             self.assertEqual(path, '/api/chat')
             sent = json.loads(raw)

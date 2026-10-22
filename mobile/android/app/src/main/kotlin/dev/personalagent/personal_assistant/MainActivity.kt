@@ -86,7 +86,7 @@ class MainActivity : FlutterFragmentActivity() {
     private fun startVoice(args:Map<*,*>, result:MethodChannel.Result) {
         val mode=args["mode"] as? String
         val locale=args["locale"] as? String
-        if(mode !in setOf("offline","online") || locale !in setOf("as-IN","en-IN")) { result.error("invalid","Unsupported speech selection",null);return }
+        if(mode !in setOf("offline","online") || locale !in setOf("as-IN","en-IN","hi-IN","hi-Latn-IN")) { result.error("invalid","Unsupported speech selection",null);return }
         if(mode=="online" && args["approved_online"]!=true) {result.error("approval","Review online audio processing first",null);return}
         if(mode=="offline" && (Build.VERSION.SDK_INT<33 || !SpeechRecognizer.isOnDeviceRecognitionAvailable(this))) {result.error("unavailable","Verified on-device language recognition requires Android 13+ and an installed on-device service. No online fallback.",null);return}
         if(mode=="online" && !SpeechRecognizer.isRecognitionAvailable(this)) {result.error("unavailable","No system recognition service. Type instead.",null);return}
