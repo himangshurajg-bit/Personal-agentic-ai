@@ -29,6 +29,9 @@ import io.flutter.plugin.common.EventChannel
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 
+internal fun isValidTextSharePayload(title: String?, text: String?): Boolean =
+    !title.isNullOrBlank() && title.length <= 80 && !text.isNullOrBlank() && text.length <= 10000
+
 class MainActivity : FlutterFragmentActivity() {
     private var permissionResult: MethodChannel.Result? = null
     private var pendingAction: Map<*, *>? = null
@@ -223,6 +226,7 @@ class MainActivity : FlutterFragmentActivity() {
                     "system_recognizer" to SpeechRecognizer.isRecognitionAvailable(this)
                 ))
                 "request_access_permission" -> requestAccessPermission(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
+                "share_text" -> shareText(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "voice_start" -> startVoice(call.arguments as? Map<*,*> ?: emptyMap<Any,Any>(),result)
                 "voice_cancel" -> {stopVoice();result.success(true)}
                 "list_launchable_apps" -> {
@@ -263,6 +267,25 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
     }
+    private fun shareText(args: Map<*, *>, result: MethodChannel.Result) {
+        val title = (args["title"] as? String)?.trim()
+        val text = args["text"] as? String
+        if (!isValidTextSharePayload(title, text)) {
+            result.error("invalid_argument", "A short title and non-empty text up to 10,000 characters are required", null)
+            return
+        }
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        try {
+            startActivity(Intent.createChooser(send, title))
+            result.success(mapOf("result" to "chooser_opened", "sent" to false))
+        } catch (_: Exception) {
+            result.error("unavailable", "Android could not open the text share sheet", null)
+        }
+    }
+
     private fun safeJsonExportName(requested: String?): String {
         val name = (requested ?: "personal-memories.json")
             .substringAfterLast('/')

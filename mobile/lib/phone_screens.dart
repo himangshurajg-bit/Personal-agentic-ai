@@ -1694,6 +1694,7 @@ class _PhoneLibraryState extends State<PhoneLibrary> {
   @override
   Widget build(BuildContext context) => Shell(
     title: 'On your phone',
+    assistantName: widget.state.assistantName,
     child: ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -2488,6 +2489,7 @@ class _StudyScreenState extends State<StudyScreen> {
   @override
   Widget build(BuildContext context) => Shell(
     title: 'Study mode',
+    assistantName: widget.state.assistantName,
     child: ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -2628,6 +2630,7 @@ class _SelectedFilesState extends State<SelectedFiles> {
   @override
   Widget build(BuildContext context) => Shell(
     title: 'Selected file',
+    assistantName: widget.state.assistantName,
     child: ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -2737,6 +2740,7 @@ class ActionHistory extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Shell(
     title: 'Automations',
+    assistantName: state.assistantName,
     child: ListView(
       padding: const EdgeInsets.all(20),
       children: [

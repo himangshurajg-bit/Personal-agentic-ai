@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -7,9 +8,9 @@ import 'package:flutter/services.dart';
 
 import 'assistant_state.dart';
 import 'mcp_servers.dart';
-import 'phone_screens.dart';
-import 'home_orb.dart';
 import 'offline_model.dart';
+import 'phone_screens.dart';
+import 'safe_workflows.dart';
 import 'ui_motion.dart';
 import 'visual_theme.dart';
 
@@ -66,7 +67,7 @@ class _AssistantAppState extends State<AssistantApp>
       debugShowCheckedModeBanner: false,
       theme: _assistantTheme(Brightness.light, widget.state.visualTheme),
       darkTheme: _assistantTheme(Brightness.dark, widget.state.visualTheme),
-      themeAnimationDuration: const Duration(milliseconds: 220),
+      themeAnimationDuration: const Duration(milliseconds: 520),
       themeAnimationCurve: Curves.easeInOutCubic,
       themeMode: widget.state.theme == 'dark'
           ? ThemeMode.dark
@@ -78,19 +79,28 @@ class _AssistantAppState extends State<AssistantApp>
         child: child ?? const SizedBox.shrink(),
       ),
       home: !widget.state.ready
-          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+          ? WelcomeSplash(assistantName: widget.state.assistantName)
           : widget.state.onboarded
           ? Home(state: widget.state)
           : Onboarding(state: widget.state),
       routes: {
         '/home': (_) => Home(state: widget.state),
-        '/chat': (_) => ChatScreen(state: widget.state),
+        '/chat': (context) {
+          final draft = ModalRoute.of(context)?.settings.arguments;
+          return ChatScreen(
+            state: widget.state,
+            initialDraft: draft is String ? draft : null,
+          );
+        },
+        '/voice': (_) => ChatScreen(state: widget.state, startWithVoice: true),
         '/settings': (_) => Settings(state: widget.state),
         '/memory': (_) => Memories(state: widget.state),
         '/library': (_) => PhoneLibrary(state: widget.state),
         '/study': (_) => StudyScreen(state: widget.state),
         '/files': (_) => SelectedFiles(state: widget.state),
         '/automations': (_) => ActionHistory(state: widget.state),
+        '/drafts': (_) => const OutboundDraftsScreen(),
+        '/skills': (_) => SafeSkillsScreen(state: widget.state),
       },
     ),
   );
@@ -206,6 +216,7 @@ class _LockScreenState extends State<_LockScreen> {
 
 class Shell extends StatelessWidget {
   final String title;
+  final String? assistantName;
   final Widget child;
   final List<Widget>? actions;
   final bool primaryNavigation;
@@ -213,6 +224,7 @@ class Shell extends StatelessWidget {
     super.key,
     required this.title,
     required this.child,
+    this.assistantName,
     this.actions,
     this.primaryNavigation = true,
   });
@@ -220,62 +232,805 @@ class Shell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final currentRoute = ModalRoute.of(context)?.settings.name;
+    final dark = theme.brightness == Brightness.dark;
+    final route = ModalRoute.of(context);
+    final currentRoute = route?.settings.name;
+    final canPop = route?.canPop ?? false;
     return Scaffold(
-      bottomNavigationBar: !primaryNavigation
-          ? null
-          : NavigationBar(
-              height: 80,
-              selectedIndex: switch (currentRoute) {
-                '/chat' => 1,
-                '/study' || '/files' => 1,
-                '/automations' => 2,
-                '/memory' || '/library' => 3,
-                '/settings' => 4,
-                _ => 0,
-              },
-              onDestinationSelected: (i) {
-                final route = ['/home', '/chat', '/automations', '/memory', '/settings'][i];
-                if (currentRoute != route) Navigator.pushReplacementNamed(context, route);
-              },
-              destinations: const [
-                NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'Home'),
-                NavigationDestination(icon: Icon(Icons.chat_bubble_outline), selectedIcon: Icon(Icons.chat_bubble_rounded), label: 'Chat'),
-                NavigationDestination(icon: Icon(Icons.bolt_outlined), selectedIcon: Icon(Icons.bolt_rounded), label: 'Actions'),
-                NavigationDestination(icon: Icon(Icons.auto_awesome_outlined), selectedIcon: Icon(Icons.auto_awesome), label: 'Memory'),
-                NavigationDestination(icon: Icon(Icons.tune_rounded), selectedIcon: Icon(Icons.tune_rounded), label: 'Settings'),
-              ],
-            ),
+      extendBody: true,
+      drawer: primaryNavigation
+          ? _AssistantDrawer(
+              assistantName: assistantName ?? title,
+              currentRoute: currentRoute,
+            )
+          : null,
+      drawerScrimColor: theme.colorScheme.scrim.withValues(alpha: .34),
+      bottomNavigationBar: primaryNavigation
+          ? _AssistantDock(currentRoute: currentRoute)
+          : null,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
+        leadingWidth: 58,
+        leading: !primaryNavigation
+            ? null
+            : canPop
+            ? IconButton(
+                tooltip: 'Back',
+                onPressed: () => Navigator.maybePop(context),
+                icon: const Icon(Icons.arrow_back_rounded),
+              )
+            : Builder(
+                builder: (drawerContext) => IconButton(
+                  tooltip: 'Open navigation menu',
+                  onPressed: () => Scaffold.of(drawerContext).openDrawer(),
+                  icon: const Icon(Icons.menu_rounded),
+                ),
+              ),
         title: Text(title),
         actions: actions,
-        backgroundColor: theme.colorScheme.surface,
+        backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         scrolledUnderElevation: 0,
-        titleSpacing: 20,
+        titleSpacing: 8,
       ),
-      body: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              theme.colorScheme.surface,
-              Color.lerp(theme.colorScheme.surface, theme.colorScheme.primary, theme.brightness == Brightness.dark ? .045 : .025)!,
-            ],
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: dark
+                    ? const [
+                        Color(0xff101322),
+                        Color(0xff151b2b),
+                        Color(0xff101a20),
+                      ]
+                    : const [
+                        Color(0xffe8edff),
+                        Color(0xfff8f7fc),
+                        Color(0xffe6f4f1),
+                      ],
+              ),
+            ),
           ),
+          const Positioned.fill(child: _AmbientGlow()),
+          SafeArea(
+            top: false,
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 700),
+                child: child,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class WelcomeSplash extends StatefulWidget {
+  final String assistantName;
+  const WelcomeSplash({super.key, required this.assistantName});
+
+  @override
+  State<WelcomeSplash> createState() => _WelcomeSplashState();
+}
+
+class _WelcomeSplashState extends State<WelcomeSplash>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _float = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 8),
+  );
+  bool _reduceMotion = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    if (reduceMotion == _reduceMotion && (_float.isAnimating || reduceMotion)) {
+      return;
+    }
+    _reduceMotion = reduceMotion;
+    if (reduceMotion) {
+      _float.stop();
+    } else {
+      _float.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _float.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: AnimatedBuilder(
+      animation: _float,
+      builder: (context, _) {
+        final phase = _reduceMotion ? 0.0 : _float.value * math.pi * 2;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xff070b25),
+                    Color(0xff171543),
+                    Color(0xff351a62),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              left: -70,
+              top: 80 + math.sin(phase) * 18,
+              child: _SplashGlow(
+                size: 210,
+                color: const Color(0xff4c83f2).withValues(alpha: .20),
+              ),
+            ),
+            Positioned(
+              right: -84,
+              bottom: 120 + math.cos(phase * .7) * 22,
+              child: _SplashGlow(
+                size: 260,
+                color: const Color(0xffbb7bff).withValues(alpha: .20),
+              ),
+            ),
+            Positioned(
+              right: 60,
+              top: 125 + math.cos(phase * 1.15) * 14,
+              child: _SplashDot(color: const Color(0xff9bd6ff), size: 7),
+            ),
+            Positioned(
+              left: 48,
+              bottom: 230 + math.sin(phase * .82) * 12,
+              child: _SplashDot(color: const Color(0xffd5b5ff), size: 5),
+            ),
+            SafeArea(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 36),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 420),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 112,
+                          height: 112,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: const LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Color(0xff7bdcff),
+                                Color(0xff9172f4),
+                                Color(0xffd292ff),
+                              ],
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xff987cff)
+                                    .withValues(alpha: .42),
+                                blurRadius: 42,
+                                spreadRadius: 2,
+                              ),
+                            ],
+                          ),
+                          child: const Icon(
+                            Icons.auto_awesome_rounded,
+                            size: 48,
+                            color: Color(0xff101333),
+                          ),
+                        ),
+                        const SizedBox(height: 28),
+                        Text(
+                          widget.assistantName,
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.headlineMedium
+                              ?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -.8,
+                              ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'A little room to think.',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodyLarge
+                              ?.copyWith(
+                                color: Colors.white.withValues(alpha: .72),
+                              ),
+                        ),
+                        const SizedBox(height: 34),
+                        const ClipRRect(
+                          borderRadius: BorderRadius.all(Radius.circular(8)),
+                          child: LinearProgressIndicator(
+                            minHeight: 4,
+                            backgroundColor: Color(0x337c9cff),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Color(0xffa8c7ff),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Preparing your private space',
+                          style: Theme.of(context).textTheme.labelMedium
+                              ?.copyWith(
+                                color: Colors.white.withValues(alpha: .58),
+                                letterSpacing: .2,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+}
+
+class _SplashGlow extends StatelessWidget {
+  final double size;
+  final Color color;
+  const _SplashGlow({required this.size, required this.color});
+
+  @override
+  Widget build(BuildContext context) => ImageFiltered(
+    imageFilter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
+    child: Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    ),
+  );
+}
+
+class _SplashDot extends StatelessWidget {
+  final Color color;
+  final double size;
+  const _SplashDot({required this.color, required this.size});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: size,
+    height: size,
+    decoration: BoxDecoration(
+      color: color,
+      shape: BoxShape.circle,
+      boxShadow: [
+        BoxShadow(color: color.withValues(alpha: .65), blurRadius: 14),
+      ],
+    ),
+  );
+}
+
+class _AssistantDrawer extends StatelessWidget {
+  final String assistantName;
+  final String? currentRoute;
+  const _AssistantDrawer({
+    required this.assistantName,
+    required this.currentRoute,
+  });
+
+  bool _selected(String route) {
+    if (route == '/home') {
+      return currentRoute == null || currentRoute == '/home';
+    }
+    if (route == '/chat') {
+      return currentRoute == '/chat' || currentRoute == '/voice';
+    }
+    if (route == '/memory') {
+      return currentRoute == '/memory' ||
+          currentRoute == '/library' ||
+          currentRoute == '/files';
+    }
+    return currentRoute == route;
+  }
+
+  void _go(BuildContext context, String route) {
+    Navigator.pop(context);
+    final currentRoute = ModalRoute.of(context)?.settings.name;
+    if (currentRoute != route) Navigator.pushReplacementNamed(context, route);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return Drawer(
+      width: math.min(MediaQuery.sizeOf(context).width * .86, 360),
+      elevation: 0,
+      backgroundColor: colors.surface.withValues(alpha: .96),
+      child: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 18),
+              child: Row(
+                children: [
+                  Container(
+                    width: 54,
+                    height: 54,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(20),
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [colors.primary, colors.secondary],
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: colors.primary.withValues(alpha: .22),
+                          blurRadius: 22,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      Icons.auto_awesome_rounded,
+                      color: colors.onPrimary,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          assistantName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'YOUR PRIVATE ASSISTANT',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: colors.onSurfaceVariant,
+                            letterSpacing: .9,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Divider(
+              color: colors.outlineVariant.withValues(alpha: .5),
+              height: 1,
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(12, 18, 12, 18),
+                children: [
+                  const _SettingsSectionLabel('HOME'),
+                  _DrawerRow(
+                    icon: Icons.home_rounded,
+                    label: 'Home',
+                    selected: _selected('/home'),
+                    onTap: () => _go(context, '/home'),
+                  ),
+                  const SizedBox(height: 18),
+                  const _SettingsSectionLabel('TOOLS'),
+                  _DrawerRow(
+                    icon: Icons.chat_bubble_outline_rounded,
+                    label: 'Chat',
+                    selected: _selected('/chat'),
+                    onTap: () => _go(context, '/chat'),
+                  ),
+                  _DrawerRow(
+                    icon: Icons.school_outlined,
+                    label: 'Study',
+                    selected: _selected('/study'),
+                    onTap: () => _go(context, '/study'),
+                  ),
+                  _DrawerRow(
+                    icon: Icons.bolt_rounded,
+                    label: 'Actions',
+                    selected: _selected('/automations'),
+                    onTap: () => _go(context, '/automations'),
+                  ),
+                  _DrawerRow(
+                    icon: Icons.auto_awesome_outlined,
+                    label: 'Skills & actions',
+                    selected: _selected('/skills'),
+                    onTap: () => _go(context, '/skills'),
+                  ),
+                  _DrawerRow(
+                    icon: Icons.edit_note_rounded,
+                    label: 'Message & social drafts',
+                    selected: _selected('/drafts'),
+                    onTap: () => _go(context, '/drafts'),
+                  ),
+                  _DrawerRow(
+                    icon: Icons.psychology_alt_outlined,
+                    label: 'Memory',
+                    selected: _selected('/memory'),
+                    onTap: () => _go(context, '/memory'),
+                  ),
+                  _DrawerRow(
+                    icon: Icons.library_books_outlined,
+                    label: 'Tasks & history',
+                    selected: _selected('/library'),
+                    onTap: () => _go(context, '/library'),
+                  ),
+                  _DrawerRow(
+                    icon: Icons.folder_open_outlined,
+                    label: 'Selected files',
+                    selected: _selected('/files'),
+                    onTap: () => _go(context, '/files'),
+                  ),
+                  const SizedBox(height: 18),
+                  const _SettingsSectionLabel('PREFERENCES'),
+                  _DrawerRow(
+                    icon: Icons.tune_rounded,
+                    label: 'Settings',
+                    selected: _selected('/settings'),
+                    onTap: () => _go(context, '/settings'),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 18),
+              child: Text(
+                'A quiet space for your conversations, study and plans.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
         ),
-        child: SafeArea(
-          top: false,
-          child: Align(
-            alignment: Alignment.topCenter,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 760),
-              child: child,
+      ),
+    );
+  }
+}
+
+class _DrawerRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _DrawerRow({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 240),
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              gradient: selected
+                  ? LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        colors.primary.withValues(alpha: .18),
+                        colors.secondary.withValues(alpha: .10),
+                      ],
+                    )
+                  : null,
+              border: selected
+                  ? Border.all(color: colors.primary.withValues(alpha: .22))
+                  : null,
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  icon,
+                  size: 21,
+                  color: selected ? colors.primary : colors.onSurfaceVariant,
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: selected ? colors.primary : colors.onSurface,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ),
+                if (selected)
+                  Icon(Icons.chevron_right_rounded, color: colors.primary),
+              ],
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _AssistantDock extends StatelessWidget {
+  final String? currentRoute;
+  const _AssistantDock({required this.currentRoute});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final dark = theme.brightness == Brightness.dark;
+    final home = currentRoute == null || currentRoute == '/home';
+    final chat = currentRoute == '/chat' || currentRoute == '/voice';
+    final memory =
+        currentRoute == '/memory' ||
+        currentRoute == '/library' ||
+        currentRoute == '/files';
+    final settings = currentRoute == '/settings';
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(28),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+            child: Container(
+              height: 78,
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+              decoration: BoxDecoration(
+                color: colors.surface.withValues(alpha: dark ? .76 : .72),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: dark ? .16 : .78),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: colors.primary.withValues(alpha: dark ? .12 : .10),
+                    blurRadius: 28,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  _DockItem(
+                    icon: Icons.home_outlined,
+                    selectedIcon: Icons.home_rounded,
+                    label: 'Home',
+                    selected: home,
+                    onTap: () => _navigate(context, '/home'),
+                  ),
+                  _DockItem(
+                    icon: Icons.chat_bubble_outline_rounded,
+                    selectedIcon: Icons.chat_bubble_rounded,
+                    label: 'Chat',
+                    selected: chat,
+                    onTap: () => _navigate(context, '/chat'),
+                  ),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Tooltip(
+                          message: 'Start a voice conversation',
+                          child: TapMotion(
+                            depth: .7,
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                customBorder: const CircleBorder(),
+                                onTap: () => _navigate(context, '/voice'),
+                                child: Container(
+                                  width: 47,
+                                  height: 47,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                      colors: [
+                                        colors.primary,
+                                        colors.secondary,
+                                      ],
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: colors.primary.withValues(
+                                          alpha: .32,
+                                        ),
+                                        blurRadius: 17,
+                                        offset: const Offset(0, 5),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Icon(
+                                    Icons.mic_rounded,
+                                    color: colors.onPrimary,
+                                    size: 23,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          'Voice',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontSize: 9,
+                            height: 1.1,
+                            fontWeight: FontWeight.w600,
+                            color: colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _DockItem(
+                    icon: Icons.psychology_alt_outlined,
+                    selectedIcon: Icons.psychology_alt_rounded,
+                    label: 'Memory',
+                    selected: memory,
+                    onTap: () => _navigate(context, '/memory'),
+                  ),
+                  _DockItem(
+                    icon: Icons.tune_rounded,
+                    selectedIcon: Icons.tune_rounded,
+                    label: 'Settings',
+                    selected: settings,
+                    onTap: () => _navigate(context, '/settings'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _navigate(BuildContext context, String route) {
+    if (ModalRoute.of(context)?.settings.name != route) {
+      if (route == '/voice') {
+        Navigator.pushNamed(context, route);
+      } else {
+        Navigator.pushReplacementNamed(context, route);
+      }
+    }
+  }
+}
+
+class _DockItem extends StatelessWidget {
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _DockItem({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return Expanded(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
+            margin: const EdgeInsets.symmetric(horizontal: 1),
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              color: selected ? colors.primary.withValues(alpha: .09) : null,
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  selected ? selectedIcon : icon,
+                  size: 21,
+                  color: selected ? colors.primary : colors.onSurfaceVariant,
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 9,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: selected ? colors.primary : colors.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsSectionLabel extends StatelessWidget {
+  final String text;
+  const _SettingsSectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(10, 12, 10, 8),
+    child: Text(
+      text,
+      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+        letterSpacing: 1.1,
+        fontWeight: FontWeight.w800,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+    ),
+  );
+}
+
+class _SettingsIconTile extends StatelessWidget {
+  final IconData icon;
+  const _SettingsIconTile({required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(
+        color: colors.primary.withValues(alpha: .10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colors.primary.withValues(alpha: .10)),
+      ),
+      child: Icon(icon, size: 20, color: colors.primary),
     );
   }
 }
@@ -337,10 +1092,10 @@ ThemeData _assistantTheme(Brightness brightness, String paletteId) {
       iconTheme: IconThemeData(color: scheme.onSurface),
     ),
     navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: scheme.surface,
+      backgroundColor: Colors.transparent,
       elevation: 0,
-      indicatorColor: scheme.primary.withValues(alpha: dark ? .24 : .12),
-      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      indicatorColor: scheme.primary.withValues(alpha: dark ? .28 : .13),
+      labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
       iconTheme: WidgetStateProperty.resolveWith(
         (states) => IconThemeData(
           color: states.contains(WidgetState.selected)
@@ -454,6 +1209,98 @@ ThemeData _assistantTheme(Brightness brightness, String paletteId) {
   );
 }
 
+class _AmbientGlow extends StatefulWidget {
+  const _AmbientGlow();
+
+  @override
+  State<_AmbientGlow> createState() => _AmbientGlowState();
+}
+
+class _AmbientGlowState extends State<_AmbientGlow>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 18),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller.stop();
+    } else if (!_controller.isAnimating) {
+      _controller.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _controller,
+    builder: (context, _) => CustomPaint(
+      painter: _AmbientPainter(
+        progress: MediaQuery.disableAnimationsOf(context)
+            ? .45
+            : _controller.value,
+        scheme: Theme.of(context).colorScheme,
+      ),
+      child: const SizedBox.expand(),
+    ),
+  );
+}
+
+class _AmbientPainter extends CustomPainter {
+  final double progress;
+  final ColorScheme scheme;
+  const _AmbientPainter({required this.progress, required this.scheme});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    final dark = scheme.brightness == Brightness.dark;
+    final phase = progress * math.pi * 2;
+    void glow(Offset center, double radius, Color color, double opacity) {
+      final bounds = Rect.fromCircle(center: center, radius: radius);
+      final paint = Paint()
+        ..shader = RadialGradient(
+          colors: [
+            color.withValues(alpha: opacity),
+            color.withValues(alpha: 0),
+          ],
+        ).createShader(bounds);
+      canvas.drawCircle(center, radius, paint);
+    }
+
+    glow(
+      Offset(size.width * (.18 + .14 * math.sin(phase)), size.height * .16),
+      size.width * .78,
+      scheme.primary,
+      dark ? .28 : .24,
+    );
+    glow(
+      Offset(size.width * (.84 - .12 * math.sin(phase)), size.height * .64),
+      size.width * .68,
+      scheme.tertiary,
+      dark ? .22 : .19,
+    );
+    glow(
+      Offset(size.width * (.48 + .10 * math.cos(phase)), size.height * .98),
+      size.width * .56,
+      scheme.secondary,
+      dark ? .14 : .15,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_AmbientPainter oldDelegate) =>
+      oldDelegate.progress != progress || oldDelegate.scheme != scheme;
+}
+
 class Glass extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -467,32 +1314,96 @@ class Glass extends StatelessWidget {
     this.padding = const EdgeInsets.all(20),
     this.tintColor,
     this.bottomSpacing = 14,
-    this.borderRadius = const BorderRadius.all(Radius.circular(20)),
+    this.borderRadius = const BorderRadius.all(Radius.circular(24)),
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
     final surface = tintColor == null
-        ? theme.colorScheme.surfaceContainerLow
-        : Color.alphaBlend(tintColor!.withValues(alpha: .08), theme.colorScheme.surfaceContainerLow);
+        ? theme.colorScheme.surface
+        : Color.alphaBlend(
+            tintColor!.withValues(alpha: dark ? .24 : .12),
+            theme.colorScheme.surface,
+          );
     return Padding(
       padding: EdgeInsets.only(bottom: bottomSpacing),
-      child: Container(
+      child: DecoratedBox(
         decoration: BoxDecoration(
-          color: surface,
           borderRadius: borderRadius,
-          border: Border.all(color: theme.colorScheme.outlineVariant.withValues(alpha: .55)),
           boxShadow: [
             BoxShadow(
-              color: theme.colorScheme.shadow.withValues(alpha: theme.brightness == Brightness.dark ? .12 : .045),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
+              color: theme.colorScheme.primary.withValues(
+                alpha: dark ? .20 : .13,
+              ),
+              blurRadius: 34,
+              spreadRadius: -3,
+              offset: const Offset(0, 11),
+            ),
+            BoxShadow(
+              color: theme.colorScheme.tertiary.withValues(
+                alpha: dark ? .11 : .08,
+              ),
+              blurRadius: 38,
+              spreadRadius: -8,
+              offset: const Offset(0, 18),
             ),
           ],
         ),
-        padding: padding,
-        child: Material(type: MaterialType.transparency, child: child),
+        child: ClipRRect(
+          borderRadius: borderRadius,
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withValues(alpha: dark ? .12 : .70),
+                    surface.withValues(alpha: dark ? .62 : .62),
+                    theme.colorScheme.surfaceContainerHighest.withValues(
+                      alpha: dark ? .28 : .42,
+                    ),
+                  ],
+                ),
+                borderRadius: borderRadius,
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: dark ? .18 : .82),
+                  width: 1,
+                ),
+              ),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.center,
+                            colors: [
+                              Colors.white.withValues(alpha: dark ? .07 : .30),
+                              Colors.transparent,
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: padding,
+                    child: Material(
+                      type: MaterialType.transparency,
+                      child: child,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -825,363 +1736,384 @@ class Home extends StatelessWidget {
     final theme = Theme.of(context);
     final openTasks = state.local
         .rows('tasks')
-        .where((r) => !r['done'])
+        .where((row) => !row['done'])
         .toList();
     final attempts = state.local.rows('attempts');
     final upcomingReminders = state.local
         .rows('actions')
         .where(
-          (r) =>
-              r['status'] == 'scheduled' &&
-              r['action']['at_ms'] > DateTime.now().millisecondsSinceEpoch,
+          (row) =>
+              row['status'] == 'scheduled' &&
+              row['action']['at_ms'] > DateTime.now().millisecondsSinceEpoch,
         )
-        .take(3)
         .toList();
+    final hour = DateTime.now().hour;
+    final greeting = hour < 12
+        ? 'Good morning'
+        : hour < 17
+        ? 'Good afternoon'
+        : 'Good evening';
+    final modeLabel = state.engine == 'offline'
+        ? 'Offline AI unavailable'
+        : 'Online mode selected';
     return Shell(
       title: state.assistantName,
+      assistantName: state.assistantName,
       actions: [
         IconButton(
-          tooltip: 'Settings',
-          onPressed: () => Navigator.pushNamed(context, '/settings'),
-          icon: const Icon(Icons.tune_rounded),
+          tooltip: 'Reminder activity',
+          onPressed: () => Navigator.pushNamed(context, '/automations'),
+          icon: const Icon(Icons.notifications_none_rounded),
         ),
       ],
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 112),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 118),
         children: [
           SoftEntrance(
-            child: Glass(
-              tintColor: theme.colorScheme.primary,
-              padding: const EdgeInsets.fromLTRB(22, 18, 22, 22),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.auto_awesome_rounded,
-                        size: 16,
-                        color: theme.colorScheme.primary,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'YOUR PRIVATE SPACE',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1.0,
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
+                      Text(
+                        greeting,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -.65,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surface.withValues(
-                            alpha: .55,
-                          ),
-                          borderRadius: BorderRadius.circular(30),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: .44),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.phone_android_rounded,
-                              size: 14,
-                              color: theme.colorScheme.primary,
-                            ),
-                            const SizedBox(width: 5),
-                            Text(
-                              'ON DEVICE',
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: .6,
-                              ),
-                            ),
-                          ],
+                      const SizedBox(height: 4),
+                      Text(
+                        'What would you like to do today?',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  Center(
-                    child: HolographicAssistantOrb(
-                      state: state.busy
-                          ? HolographicOrbState.thinking
-                          : HolographicOrbState.idle,
-                      size: 128,
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  margin: const EdgeInsets.only(top: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 11,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surface.withValues(alpha: .68),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color: theme.colorScheme.primary.withValues(alpha: .14),
                     ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: theme.colorScheme.primary.withValues(alpha: .07),
+                        blurRadius: 18,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 14),
-                  Text(
-                    'A clearer day,\none thought at a time.',
-                    style: theme.textTheme.headlineMedium?.copyWith(
-                      fontSize: 32,
-                      height: 1.06,
-                      letterSpacing: -1.05,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        state.engine == 'offline'
+                            ? Icons.cloud_off_rounded
+                            : Icons.auto_awesome_rounded,
+                        size: 15,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        modeLabel,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'A calm space for conversations, notes and small plans.',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                      height: 1.45,
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  FilledButton.icon(
-                    onPressed: () => Navigator.pushNamed(context, '/chat'),
-                    icon: const Icon(Icons.chat_bubble_outline_rounded),
-                    label: const Text('Open conversation'),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
+          const SizedBox(height: 6),
           SoftEntrance(
-            delay: const Duration(milliseconds: 60),
-            child: const DecorativeHomeOrb(),
-          ),
-          SoftEntrance(
-            delay: const Duration(milliseconds: 90),
+            delay: const Duration(milliseconds: 50),
             child: Glass(
-              padding: const EdgeInsets.all(18),
+              tintColor: theme.colorScheme.primary,
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.dashboard_outlined,
-                        color: theme.colorScheme.primary,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'Your local overview',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: -.35,
-                          ),
-                        ),
-                      ),
-                    ],
+                  HolographicAssistantOrb(
+                    state: state.busy
+                        ? HolographicOrbState.thinking
+                        : HolographicOrbState.idle,
+                    size: 182,
                   ),
-                  const SizedBox(height: 14),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _MetricPill(
-                        icon: Icons.check_circle_outline_rounded,
-                        value: '${openTasks.length}',
-                        label: 'open tasks',
-                      ),
-                      _MetricPill(
-                        icon: Icons.school_outlined,
-                        value: '${attempts.length}',
-                        label: 'study attempts',
-                      ),
-                    ],
-                  ),
-                  if (openTasks.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    Text(
-                      'UP NEXT',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        letterSpacing: 1.0,
-                        fontWeight: FontWeight.w700,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    for (final task in openTasks.take(3))
-                      Padding(
-                        padding: const EdgeInsets.only(top: 7),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(
-                              Icons.circle,
-                              size: 7,
-                              color: theme.colorScheme.primary,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(child: Text(task['title'])),
-                          ],
-                        ),
-                      ),
-                  ] else ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      'No open tasks saved on this phone.',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                  for (final reminder in upcomingReminders)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 9),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.alarm_rounded,
-                            size: 17,
-                            color: theme.colorScheme.secondary,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              '${reminder['action']['title']} · ${DateTime.fromMillisecondsSinceEpoch(reminder['action']['at_ms'])}',
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   Text(
-                    'Only actual local records. Calendar and automatic briefings are not connected.',
+                    state.busy ? 'Thinking with you' : 'Here when you need me',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -.45,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Chat, study, or make a small plan.',
+                    textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
-                ],
-              ),
-            ),
-          ),
-          SoftEntrance(
-            delay: const Duration(milliseconds: 180),
-            child: Glass(
-              padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+                  const SizedBox(height: 16),
                   Row(
                     children: [
-                      Icon(
-                        Icons.grid_view_rounded,
-                        color: theme.colorScheme.primary,
+                      _HomeQuickAction(
+                        label: 'Chat',
+                        icon: Icons.chat_bubble_outline_rounded,
+                        onTap: () => Navigator.pushNamed(context, '/chat'),
                       ),
-                      const SizedBox(width: 10),
-                      Text(
-                        'Your toolkit',
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: -.35,
-                        ),
+                      const SizedBox(width: 8),
+                      _HomeQuickAction(
+                        label: 'Study',
+                        icon: Icons.school_outlined,
+                        onTap: () => Navigator.pushNamed(context, '/study'),
+                      ),
+                      const SizedBox(width: 8),
+                      _HomeQuickAction(
+                        label: 'Memory',
+                        icon: Icons.psychology_alt_outlined,
+                        onTap: () => Navigator.pushNamed(context, '/memory'),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  TapMotion(
-                    depth: .7,
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.book_outlined),
-                      title: const Text('Offline notebook'),
-                      subtitle: const Text('A note that stays on this device'),
-                      onTap: () => notebook(context),
-                    ),
-                  ),
-                  TapMotion(
-                    depth: .7,
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.psychology_outlined),
-                      title: const Text('Chosen memories'),
-                      subtitle: const Text(
-                        'Local · inspect, edit, export or forget',
-                      ),
-                      onTap: () => Navigator.pushNamed(context, '/memory'),
-                    ),
-                  ),
-                  TapMotion(
-                    depth: .7,
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.checklist_rounded),
-                      title: const Text('Tasks & history'),
-                      subtitle: const Text(
-                        'Local tasks, chat search and data export',
-                      ),
-                      onTap: () => Navigator.pushNamed(context, '/library'),
-                    ),
-                  ),
-                  TapMotion(
-                    depth: .7,
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.school_outlined),
-                      title: const Text('Study mode'),
-                      subtitle: const Text(
-                        'Tutoring prompts and recorded practice attempts',
-                      ),
-                      onTap: () => Navigator.pushNamed(context, '/study'),
-                    ),
-                  ),
-                  TapMotion(
-                    depth: .7,
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.description_outlined),
-                      title: const Text('Selected files'),
-                      subtitle: const Text(
-                        'Open only a file you choose; no broad storage access',
-                      ),
-                      onTap: () => Navigator.pushNamed(context, '/files'),
-                    ),
-                  ),
-                  TapMotion(
-                    depth: .7,
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.notifications_outlined),
-                      title: const Text('Set a reminder'),
-                      subtitle: const Text('Choose the details, then approve'),
-                      onTap: () => reminder(context),
-                    ),
-                  ),
-                  TapMotion(
-                    depth: .7,
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.open_in_new_rounded),
-                      title: const Text('Open an Android app'),
-                      subtitle: const Text(
-                        'Search installed apps; review each launch',
-                      ),
-                      onTap: () => openAppPicker(context),
-                    ),
-                  ),
                 ],
               ),
             ),
           ),
+          const SizedBox(height: 14),
+          SoftEntrance(
+            delay: const Duration(milliseconds: 100),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _HomeInfoCard(
+                    icon: Icons.check_circle_outline_rounded,
+                    value: '${openTasks.length}',
+                    label: 'Open tasks',
+                    onTap: () => Navigator.pushNamed(context, '/library'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _HomeInfoCard(
+                    icon: Icons.school_outlined,
+                    value: '${attempts.length}',
+                    label: 'Study attempts',
+                    onTap: () => Navigator.pushNamed(context, '/study'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _HomeInfoCard(
+                    icon: Icons.notifications_active_outlined,
+                    value: '${upcomingReminders.length}',
+                    label: 'Reminders',
+                    onTap: () => Navigator.pushNamed(context, '/automations'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          SoftEntrance(
+            delay: const Duration(milliseconds: 150),
+            child: _HomeComposer(
+              onOpenChat: (draft) =>
+                  Navigator.pushNamed(context, '/chat', arguments: draft),
+            ),
+          ),
+          const SizedBox(height: 12),
           Padding(
-            padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Text(
-              'Device actions need your review. The AI cannot run shell commands or send messages.',
+              '${openTasks.isEmpty ? 'No open tasks yet' : 'Your tasks and notes stay on this device.'}  Voice starts only when you tap the mic.',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeQuickAction extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  const _HomeQuickAction({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Expanded(
+      child: Material(
+        color: colors.surface.withValues(alpha: .54),
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 5),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 16, color: colors.primary),
+                const SizedBox(width: 5),
+                Flexible(
+                  child: Text(
+                    label,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeInfoCard extends StatelessWidget {
+  final IconData icon;
+  final String value;
+  final String label;
+  final VoidCallback onTap;
+  const _HomeInfoCard({
+    required this.icon,
+    required this.value,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return Glass(
+      padding: EdgeInsets.zero,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: SizedBox(
+          height: 108,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 11),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 19, color: colors.primary),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    height: 1.0,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: colors.onSurfaceVariant,
+                    fontSize: 9,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeComposer extends StatefulWidget {
+  final ValueChanged<String?> onOpenChat;
+  const _HomeComposer({required this.onOpenChat});
+
+  @override
+  State<_HomeComposer> createState() => _HomeComposerState();
+}
+
+class _HomeComposerState extends State<_HomeComposer> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _continue() {
+    final draft = _controller.text.trim();
+    widget.onOpenChat(draft.isEmpty ? null : draft);
+    _controller.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Glass(
+      padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+      child: Row(
+        children: [
+          Icon(
+            Icons.edit_note_rounded,
+            color: colors.onSurfaceVariant,
+            size: 22,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: _controller,
+              maxLines: 1,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) => _continue(),
+              decoration: InputDecoration(
+                hintText: 'Ask your assistant…',
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                filled: false,
+                contentPadding: EdgeInsets.zero,
+                hintStyle: TextStyle(color: colors.onSurfaceVariant),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          IconButton.filledTonal(
+            tooltip: 'Continue in chat',
+            onPressed: _continue,
+            icon: const Icon(Icons.arrow_upward_rounded),
           ),
         ],
       ),
@@ -1304,48 +2236,16 @@ class _AppPickerSheetState extends State<AppPickerSheet> {
   }
 }
 
-class _MetricPill extends StatelessWidget {
-  final IconData icon;
-  final String value;
-  final String label;
-
-  const _MetricPill({
-    required this.icon,
-    required this.value,
-    required this.label,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(
-        color: scheme.surface.withValues(alpha: .45),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: .42)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 18, color: scheme.primary),
-          const SizedBox(width: 8),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.titleSmall
-                ?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(width: 5),
-          Text(label, style: Theme.of(context).textTheme.bodySmall),
-        ],
-      ),
-    );
-  }
-}
-
 class ChatScreen extends StatefulWidget {
   final AssistantState state;
-  const ChatScreen({super.key, required this.state});
+  final String? initialDraft;
+  final bool startWithVoice;
+  const ChatScreen({
+    super.key,
+    required this.state,
+    this.initialDraft,
+    this.startWithVoice = false,
+  });
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
@@ -1356,7 +2256,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   static const audioEvents = MethodChannel('personal_assistant/audio');
   final tts = FlutterTts();
   bool listening = false, speaking = false;
+  bool _draftApplied = false;
+  bool _initialVoiceStarted = false;
   double level = 0;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_draftApplied && widget.initialDraft != null) {
+      input.text = widget.initialDraft!;
+      _draftApplied = true;
+    }
+    if (widget.startWithVoice && !_initialVoiceStarted) {
+      _initialVoiceStarted = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) listen();
+      });
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1676,6 +2594,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final state = widget.state;
       return Shell(
         title: state.assistantName,
+        assistantName: state.assistantName,
         actions: [
           IconButton(
             tooltip: 'Read replies aloud',
@@ -2648,33 +3567,47 @@ class _SettingsState extends State<Settings> {
     }
   }
 
-  Widget _destinationTile({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required String route,
-  }) => ListTile(
-    leading: Icon(icon),
-    title: Text(title),
-    subtitle: Text(subtitle),
-    trailing: const Icon(Icons.chevron_right),
-    onTap: () => Navigator.pushNamed(context, route),
-  );
-
   @override
   Widget build(BuildContext context) => Shell(
     title: 'Settings',
+    assistantName: widget.state.assistantName,
+    actions: [
+      IconButton(
+        tooltip: 'Reminder activity',
+        onPressed: () => Navigator.pushNamed(context, '/automations'),
+        icon: const Icon(Icons.notifications_none_rounded),
+      ),
+    ],
     child: ListView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 118),
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Make it yours',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -.55,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Choose how your assistant looks, speaks and connects.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const _SettingsSectionLabel('PRIVACY & ACCESS'),
         const Glass(
           child: Text(
             'Your chats, approved memories, notes, tasks and study records stay on this phone. AI is optional: offline inference is not installed; online requests require an explicit payload review. The private FastAPI adapter remains optional, not a requirement for local tools.',
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
-          child: Text('PRIVACY & APP ACCESS', style: Theme.of(context).textTheme.labelLarge?.copyWith(letterSpacing: 1.1, color: Theme.of(context).colorScheme.primary)),
         ),
         Glass(
           child: SwitchListTile(
@@ -2697,64 +3630,45 @@ class _SettingsState extends State<Settings> {
                       );
                     }
                   },
-            secondary: const Icon(Icons.lock_outline),
+            secondary: const _SettingsIconTile(icon: Icons.lock_outline),
             title: const Text('App lock'),
             subtitle: const Text(
               'Require your phone’s biometric or screen lock when opening or returning to the app.',
             ),
           ),
         ),
+        const _SettingsSectionLabel('DEVICE ACCESS'),
         const AndroidAccessPanel(),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
-          child: Text(
-            'YOUR TOOLS',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              letterSpacing: 1.1,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-          ),
-        ),
+        const _SettingsSectionLabel('APPEARANCE'),
         Glass(
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _destinationTile(
-                icon: Icons.school_outlined,
-                title: 'Study planner',
-                subtitle: 'Targets, study logs and flashcards',
-                route: '/study',
-              ),
-              _destinationTile(
-                icon: Icons.psychology_alt_outlined,
-                title: 'Memory and local search',
-                subtitle: 'Review saved facts and search this phone’s chats',
-                route: '/memory',
-              ),
-              _destinationTile(
-                icon: Icons.hub_outlined,
-                title: 'Google services and files',
-                subtitle: 'Open available connectors; access depends on account and scope',
-                route: '/library',
-              ),
-              _destinationTile(
-                icon: Icons.notifications_active_outlined,
-                title: 'Reminders and action history',
-                subtitle: 'Review local actions and reminder receipts',
-                route: '/automations',
-              ),
-              _destinationTile(
-                icon: Icons.folder_open_outlined,
-                title: 'Selected files',
-                subtitle: 'Manage files you chose for this device',
-                route: '/files',
+              FuturisticThemePicker(state: widget.state),
+              const SizedBox(height: 18),
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: theme,
+                decoration: const InputDecoration(
+                  labelText: 'Light or dark mode',
+                ),
+                items: [
+                  for (final mode in ['system', 'light', 'dark'])
+                    DropdownMenuItem(
+                      value: mode,
+                      child: Text(switch (mode) {
+                        'system' => 'Follow device',
+                        'light' => 'Light',
+                        _ => 'Dark',
+                      }),
+                    ),
+                ],
+                onChanged: (value) => setState(() => theme = value ?? 'system'),
               ),
             ],
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
-          child: Text('VOICE & AI', style: Theme.of(context).textTheme.labelLarge?.copyWith(letterSpacing: 1.1, color: Theme.of(context).colorScheme.primary)),
-        ),
+        const _SettingsSectionLabel('AI & VOICE'),
         Glass(
           child: Column(
             children: [
@@ -2792,11 +3706,11 @@ class _SettingsState extends State<Settings> {
                 decoration: const InputDecoration(labelText: 'AI engine'),
                 items: [
                   for (final item in {
-                    'offline': 'Offline · not qualified / unavailable',
+                    'offline': 'Offline · model not installed',
                     'compatible': 'Online · OpenAI-compatible',
                     'private_service': 'Online · private FastAPI',
                   }.entries)
-                    DropdownMenuItem(value: item.key, enabled: item.key != 'offline' || engine == 'offline', child: Text(item.value)),
+                    DropdownMenuItem(value: item.key, child: Text(item.value)),
                 ],
                 onChanged: (v) => setState(() => engine = v!),
               ),
@@ -2920,30 +3834,8 @@ class _SettingsState extends State<Settings> {
                   ),
               ] else
                 const Text(
-                  'Offline AI is not qualified and cannot handle chat. The Gemma candidate below is isolated to fixed screening prompts; there is no online fallback.',
+                  'Offline AI is unavailable: no model is installed. No online fallback will be used.',
                 ),
-              const SizedBox(height: 16),
-              FuturisticThemePicker(state: widget.state),
-              const SizedBox(height: 18),
-              DropdownButtonFormField<String>(
-                isExpanded: true,
-                initialValue: theme,
-                decoration: const InputDecoration(
-                  labelText: 'Light or dark mode',
-                ),
-                items: [
-                  for (final mode in ['system', 'light', 'dark'])
-                    DropdownMenuItem(
-                      value: mode,
-                      child: Text(switch (mode) {
-                        'system' => 'Follow device',
-                        'light' => 'Light',
-                        _ => 'Dark',
-                      }),
-                    ),
-                ],
-                onChanged: (v) => setState(() => theme = v ?? 'system'),
-              ),
               const SizedBox(height: 20),
               FilledButton(
                 onPressed: () async {
@@ -2998,54 +3890,35 @@ class _SettingsState extends State<Settings> {
             ],
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
-          child: Text('LOCAL MODEL SCREENING', style: Theme.of(context).textTheme.labelLarge?.copyWith(letterSpacing: 1.1, color: Theme.of(context).colorScheme.primary)),
-        ),
-        const OfflineModelPanel(),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
-          child: Text('CONNECTIONS', style: Theme.of(context).textTheme.labelLarge?.copyWith(letterSpacing: 1.1, color: Theme.of(context).colorScheme.primary)),
-        ),
-        CustomMcpPanel(state: widget.state),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
-          child: Text(
-            'DATA & BACKUP',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              letterSpacing: 1.1,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-          ),
-        ),
+        const _SettingsSectionLabel('WORKFLOWS'),
         Glass(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.backup_outlined),
-                title: const Text('Export local data'),
-                subtitle: const Text('Save a private JSON copy to a location you choose'),
+                leading: const Icon(Icons.edit_note_rounded),
+                title: const Text('Message & social drafts'),
+                subtitle: const Text('Edit text, then use Android’s share sheet; nothing is sent automatically.'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.pushNamed(context, '/drafts'),
               ),
-              const Text(
-                'The export is readable and unencrypted. Provider credentials are excluded. Restore is not implemented yet.',
-              ),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: _exportLocalBackup,
-                icon: const Icon(Icons.download_outlined),
-                label: const Text('Export backup'),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.auto_awesome_outlined),
+                title: const Text('Skills & actions'),
+                subtitle: const Text('Reviewed local app launches and reminders; no background agent.'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.pushNamed(context, '/skills'),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 12),
-        const Glass(
-          child: Text(
-            'Not available in this build: WhatsApp replies, social-media publishing, YouTube or music control, phone-call automation, a remote skills marketplace, sub-agent execution, and restoring a backup. No inactive switches are shown for these services.',
-          ),
-        ),
+        const _SettingsSectionLabel('CONNECTED TOOLS'),
+        CustomMcpPanel(state: widget.state),
+        const _SettingsSectionLabel('OFFLINE MODEL SCREENING'),
+        const Text('Optional device-only candidate evaluation. This does not enable offline chat or qualify the model for your phone.'),
+        const SizedBox(height: 8),
+        const OfflineModelPanel(),
+        const _SettingsSectionLabel('VOICE CAPABILITIES'),
         TextButton(
           onPressed: () async {
             try {
@@ -3063,6 +3936,23 @@ class _SettingsState extends State<Settings> {
             }
           },
           child: const Text('Check device speech capabilities'),
+        ),
+        const _SettingsSectionLabel('DATA & PRIVACY'),
+        Glass(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Local backup', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 6),
+              const Text('Export is manual and owner-confirmed. The JSON file is readable and unencrypted; save it somewhere private. Provider keys and service tokens are excluded. Import/restore is not implemented.'),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: _exportLocalBackup,
+                icon: const Icon(Icons.download_outlined),
+                label: const Text('Export local data'),
+              ),
+            ],
+          ),
         ),
         const Glass(
           child: Text(
@@ -3241,6 +4131,7 @@ class _MemoriesState extends State<Memories> {
   @override
   Widget build(BuildContext context) => Shell(
     title: 'Memory & Library',
+    assistantName: widget.state.assistantName,
     actions: [
       IconButton(
         tooltip: 'Refresh memories',
@@ -3358,7 +4249,6 @@ class _MemoriesState extends State<Memories> {
   );
 }
 
-
 class CustomMcpPanel extends StatefulWidget {
   final AssistantState state;
   const CustomMcpPanel({super.key, required this.state});
@@ -3383,53 +4273,78 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
           child: Form(
             key: formKey,
             child: SingleChildScrollView(
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                TextFormField(
-                  controller: name,
-                  maxLength: 48,
-                  decoration: const InputDecoration(labelText: 'Server name'),
-                  validator: (value) {
-                    final normalized = (value ?? '').trim();
-                    if (normalized.isEmpty || normalized.runes.length > 48 ||
-                        normalized.contains(RegExp(r'[\x00-\x1f]'))) {
-                      return 'Use 1–48 characters without control characters.';
-                    }
-                    return null;
-                  },
-                ),
-                TextFormField(
-                  controller: endpoint,
-                  keyboardType: TextInputType.url,
-                  autocorrect: false,
-                  decoration: const InputDecoration(labelText: 'MCP server URL', hintText: 'https://mcp.example.com/mcp'),
-                  validator: (value) {
-                    try { validateMcpEndpoint(value ?? ''); return null; }
-                    catch (e) { return e.toString(); }
-                  },
-                ),
-                TextFormField(
-                  controller: token,
-                  obscureText: true,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  autofillHints: const [],
-                  decoration: const InputDecoration(labelText: 'Optional bearer token'),
-                ),
-                const SizedBox(height: 10),
-                const Text('Only the MCP initialize and tools/list requests go to this server. The token is kept in phone secure storage. Discovered tools are not called, and no chat or memory context is sent.'),
-              ]),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: name,
+                    maxLength: 48,
+                    decoration: const InputDecoration(labelText: 'Server name'),
+                    validator: (value) {
+                      final normalized = (value ?? '').trim();
+                      if (normalized.isEmpty ||
+                          normalized.runes.length > 48 ||
+                          normalized.contains(RegExp(r'[\x00-\x1f]'))) {
+                        return 'Use 1–48 characters without control characters.';
+                      }
+                      return null;
+                    },
+                  ),
+                  TextFormField(
+                    controller: endpoint,
+                    keyboardType: TextInputType.url,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: 'MCP server URL',
+                      hintText: 'https://mcp.example.com/mcp',
+                    ),
+                    validator: (value) {
+                      try {
+                        validateMcpEndpoint(value ?? '');
+                        return null;
+                      } catch (e) {
+                        return e.toString();
+                      }
+                    },
+                  ),
+                  TextFormField(
+                    controller: token,
+                    obscureText: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    autofillHints: const [],
+                    decoration: const InputDecoration(
+                      labelText: 'Optional bearer token',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Only the MCP initialize and tools/list requests go to this server. The token is kept in phone secure storage. Discovered tools are not called, and no chat or memory context is sent.',
+                  ),
+                ],
+              ),
             ),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () {
-            if (formKey.currentState!.validate()) Navigator.pop(context, [name.text, endpoint.text, token.text]);
-          }, child: const Text('Add server')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                Navigator.pop(context, [name.text, endpoint.text, token.text]);
+              }
+            },
+            child: const Text('Add server'),
+          ),
         ],
       ),
     );
-    name.dispose(); endpoint.dispose(); token.dispose();
+    name.dispose();
+    endpoint.dispose();
+    token.dispose();
     if (values == null || !mounted) return;
     try {
       await widget.state.addMcpServer(values[0], values[1], values[2]);
@@ -3444,19 +4359,49 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
     try {
       final tools = await widget.state.discoverMcpTools(server.id);
       if (!mounted) return;
-      await showDialog<void>(context: context, builder: (context) => AlertDialog(
-        title: Text('${server.name} · ${tools.length} tools'),
-        content: SizedBox(width: 480, child: tools.isEmpty
-          ? const Text('The server responded, but advertised no tools.')
-          : SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              for (final tool in tools) Padding(padding: const EdgeInsets.only(bottom: 12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(tool.name, style: Theme.of(context).textTheme.titleSmall),
-                if (tool.description.isNotEmpty) Text(tool.description),
-              ])),
-              const Text('Discovery only. Tools cannot be invoked by this app yet.'),
-            ]))),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
-      ));
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('${server.name} · ${tools.length} tools'),
+          content: SizedBox(
+            width: 480,
+            child: tools.isEmpty
+                ? const Text('The server responded, but advertised no tools.')
+                : SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final tool in tools)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  tool.name,
+                                  style: Theme.of(context).textTheme.titleSmall,
+                                ),
+                                if (tool.description.isNotEmpty)
+                                  Text(tool.description),
+                              ],
+                            ),
+                          ),
+                        const Text(
+                          'Discovery only. Tools cannot be invoked by this app yet.',
+                        ),
+                      ],
+                    ),
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
     } catch (e) {
       if (mounted) notice(context, e);
     } finally {
@@ -3465,45 +4410,90 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
   }
 
   Future<void> _remove(McpServer server) async {
-    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
-      title: Text('Remove ${server.name}?'),
-      content: const Text('This removes the saved server and its phone-stored bearer token. It does not revoke the token at the server.'),
-      actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Remove'))],
-    )) ?? false;
+    final confirmed =
+        await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('Remove ${server.name}?'),
+            content: const Text(
+              'This removes the saved server and its phone-stored bearer token. It does not revoke the token at the server.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Keep'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Remove'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
     if (!confirmed || !mounted) return;
-    try { await widget.state.removeMcpServer(server.id); }
-    catch (e) { if (mounted) notice(context, e); }
+    try {
+      await widget.state.removeMcpServer(server.id);
+    } catch (e) {
+      if (mounted) notice(context, e);
+    }
   }
 
   @override
-  Widget build(BuildContext context) => Glass(child: Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text('Custom MCP servers', style: Theme.of(context).textTheme.titleMedium),
-      const SizedBox(height: 6),
-      const Text('Add a remote Model Context Protocol server and inspect its advertised tools. Endpoints must use HTTPS (loopback HTTP is allowed for local testing). Treat servers and tool descriptions as untrusted.'),
-      if (widget.state.mcpLoadError.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text(widget.state.mcpLoadError)),
-      for (final server in widget.state.customMcpServers) ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: const Icon(Icons.hub_outlined),
-        title: Text(server.name),
-        subtitle: Text(server.endpoint, maxLines: 2, overflow: TextOverflow.ellipsis),
-        trailing: PopupMenuButton<String>(
-          enabled: !busy,
-          onSelected: (value) => value == 'discover' ? _discover(server) : _remove(server),
-          itemBuilder: (context) => const [
-            PopupMenuItem(value: 'discover', child: Text('Test & discover tools')),
-            PopupMenuItem(value: 'remove', child: Text('Remove server')),
-          ],
+  Widget build(BuildContext context) => Glass(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Custom MCP servers',
+          style: Theme.of(context).textTheme.titleMedium,
         ),
-      ),
-      if (busy) const LinearProgressIndicator(),
-      Align(alignment: Alignment.centerLeft, child: OutlinedButton.icon(
-        onPressed: widget.state.customMcpServers.length >= 25 ? null : _add,
-        icon: const Icon(Icons.add), label: const Text('Add MCP server'),
-      )),
-      const SizedBox(height: 4),
-      const Text('No tool is automatically invoked. MCP tool execution and per-action approval integration are not implemented in this version.'),
-    ],
-  ));
+        const SizedBox(height: 6),
+        const Text(
+          'Add a remote Model Context Protocol server and inspect its advertised tools. Endpoints must use HTTPS (loopback HTTP is allowed for local testing). Treat servers and tool descriptions as untrusted.',
+        ),
+        if (widget.state.mcpLoadError.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(widget.state.mcpLoadError),
+          ),
+        for (final server in widget.state.customMcpServers)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.hub_outlined),
+            title: Text(server.name),
+            subtitle: Text(
+              server.endpoint,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: PopupMenuButton<String>(
+              enabled: !busy,
+              onSelected: (value) =>
+                  value == 'discover' ? _discover(server) : _remove(server),
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: 'discover',
+                  child: Text('Test & discover tools'),
+                ),
+                PopupMenuItem(value: 'remove', child: Text('Remove server')),
+              ],
+            ),
+          ),
+        if (busy) const LinearProgressIndicator(),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: widget.state.customMcpServers.length >= 25 ? null : _add,
+            icon: const Icon(Icons.add),
+            label: const Text('Add MCP server'),
+          ),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'No tool is automatically invoked. MCP tool execution and per-action approval integration are not implemented in this version.',
+        ),
+      ],
+    ),
+  );
 }

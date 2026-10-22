@@ -36,14 +36,25 @@ void main() {
       await state.remember('Synthetic navigation memory');
       await tester.pumpWidget(AssistantApp(state: state));
       await tester.pumpAndSettle();
-      for (final label in [
-        'Chat',
-        'Actions',
-        'Memory',
-        'Settings',
-        'Home',
-        'Memory',
-      ]) {
+      expect(find.text('Here when you need me'), findsOneWidget);
+      expect(find.byTooltip('Start a voice conversation'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Open tasks'),
+        280,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.text('Open tasks'), findsOneWidget);
+
+      // Actions lives in the grouped drawer; the dock reserves its center slot for Voice.
+      await tester.tap(find.byTooltip('Open navigation menu'));
+      await tester.pumpAndSettle();
+      expect(find.text('TOOLS'), findsOneWidget);
+      await tester.tap(find.text('Actions').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Prepare a reminder'), findsOneWidget);
+      expect(tester.takeException(), isNull, reason: 'Entering Actions');
+
+      for (final label in ['Chat', 'Memory', 'Settings', 'Home', 'Memory']) {
         await tester.tap(find.text(label).last);
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull, reason: 'Entering $label');
