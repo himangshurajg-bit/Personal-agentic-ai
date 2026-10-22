@@ -98,4 +98,6 @@ tasks.named("preBuild") {
 
 dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.1")
+    testImplementation("junit:junit:4.13.2")
 }

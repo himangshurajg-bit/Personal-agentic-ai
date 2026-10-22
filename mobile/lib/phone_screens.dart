@@ -1794,7 +1794,10 @@ class _PhoneLibraryState extends State<PhoneLibrary> {
             try {
               final result = await AssistantState.device.invokeMapMethod(
                 'export',
-                {'text': widget.state.exportLocalData()},
+                {
+                  'text': widget.state.exportLocalData(),
+                  'filename': 'personal-ai-backup.json',
+                },
               );
               if (context.mounted && result?['saved'] == true) {
                 notice(

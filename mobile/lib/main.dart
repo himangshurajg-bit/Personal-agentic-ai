@@ -8,7 +8,9 @@ import 'package:flutter/services.dart';
 
 import 'assistant_state.dart';
 import 'mcp_servers.dart';
+import 'offline_model.dart';
 import 'phone_screens.dart';
+import 'safe_workflows.dart';
 import 'ui_motion.dart';
 import 'visual_theme.dart';
 
@@ -97,6 +99,8 @@ class _AssistantAppState extends State<AssistantApp>
         '/study': (_) => StudyScreen(state: widget.state),
         '/files': (_) => SelectedFiles(state: widget.state),
         '/automations': (_) => ActionHistory(state: widget.state),
+        '/drafts': (_) => const OutboundDraftsScreen(),
+        '/skills': (_) => SafeSkillsScreen(state: widget.state),
       },
     ),
   );
@@ -262,7 +266,7 @@ class Shell extends StatelessWidget {
                   icon: const Icon(Icons.menu_rounded),
                 ),
               ),
-        title: Text(title),
+        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: actions,
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
@@ -648,6 +652,18 @@ class _AssistantDrawer extends StatelessWidget {
                     label: 'Actions',
                     selected: _selected('/automations'),
                     onTap: () => _go(context, '/automations'),
+                  ),
+                  _DrawerRow(
+                    icon: Icons.auto_awesome_outlined,
+                    label: 'Skills & actions',
+                    selected: _selected('/skills'),
+                    onTap: () => _go(context, '/skills'),
+                  ),
+                  _DrawerRow(
+                    icon: Icons.edit_note_rounded,
+                    label: 'Message & social drafts',
+                    selected: _selected('/drafts'),
+                    onTap: () => _go(context, '/drafts'),
                   ),
                   _DrawerRow(
                     icon: Icons.psychology_alt_outlined,
@@ -3510,6 +3526,47 @@ class _SettingsState extends State<Settings> {
     if (mounted) notice(context, '$label cleared from this phone.');
   }
 
+  Future<void> _exportLocalBackup() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Export a private backup?'),
+        content: const Text(
+          'This creates a readable, unencrypted JSON copy of your on-phone chats, approved memories, notes, tasks, study records and action receipts. Provider API keys and service tokens are stored separately and are not included. Choose a private save location. Restore is not available in this build.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.download_outlined),
+            label: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final result = await AssistantState.device.invokeMapMethod<String, dynamic>(
+        'export',
+        {
+          'text': widget.state.exportLocalData(),
+          'filename': 'personal-ai-backup.json',
+        },
+      );
+      if (mounted && result?['saved'] == true) {
+        notice(context, 'Local backup saved to the location you chose.');
+      }
+    } on PlatformException catch (error) {
+      if (!mounted || error.code == 'cancelled') return;
+      notice(context, error.message ?? 'The local backup could not be saved.');
+    } catch (error) {
+      if (mounted) notice(context, error);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Shell(
     title: 'Settings',
@@ -3833,8 +3890,34 @@ class _SettingsState extends State<Settings> {
             ],
           ),
         ),
+        const _SettingsSectionLabel('WORKFLOWS'),
+        Glass(
+          child: Column(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.edit_note_rounded),
+                title: const Text('Message & social drafts'),
+                subtitle: const Text('Edit text, then use Android’s share sheet; nothing is sent automatically.'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.pushNamed(context, '/drafts'),
+              ),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.auto_awesome_outlined),
+                title: const Text('Skills & actions'),
+                subtitle: const Text('Reviewed local app launches and reminders; no background agent.'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.pushNamed(context, '/skills'),
+              ),
+            ],
+          ),
+        ),
         const _SettingsSectionLabel('CONNECTED TOOLS'),
         CustomMcpPanel(state: widget.state),
+        const _SettingsSectionLabel('OFFLINE MODEL SCREENING'),
+        const Text('Optional device-only candidate evaluation. This does not enable offline chat or qualify the model for your phone.'),
+        const SizedBox(height: 8),
+        const OfflineModelPanel(),
         const _SettingsSectionLabel('VOICE CAPABILITIES'),
         TextButton(
           onPressed: () async {
@@ -3855,6 +3938,22 @@ class _SettingsState extends State<Settings> {
           child: const Text('Check device speech capabilities'),
         ),
         const _SettingsSectionLabel('DATA & PRIVACY'),
+        Glass(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Local backup', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 6),
+              const Text('Export is manual and owner-confirmed. The JSON file is readable and unencrypted; save it somewhere private. Provider keys and service tokens are excluded. Import/restore is not implemented.'),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: _exportLocalBackup,
+                icon: const Icon(Icons.download_outlined),
+                label: const Text('Export local data'),
+              ),
+            ],
+          ),
+        ),
         const Glass(
           child: Text(
             'Privacy & permissions\n\nOptional app lock uses Android device authentication (biometrics or screen lock where supported). No PIN or authentication secret is created or stored. The lock is checked when enabled and gates the app on launch and return from the background.\n\nMicrophone access is requested only when starting voice input. Notification permission is requested when scheduling your first reminder. Neither is needed for typed chat. Android speech providers may send audio to their service. There is no background microphone or wake phrase.\n\nReminders use approximate alarms and are lost if this private test app is removed. Battery settings can delay them.',

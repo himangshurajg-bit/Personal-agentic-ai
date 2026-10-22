@@ -25,8 +25,12 @@ import android.util.Base64
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.EventChannel
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+
+internal fun isValidTextSharePayload(title: String?, text: String?): Boolean =
+    !title.isNullOrBlank() && title.length <= 80 && !text.isNullOrBlank() && text.length <= 10000
 
 class MainActivity : FlutterFragmentActivity() {
     private var permissionResult: MethodChannel.Result? = null
@@ -128,11 +132,63 @@ class MainActivity : FlutterFragmentActivity() {
             } else {recognizer.startListening(intent);result.success(mapOf("started" to true,"mode" to "online"))}
         } catch(_:Exception) {stopVoice();result.error("unavailable","Speech could not start; typing remains available",null)}
     }
-    override fun onPause() {stopVoice();stopAudio();super.onPause()}
-    override fun onDestroy() {stopVoice();stopAudio();super.onDestroy()}
+    override fun onPause() {
+        stopVoice()
+        stopAudio()
+        offlineModelCoordinator?.onAppPaused()
+        super.onPause()
+    }
+    override fun onDestroy() {
+        stopVoice()
+        stopAudio()
+        offlineModelCoordinator?.shutdown()
+        offlineModelCoordinator = null
+        super.onDestroy()
+    }
     private var fileResult: MethodChannel.Result? = null
+    private var offlineModelCoordinator: Gemma4OfflineCoordinator? = null
+    private var offlineModelEventSink: EventChannel.EventSink? = null
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
+        offlineModelCoordinator = Gemma4OfflineCoordinator(applicationContext) { event ->
+            offlineModelEventSink?.success(event)
+        }
+        EventChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/offline_model/events")
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    offlineModelEventSink = events
+                }
+                override fun onCancel(arguments: Any?) {
+                    offlineModelEventSink = null
+                }
+            })
+        MethodChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/offline_model")
+            .setMethodCallHandler { call, result ->
+                val offline = offlineModelCoordinator
+                if (offline == null) {
+                    result.error("unavailable", "Local model management is unavailable in this session.", null)
+                    return@setMethodCallHandler
+                }
+                when (call.method) {
+                    "status" -> result.success(offline.status())
+                    "download" -> { offline.startDownload(); result.success(true) }
+                    "cancel_download" -> { offline.cancelDownload(); result.success(true) }
+                    "remove_model" -> { offline.removeModel(); result.success(true) }
+                    "load_for_screening" -> { offline.loadForScreening(); result.success(true) }
+                    "run_qualification" -> {
+                        val fixture = call.argument<String>("fixture_id")
+                        if (fixture.isNullOrBlank()) {
+                            result.error("invalid_fixture", "Choose a fixed screening prompt.", null)
+                        } else {
+                            offline.runQualification(fixture)
+                            result.success(true)
+                        }
+                    }
+                    "cancel_inference" -> { offline.cancelInference(); result.success(true) }
+                    "unload_candidate" -> { offline.unloadCandidate(); result.success(true) }
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/rust_search").setMethodCallHandler { call, result ->
             if (call.method != "search_chats") {
                 result.notImplemented()
@@ -170,6 +226,7 @@ class MainActivity : FlutterFragmentActivity() {
                     "system_recognizer" to SpeechRecognizer.isRecognitionAvailable(this)
                 ))
                 "request_access_permission" -> requestAccessPermission(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
+                "share_text" -> shareText(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "voice_start" -> startVoice(call.arguments as? Map<*,*> ?: emptyMap<Any,Any>(),result)
                 "voice_cancel" -> {stopVoice();result.success(true)}
                 "list_launchable_apps" -> {
@@ -201,7 +258,8 @@ class MainActivity : FlutterFragmentActivity() {
                     if(exportResult != null) { result.error("busy","An export is already open",null) }
                     else {
                         exportText=call.argument<String>("text"); exportResult=result
-                        try { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="application/json"; putExtra(Intent.EXTRA_TITLE,"personal-memories.json") },42) }
+                        val filename = safeJsonExportName(call.argument<String>("filename"))
+                        try { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="application/json"; putExtra(Intent.EXTRA_TITLE,filename) },42) }
                         catch(_:Exception) { exportResult=null; exportText=null; result.error("unavailable","No document picker is available",null) }
                     }
                 }
@@ -209,6 +267,36 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
     }
+    private fun shareText(args: Map<*, *>, result: MethodChannel.Result) {
+        val title = (args["title"] as? String)?.trim()
+        val text = args["text"] as? String
+        if (!isValidTextSharePayload(title, text)) {
+            result.error("invalid_argument", "A short title and non-empty text up to 10,000 characters are required", null)
+            return
+        }
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        try {
+            startActivity(Intent.createChooser(send, title))
+            result.success(mapOf("result" to "chooser_opened", "sent" to false))
+        } catch (_: Exception) {
+            result.error("unavailable", "Android could not open the text share sheet", null)
+        }
+    }
+
+    private fun safeJsonExportName(requested: String?): String {
+        val name = (requested ?: "personal-memories.json")
+            .substringAfterLast('/')
+            .substringAfterLast('\\')
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .trim('.', '_')
+            .take(80)
+            .ifBlank { "personal-data" }
+        return if (name.endsWith(".json", ignoreCase = true)) name else "$name.json"
+    }
+
     private fun cleanAppLabel(value: String): String =
         value.replace(Regex("[\\p{Cc}\\p{Cf}]"), " ")
             .replace(Regex("\\s+"), " ")
@@ -397,7 +485,7 @@ class MainActivity : FlutterFragmentActivity() {
             if(resultCode!=RESULT_OK || data?.data==null || text==null) { result?.error("cancelled","Export cancelled; no file saved",null); return }
             try { contentResolver.openOutputStream(data.data!!,"wt")?.use { it.write(text.toByteArray(Charsets.UTF_8)); it.flush() } ?: throw IllegalStateException("Could not open destination")
                 result?.success(mapOf("saved" to true))
-            } catch(_:Exception) { result?.error("write_failed","Memory export could not be saved",null) }
+            } catch(_:Exception) { result?.error("write_failed","Local data export could not be saved",null) }
         }
     }
 }

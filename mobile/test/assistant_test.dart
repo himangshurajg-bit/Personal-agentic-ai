@@ -117,6 +117,34 @@ void main() {
     },
   );
 
+  test('local backup contains phone data but excludes provider credentials', () async {
+    final state = AssistantState();
+    await state.initialize();
+    await state.saveSettings(
+      'http://127.0.0.1:8766',
+      'private-token-test',
+      'dark',
+      compatibleUrl: 'https://provider.example',
+      compatibleSecret: 'provider-key-test',
+    );
+    await state.setAssistantName('Maya');
+    await state.saveNote('A private local note');
+    await state.remember('A saved local preference');
+    await state.local.writeChat('personal', [
+      {'role': 'user', 'text': 'A local test message'},
+    ]);
+
+    final exported = state.exportLocalData();
+    final data = jsonDecode(exported) as Map<String, dynamic>;
+    expect(data['private_note'], 'A private local note');
+    expect(data['assistant_display_name'], 'Maya');
+    expect(data['memories'], isNotEmpty);
+    expect(data['chats']['personal'].first['text'], 'A local test message');
+    expect(exported, isNot(contains('private-token-test')));
+    expect(exported, isNot(contains('provider-key-test')));
+    state.dispose();
+  });
+
   test(
     'legacy provider settings migrate into the selected secure slot',
     () async {
