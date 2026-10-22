@@ -22,7 +22,15 @@ The Flutter client can reach loopback via USB `adb reverse tcp:8766 tcp:8766` or
 
 Install and run a model in Ollama on the same service computer using that model's own license and hardware requirements. No model is downloaded or paid API called by this project. Set `OLLAMA_MODEL` to the already-installed model's exact name before starting the service. Optional `OLLAMA_URL` defaults to `http://127.0.0.1:11434`; only loopback origins are accepted. Restart the service to apply changes. Models and credentials are not requested through chat.
 
-Without `OLLAMA_MODEL`, `/health` truthfully returns `provider_configured: false` and chat returns 503. This is not a simulated assistant. The test-only provider is injected from tests and cannot be enabled as a production demo responder. The `Provider.stream(messages)` protocol is the replacement boundary. An additional provider must undergo privacy, license, cost and transport review first.
+With the default `ASSISTANT_PROVIDER=ollama`, without `OLLAMA_MODEL`, `/health` truthfully returns `provider_configured: false` and chat returns 503. This is not a simulated assistant. The test-only provider is injected from tests and cannot be enabled as a production demo responder. The `Provider.stream(messages)` protocol is the replacement boundary.
+
+## Optional Groq hosted API (first cloud adapter)
+
+The service also supports Groq's OpenAI-compatible streaming chat endpoint. It is opt-in and server-side: set `ASSISTANT_PROVIDER=groq`, `GROQ_API_KEY` and optionally `GROQ_MODEL` in the private service process environment, then restart the service. The initial model is `openai/gpt-oss-120b`; Groq's current high-level Free Plan table lists 30 requests/minute, 1,000 requests/day, 8,000 tokens/minute and 200,000 tokens/day for that model. Groq says exact account limits may vary. Keep the account on its Free plan if zero-cost use is required; this project never upgrades an account, retries a request or routes to a paid fallback.
+
+The provider key stays on the service computer, never in the Android APK, repository, or chat. The phone still uses the authenticated private service and requires its existing per-message online payload review. An approved online request can include the current prompt and any selected context. Groq says inference inputs and outputs are not retained by default and are not used to train models under its Services Agreement, but it may temporarily log them for reliability or abuse investigations for up to 30 days; its Data Controls offer Zero Data Retention. Third-party model terms also apply. Groq's Services Agreement requires the account user to be at least 18. Do not configure or use a Groq key until that eligibility condition is met.
+
+The API key and model are not checked into this repository. The provider is selected only when `ASSISTANT_PROVIDER=groq`; merely setting a key does not activate it. If the key or model is missing/invalid, startup fails rather than falling back to Ollama. Tests use a mocked HTTPS response only: no live Groq request, key creation, Assamese quality check, JEE evaluation, or billing-tier verification has been performed. Verify English, Assamese and JEE responses yourself before relying on the service; quality is not guaranteed by API compatibility.
 
 ## Optional ElevenLabs expressive speech
 
