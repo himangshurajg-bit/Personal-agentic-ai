@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
+import 'provider_compare.dart';
+
 import 'phone_data.dart';
 import 'app_lock.dart';
 import 'engines.dart';
@@ -124,6 +126,10 @@ class AssistantState extends ChangeNotifier {
   Map<String, dynamic>? selectedFile;
   bool ready = false, onboarded = false, busy = false, speakReplies = false;
   bool experimentalOfflineChatEnabled = false;
+  List<AIProviderProfile> providerProfiles = AIProviderProfile.defaults();
+  late final ProviderCompareService providerCompare = ProviderCompareService(
+    clientFactory,
+  );
   bool _localInferenceActive = false;
   bool appLockConfigurationReady = false,
       appLockEnabled = false,
@@ -187,6 +193,9 @@ class AssistantState extends ChangeNotifier {
       compatibleApiKey =
           await storage.read(key: 'compatible_api_key') ??
           (engine == 'compatible' ? legacyToken ?? '' : '');
+      providerProfiles = AIProviderProfile.fromSecureJson(
+        await storage.read(key: 'ai_provider_profiles'),
+      );
       if (legacyEndpoint != null || legacyToken != null) {
         await storage.write(
           key: 'private_service_endpoint',
@@ -363,7 +372,9 @@ class AssistantState extends ChangeNotifier {
     if (customMcpServers.length >= 25) {
       throw const McpException('You can add up to 25 MCP servers.');
     }
-    if (customMcpServers.any((s) => s.name.toLowerCase() == name.trim().toLowerCase())) {
+    if (customMcpServers.any(
+      (s) => s.name.toLowerCase() == name.trim().toLowerCase(),
+    )) {
       throw const McpException('A server with that name already exists.');
     }
     final server = McpServer(
@@ -394,7 +405,9 @@ class AssistantState extends ChangeNotifier {
 
   Future<List<McpToolInfo>> discoverMcpTools(String id) async {
     final server = customMcpServers.where((s) => s.id == id).firstOrNull;
-    if (server == null) throw const McpException('MCP server is no longer configured.');
+    if (server == null) {
+      throw const McpException('MCP server is no longer configured.');
+    }
     return mcpStore.discoverTools(server);
   }
 
@@ -435,6 +448,60 @@ class AssistantState extends ChangeNotifier {
     model: model,
     token: engine == 'compatible' ? compatibleApiKey : privateServiceToken,
   );
+  Future<void> saveProviderProfiles(List<AIProviderProfile> profiles) async {
+    final known = {
+      for (final profile in AIProviderProfile.defaults()) profile.id,
+    };
+    if (profiles.length != known.length ||
+        profiles.map((p) => p.id).toSet().length != known.length ||
+        !profiles.every((p) => known.contains(p.id))) {
+      throw ServiceException('Provider profile list is invalid.');
+    }
+    for (final profile in profiles) {
+      final uri = Uri.tryParse(profile.origin.trim());
+      if (uri == null ||
+          uri.scheme != 'https' ||
+          !uri.hasAuthority ||
+          uri.userInfo.isNotEmpty ||
+          uri.hasQuery ||
+          uri.hasFragment) {
+        throw ServiceException(
+          'Every provider endpoint must use HTTPS without embedded credentials.',
+        );
+      }
+    }
+    final ordered = [
+      for (final defaultProfile in AIProviderProfile.defaults())
+        profiles.firstWhere((p) => p.id == defaultProfile.id),
+    ];
+    await storage.write(
+      key: 'ai_provider_profiles',
+      value: jsonEncode(ordered.map((p) => p.toSecureMap()).toList()),
+    );
+    providerProfiles = ordered;
+    notifyListeners();
+  }
+
+  Future<List<ProviderCompareResult>> compareProviders({
+    required List<String> providerIds,
+    required String prompt,
+    required bool approvedThisRun,
+  }) {
+    final selected = providerProfiles
+        .where((p) => providerIds.contains(p.id))
+        .toList(growable: false);
+    if (selected.length != providerIds.length) {
+      throw const ProviderCompareException(
+        'A selected provider is not configured. No request was sent.',
+      );
+    }
+    return providerCompare.run(
+      profiles: selected,
+      prompt: prompt,
+      approvedThisRun: approvedThisRun,
+    );
+  }
+
   Future<void> saveExperimentalOfflineChat(bool enabled) async {
     await storage.write(
       key: 'experimental_offline_chat',
@@ -442,10 +509,9 @@ class AssistantState extends ChangeNotifier {
     );
     experimentalOfflineChatEnabled = enabled;
     try {
-      await offlineModel.invokeMethod<void>(
-        'set_experimental_chat_enabled',
-        {'enabled': enabled},
-      );
+      await offlineModel.invokeMethod<void>('set_experimental_chat_enabled', {
+        'enabled': enabled,
+      });
     } on PlatformException {
       // Opt-in is stored locally, but unsupported builds still cannot run native inference.
     } on MissingPluginException {
@@ -862,8 +928,7 @@ class AssistantState extends ChangeNotifier {
       return;
     }
     if (engine == 'offline' && !experimentalOfflineChatEnabled) {
-      error =
-          'Experimental Gemma chat is off. Turn it on in Settings > AI & Voice after reviewing the warning. No online fallback was used.';
+      error = 'Experimental Gemma chat is off. Turn it on in Settings > AI & Voice after reviewing the warning. No online fallback was used.';
       notifyListeners();
       return;
     }
@@ -904,10 +969,10 @@ class AssistantState extends ChangeNotifier {
       if (generation != _generation) return;
       if (selectedEngine == 'offline') {
         _localInferenceActive = true;
-        final answer = await offlineModel.invokeMethod<String>(
-          'run_chat',
-          {'prompt': prompt, 'experimental_opt_in': true},
-        );
+        final answer = await offlineModel.invokeMethod<String>('run_chat', {
+          'prompt': prompt,
+          'experimental_opt_in': true,
+        });
         if (generation == _generation) {
           if (answer == null || answer.trim().isEmpty) {
             throw ServiceException(
@@ -918,18 +983,23 @@ class AssistantState extends ChangeNotifier {
             'role': 'assistant',
             'text': answer,
             'state': 'complete',
+            'engine': selectedEngine,
           });
           partial = '';
         }
       } else {
         final req = selectedConfig!.request(conversation, prompt);
-        final res = await client!.send(req).timeout(const Duration(seconds: 10));
+        final res = await client!
+            .send(req)
+            .timeout(const Duration(seconds: 10));
         if (res.statusCode >= 300) {
           throw ServiceException(describeStatus(res.statusCode));
         }
         var done = false;
         await for (final event
-            in selectedConfig.events(res.stream).timeout(const Duration(seconds: 65))) {
+            in selectedConfig
+                .events(res.stream)
+                .timeout(const Duration(seconds: 65))) {
           if (generation != _generation) break;
           if (event['type'] == 'delta') {
             partial += event['text'] as String;
@@ -953,6 +1023,7 @@ class AssistantState extends ChangeNotifier {
               'role': 'assistant',
               'text': partial,
               'state': 'complete',
+              'engine': selectedEngine,
             });
           }
           partial = '';
@@ -961,7 +1032,8 @@ class AssistantState extends ChangeNotifier {
     } on PlatformException catch (e) {
       if (generation == _generation) {
         final message = e.message ?? 'Local Gemma could not answer.';
-        error = selectedEngine == 'offline' &&
+        error =
+            selectedEngine == 'offline' &&
                 !message.toLowerCase().contains('fallback')
             ? '$message No online fallback was used.'
             : message;
@@ -980,6 +1052,7 @@ class AssistantState extends ChangeNotifier {
             'role': 'assistant',
             'text': partial,
             'state': 'interrupted',
+            'engine': selectedEngine,
           });
           partial = '';
         }
