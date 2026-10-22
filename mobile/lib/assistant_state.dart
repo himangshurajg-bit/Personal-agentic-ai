@@ -929,7 +929,7 @@ class AssistantState extends ChangeNotifier {
         }
         var done = false;
         await for (final event
-            in selectedConfig!.events(res.stream).timeout(const Duration(seconds: 65))) {
+            in selectedConfig.events(res.stream).timeout(const Duration(seconds: 65))) {
           if (generation != _generation) break;
           if (event['type'] == 'delta') {
             partial += event['text'] as String;
