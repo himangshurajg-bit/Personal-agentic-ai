@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'visual_theme.dart';
+
 /// Adds a short, directional 3D press to an existing control without taking
 /// over its gesture, focus, semantics, or accessibility action.
 class TapMotion extends StatefulWidget {
@@ -314,30 +316,33 @@ class _HolographicOrbState extends State<HolographicAssistantOrb>
 
   @override
   Widget build(BuildContext context) {
+    final orbColors =
+        Theme.of(context).extension<PaletteVisuals>()?.orbColors ??
+        const [
+          Color(0xff75d9ff),
+          Color(0xffb18cff),
+          Color(0xffff8eae),
+          Color(0xffffb16f),
+        ];
     final colors = switch (widget.state) {
-      HolographicOrbState.idle => const [
-        Color(0xff75d9ff),
-        Color(0xffb18cff),
-        Color(0xffff8eae),
-        Color(0xffffb16f),
+      HolographicOrbState.idle => orbColors,
+      HolographicOrbState.listening => [
+        orbColors[2],
+        orbColors[0],
+        orbColors[1],
+        orbColors[3],
       ],
-      HolographicOrbState.listening => const [
-        Color(0xff70f2ff),
-        Color(0xff7db4ff),
-        Color(0xffbd8eff),
-        Color(0xffff86bd),
+      HolographicOrbState.thinking => [
+        orbColors[1],
+        orbColors[3],
+        orbColors[0],
+        orbColors[2],
       ],
-      HolographicOrbState.thinking => const [
-        Color(0xff70dfff),
-        Color(0xffa890ff),
-        Color(0xffed8cff),
-        Color(0xffffaa76),
-      ],
-      HolographicOrbState.speaking => const [
-        Color(0xff8cf4ff),
-        Color(0xff9ca9ff),
-        Color(0xffff91ce),
-        Color(0xffffbc70),
+      HolographicOrbState.speaking => [
+        orbColors[2],
+        orbColors[3],
+        orbColors[0],
+        orbColors[1],
       ],
     };
     final label = switch (widget.state) {

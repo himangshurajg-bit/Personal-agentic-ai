@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'phone_data.dart';
 import 'app_lock.dart';
 import 'engines.dart';
+import 'visual_theme.dart';
 
 class ServiceException implements Exception {
   final String message;
@@ -101,7 +102,8 @@ class AssistantState extends ChangeNotifier {
   }
 
   String conversation = 'personal';
-  String theme = 'system', error = '', partial = '', lastPrompt = '', note = '';
+  String theme = 'system', visualTheme = 'aurora';
+  String error = '', partial = '', lastPrompt = '', note = '';
   bool shareMemories = false, shareHistory = false;
   Map<String, dynamic>? selectedFile;
   bool ready = false, onboarded = false, busy = false, speakReplies = false;
@@ -163,6 +165,11 @@ class AssistantState extends ChangeNotifier {
         await storage.delete(key: 'token');
       }
       theme = await storage.read(key: 'theme') ?? 'system';
+      final savedVisualTheme = await storage.read(key: 'visual_theme');
+      visualTheme =
+          FuturisticPalette.all.any((item) => item.id == savedVisualTheme)
+          ? savedVisualTheme!
+          : 'aurora';
       conversation = await storage.read(key: 'conversation') ?? 'personal';
       onboarded = await storage.read(key: 'onboarded') == 'yes';
       note = await storage.read(key: 'note') ?? '';
@@ -287,6 +294,16 @@ class AssistantState extends ChangeNotifier {
       value: privateServiceEndpoint,
     );
     await storage.write(key: 'theme', value: theme);
+    notifyListeners();
+  }
+
+  Future<void> setVisualTheme(String id) async {
+    if (!FuturisticPalette.all.any((palette) => palette.id == id)) {
+      throw ArgumentError.value(id, 'id', 'Unknown visual theme');
+    }
+    if (visualTheme == id) return;
+    await storage.write(key: 'visual_theme', value: id);
+    visualTheme = id;
     notifyListeners();
   }
 
