@@ -20,4 +20,4 @@ The README's Windows window/keyboard/mouse/clipboard control, app automation, sc
 
 This branch adds an original, on-device search over the exact text already selected through Android's document picker. It does not scan storage, persist/index the text, upload it, or use an AI. Search is limited to locally readable text/Markdown/JSON in the existing 200 KB preview path; PDF extraction and image OCR remain unavailable. Results are bounded to 100 and show local line numbers/snippets. The search is cleared when a different file is selected or the view is closed.
 
-Targeted unit tests cover case-insensitive/multiline matching, repeated terms, empty queries, result limits, and snippet bounds. This is one safe first slice, not a port of MYRA's claimed desktop automation suite.
+Targeted unit tests cover case-insensitive/multiline matching, Unicode lowercase expansions, repeated terms, empty queries, result limits, and snippet bounds. This is one safe first slice, not a port of MYRA's claimed desktop automation suite.

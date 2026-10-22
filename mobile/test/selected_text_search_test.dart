@@ -39,5 +39,12 @@ void main() {
         1,
       );
     });
+
+    test('maps Unicode lowercase expansions back to the original snippet', () {
+      final matches = searchSelectedText('İstanbul is beautiful', 'i\u0307');
+      expect(matches, hasLength(1));
+      expect(matches.single.lineNumber, 1);
+      expect(matches.single.snippet, 'İstanbul is beautiful');
+    });
   });
 }
