@@ -40,6 +40,8 @@ class MainActivity : FlutterFragmentActivity() {
     private var audioFile: java.io.File? = null
     private var audioStartResult: MethodChannel.Result? = null
     private var voicePermission: MethodChannel.Result? = null
+    private var accessPermissionResult: MethodChannel.Result? = null
+    private var accessPermissionKind: String? = null
     private var voiceArgs: Map<*,*>? = null
     private fun voiceEvent(kind:String, value:Any? = null) { voiceChannel?.invokeMethod("voice_event",mapOf("kind" to kind,"value" to value)) }
     private fun stopVoice() { voice?.cancel();voice?.destroy();voice=null;voiceEvent("stopped") }
@@ -167,6 +169,7 @@ class MainActivity : FlutterFragmentActivity() {
                     "on_device_recognizer" to (Build.VERSION.SDK_INT>=31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)),
                     "system_recognizer" to SpeechRecognizer.isRecognitionAvailable(this)
                 ))
+                "request_access_permission" -> requestAccessPermission(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "voice_start" -> startVoice(call.arguments as? Map<*,*> ?: emptyMap<Any,Any>(),result)
                 "voice_cancel" -> {stopVoice();result.success(true)}
                 "list_launchable_apps" -> {
@@ -300,6 +303,35 @@ class MainActivity : FlutterFragmentActivity() {
             }
         } catch(e:Exception) { result.success(mapOf("result" to "failed","detail" to (e.message ?: "Action failed; outcome not verified").take(300))) }
     }
+    private fun requestAccessPermission(args: Map<*, *>, result: MethodChannel.Result) {
+        val kind = args["permission"] as? String
+        val permission = when (kind) {
+            "microphone" -> Manifest.permission.RECORD_AUDIO
+            "notifications" -> {
+                if (Build.VERSION.SDK_INT < 33) {
+                    result.success(mapOf("permission" to kind, "granted" to true, "required" to false))
+                    return
+                }
+                Manifest.permission.POST_NOTIFICATIONS
+            }
+            else -> {
+                result.error("invalid_permission", "Only microphone or notification access can be requested.", null)
+                return
+            }
+        }
+        if (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+            result.success(mapOf("permission" to kind, "granted" to true, "required" to true))
+            return
+        }
+        if (accessPermissionResult != null || permissionResult != null || voicePermission != null) {
+            result.error("busy", "Another Android permission request is already open.", null)
+            return
+        }
+        accessPermissionResult = result
+        accessPermissionKind = kind
+        requestPermissions(arrayOf(permission), 45)
+    }
+
     override fun onRequestPermissionsResult(requestCode:Int,permissions:Array<out String>,grantResults:IntArray) {
         super.onRequestPermissionsResult(requestCode,permissions,grantResults)
         if(requestCode==44) {
@@ -307,6 +339,20 @@ class MainActivity : FlutterFragmentActivity() {
             if(result!=null && args!=null) {
                 if(grantResults.isNotEmpty() && grantResults[0]==PackageManager.PERMISSION_GRANTED) startVoice(args,result)
                 else result.error("denied","Microphone permission denied. No audio was processed; typing still works.",null)
+            }
+        }
+        if(requestCode==45) {
+            val result=accessPermissionResult
+            val kind=accessPermissionKind
+            accessPermissionResult=null
+            accessPermissionKind=null
+            if(result!=null && kind!=null) {
+                val permission=if(kind=="microphone") Manifest.permission.RECORD_AUDIO else Manifest.permission.POST_NOTIFICATIONS
+                result.success(mapOf(
+                    "permission" to kind,
+                    "granted" to (checkSelfPermission(permission)==PackageManager.PERMISSION_GRANTED),
+                    "required" to true
+                ))
             }
         }
         if(requestCode==41) {
