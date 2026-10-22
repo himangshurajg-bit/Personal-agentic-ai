@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import 'assistant_state.dart';
 import 'mcp_servers.dart';
+import 'wajo_oauth.dart';
 import 'offline_model.dart';
 import 'phone_screens.dart';
 import 'safe_workflows.dart';
@@ -4317,82 +4318,130 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
     final endpoint = TextEditingController();
     final token = TextEditingController();
     final formKey = GlobalKey<FormState>();
+    var preset = 'custom';
     final values = await showDialog<List<String>>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add custom MCP server'),
-        content: SizedBox(
-          width: 480,
-          child: Form(
-            key: formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextFormField(
-                    controller: name,
-                    maxLength: 48,
-                    decoration: const InputDecoration(labelText: 'Server name'),
-                    validator: (value) {
-                      final normalized = (value ?? '').trim();
-                      if (normalized.isEmpty ||
-                          normalized.runes.length > 48 ||
-                          normalized.contains(RegExp(r'[\x00-\x1f]'))) {
-                        return 'Use 1–48 characters without control characters.';
-                      }
-                      return null;
-                    },
-                  ),
-                  TextFormField(
-                    controller: endpoint,
-                    keyboardType: TextInputType.url,
-                    autocorrect: false,
-                    decoration: const InputDecoration(
-                      labelText: 'MCP server URL',
-                      hintText: 'https://mcp.example.com/mcp',
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Add custom MCP server'),
+          content: SizedBox(
+            width: 480,
+            child: Form(
+              key: formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      initialValue: preset,
+                      decoration: const InputDecoration(
+                        labelText: 'Server type',
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'custom',
+                          child: Text('Custom server'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'wajo',
+                          child: Text('Wajo Fo · OAuth'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        setDialogState(() {
+                          preset = value ?? 'custom';
+                          if (preset == 'wajo') {
+                            name.text = 'Wajo Fo';
+                            endpoint.text = wajoMcpEndpoint;
+                            token.clear();
+                          } else {
+                            name.clear();
+                            endpoint.clear();
+                            token.clear();
+                          }
+                        });
+                      },
                     ),
-                    validator: (value) {
-                      try {
-                        validateMcpEndpoint(value ?? '');
+                    TextFormField(
+                      controller: name,
+                      maxLength: 48,
+                      decoration: const InputDecoration(
+                        labelText: 'Server name',
+                      ),
+                      validator: (value) {
+                        final normalized = (value ?? '').trim();
+                        if (normalized.isEmpty ||
+                            normalized.runes.length > 48 ||
+                            normalized.contains(RegExp(r'[\x00-\x1f]'))) {
+                          return 'Use 1–48 characters without control characters.';
+                        }
                         return null;
-                      } catch (e) {
-                        return e.toString();
-                      }
-                    },
-                  ),
-                  TextFormField(
-                    controller: token,
-                    obscureText: true,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    autofillHints: const [],
-                    decoration: const InputDecoration(
-                      labelText: 'Optional bearer token',
+                      },
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'Only the MCP initialize and tools/list requests go to this server. The token is kept in phone secure storage. Discovered tools are not called, and no chat or memory context is sent.',
-                  ),
-                ],
+                    TextFormField(
+                      controller: endpoint,
+                      keyboardType: TextInputType.url,
+                      autocorrect: false,
+                      decoration: const InputDecoration(
+                        labelText: 'MCP server URL',
+                        hintText: 'https://mcp.example.com/mcp',
+                      ),
+                      validator: (value) {
+                        try {
+                          validateMcpEndpoint(value ?? '');
+                          if (preset == 'wajo' &&
+                              value?.trim() != wajoMcpEndpoint) {
+                            return 'Use the exact Wajo Fo endpoint.';
+                          }
+                          return null;
+                        } catch (e) {
+                          return e.toString();
+                        }
+                      },
+                    ),
+                    if (preset == 'custom')
+                      TextFormField(
+                        controller: token,
+                        obscureText: true,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        autofillHints: const [],
+                        decoration: const InputDecoration(
+                          labelText: 'Optional bearer token',
+                        ),
+                      )
+                    else
+                      const Padding(
+                        padding: EdgeInsets.only(top: 10),
+                        child: Text(
+                          'This only saves the preset on this phone. It does not contact Wajo. After adding it, choose Connect with OAuth to start secure sign-in; no chat or memory is sent.',
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (formKey.currentState!.validate()) {
+                  Navigator.pop(context, [
+                    name.text,
+                    endpoint.text,
+                    token.text,
+                    preset,
+                  ]);
+                }
+              },
+              child: const Text('Add server'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (formKey.currentState!.validate()) {
-                Navigator.pop(context, [name.text, endpoint.text, token.text]);
-              }
-            },
-            child: const Text('Add server'),
-          ),
-        ],
       ),
     );
     name.dispose();
@@ -4400,10 +4449,40 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
     token.dispose();
     if (values == null || !mounted) return;
     try {
-      await widget.state.addMcpServer(values[0], values[1], values[2]);
-      if (mounted) notice(context, 'MCP server saved on this phone.');
+      final useWajoOAuth = values[3] == 'wajo';
+      await widget.state.addMcpServer(
+        values[0],
+        values[1],
+        values[2],
+        authMode: useWajoOAuth ? McpAuthMode.wajoOAuth : McpAuthMode.bearer,
+      );
+      if (mounted) {
+        notice(
+          context,
+          useWajoOAuth
+              ? 'Wajo Fo saved locally; it is not connected. Choose Connect with OAuth to continue.'
+              : 'MCP server saved on this phone.',
+        );
+      }
     } catch (e) {
       if (mounted) notice(context, e);
+    }
+  }
+
+  Future<void> _connectOAuth(McpServer server) async {
+    setState(() => busy = true);
+    try {
+      await widget.state.connectMcpOAuth(server.id);
+      if (mounted) {
+        notice(
+          context,
+          'Wajo OAuth connected on this phone. No tools were run.',
+        );
+      }
+    } catch (e) {
+      if (mounted) notice(context, e);
+    } finally {
+      if (mounted) setState(() => busy = false);
     }
   }
 
@@ -4469,7 +4548,7 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
           builder: (context) => AlertDialog(
             title: Text('Remove ${server.name}?'),
             content: const Text(
-              'This removes the saved server and its phone-stored bearer token. It does not revoke the token at the server.',
+              'This removes the saved server and credentials from this phone. If you used Wajo OAuth, its client registration may remain at Wajo; this app has no remote deregistration action.',
             ),
             actions: [
               TextButton(
@@ -4515,21 +4594,51 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.hub_outlined),
             title: Text(server.name),
-            subtitle: Text(
-              server.endpoint,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  server.endpoint,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (server.authMode == McpAuthMode.wajoOAuth)
+                  FutureBuilder<bool>(
+                    future: widget.state.isMcpOAuthConnected(server),
+                    builder: (context, snapshot) => Text(
+                      snapshot.data == true
+                          ? 'OAuth connected'
+                          : 'OAuth not connected',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+              ],
             ),
             trailing: PopupMenuButton<String>(
               enabled: !busy,
-              onSelected: (value) =>
-                  value == 'discover' ? _discover(server) : _remove(server),
-              itemBuilder: (context) => const [
-                PopupMenuItem(
+              onSelected: (value) {
+                if (value == 'connect') {
+                  _connectOAuth(server);
+                } else if (value == 'discover') {
+                  _discover(server);
+                } else {
+                  _remove(server);
+                }
+              },
+              itemBuilder: (context) => [
+                if (server.authMode == McpAuthMode.wajoOAuth)
+                  const PopupMenuItem(
+                    value: 'connect',
+                    child: Text('Connect with OAuth'),
+                  ),
+                const PopupMenuItem(
                   value: 'discover',
                   child: Text('Test & discover tools'),
                 ),
-                PopupMenuItem(value: 'remove', child: Text('Remove server')),
+                const PopupMenuItem(
+                  value: 'remove',
+                  child: Text('Remove server'),
+                ),
               ],
             ),
           ),
@@ -4545,6 +4654,10 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
         const SizedBox(height: 4),
         const Text(
           'No tool is automatically invoked. MCP tool execution and per-action approval integration are not implemented in this version.',
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Wajo Fo OAuth is optional. Adding its preset does not connect it; the Connect with OAuth action performs discovery and native-client registration before opening sign-in.',
         ),
       ],
     ),
