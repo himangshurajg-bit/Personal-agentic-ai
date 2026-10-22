@@ -16,7 +16,7 @@ List<SelectedTextMatch> searchSelectedText(
   String query, {
   int maxResults = 100,
 }) {
-  final needle = query.trim().toLowerCase();
+  final needle = _caseFold(query.trim());
   if (needle.isEmpty || maxResults <= 0) return const [];
 
   final results = <SelectedTextMatch>[];
@@ -46,6 +46,21 @@ List<SelectedTextMatch> searchSelectedText(
   return results;
 }
 
+String _caseFold(String source) {
+  final folded = StringBuffer();
+  for (final rune in source.runes) {
+    folded.write(_foldRune(rune));
+  }
+  return folded.toString();
+}
+
+String _foldRune(int rune) {
+  // Dart's lowercase mapping for U+0130 omits its combining dot; preserve the
+  // Unicode lowercase expansion so text and query fold to the same sequence.
+  if (rune == 0x0130) return 'i\u0307';
+  return String.fromCharCode(rune).toLowerCase();
+}
+
 class _LowercaseOffsets {
   final String text;
   final List<int> sourceStarts;
@@ -55,7 +70,7 @@ class _LowercaseOffsets {
 }
 
 _LowercaseOffsets _lowercaseWithOffsets(String source) {
-  final lowered = source.toLowerCase();
+  final lowered = _caseFold(source);
   final starts = <int>[];
   final ends = <int>[];
   var sourceOffset = 0;
@@ -64,22 +79,12 @@ _LowercaseOffsets _lowercaseWithOffsets(String source) {
     final sourceEnd = sourceOffset + original.length;
     // Some Unicode lowercase mappings expand to multiple UTF-16 units. Map
     // every output unit back to the complete source rune for correct snippets.
-    final mappedLength = original.toLowerCase().length;
-    for (var i = 0; i < mappedLength; i++) {
+    final mapped = _foldRune(rune);
+    for (var i = 0; i < mapped.length; i++) {
       starts.add(sourceOffset);
       ends.add(sourceEnd);
     }
     sourceOffset = sourceEnd;
-  }
-  if (starts.length > lowered.length) {
-    starts.removeRange(lowered.length, starts.length);
-    ends.removeRange(lowered.length, ends.length);
-  } else if (starts.length < lowered.length && starts.isNotEmpty) {
-    // Keep any context-sensitive extra units attached to the last source rune
-    // rather than letting a folded-text index escape the original line.
-    final remaining = lowered.length - starts.length;
-    starts.addAll(List<int>.filled(remaining, starts.last));
-    ends.addAll(List<int>.filled(remaining, ends.last));
   }
   return _LowercaseOffsets(lowered, starts, ends);
 }
