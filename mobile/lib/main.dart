@@ -2,13 +2,13 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
 
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter/services.dart';
 
 import 'assistant_state.dart';
 import 'phone_screens.dart';
+import 'ui_motion.dart';
 
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
@@ -365,11 +365,12 @@ ThemeData _assistantTheme(Brightness brightness) {
         ? const Color(0xff101322)
         : const Color(0xfff7f7fb),
     useMaterial3: true,
+    splashFactory: InkSparkle.splashFactory,
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: {
-        TargetPlatform.android: CupertinoPageTransitionsBuilder(),
-        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-        TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.android: GlassDepthPageTransitionsBuilder(),
+        TargetPlatform.iOS: GlassDepthPageTransitionsBuilder(),
+        TargetPlatform.macOS: GlassDepthPageTransitionsBuilder(),
       },
     ),
     appBarTheme: AppBarTheme(
@@ -426,18 +427,64 @@ ThemeData _assistantTheme(Brightness brightness) {
       ),
     ),
     filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(
-        minimumSize: const Size(0, 48),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        textStyle: const TextStyle(fontWeight: FontWeight.w600),
-      ),
+      style:
+          FilledButton.styleFrom(
+            minimumSize: const Size(0, 48),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+            ),
+            textStyle: const TextStyle(fontWeight: FontWeight.w600),
+          ).copyWith(
+            animationDuration: const Duration(milliseconds: 220),
+            splashFactory: InkSparkle.splashFactory,
+          ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style:
+          OutlinedButton.styleFrom(
+            minimumSize: const Size(0, 48),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+            ),
+          ).copyWith(
+            animationDuration: const Duration(milliseconds: 220),
+            splashFactory: InkSparkle.splashFactory,
+          ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style:
+          TextButton.styleFrom(
+            minimumSize: const Size(40, 44),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+            ),
+          ).copyWith(
+            animationDuration: const Duration(milliseconds: 220),
+            splashFactory: InkSparkle.splashFactory,
+          ),
     ),
     iconButtonTheme: IconButtonThemeData(
-      style: IconButton.styleFrom(
-        foregroundColor: scheme.onSurfaceVariant,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
+      style:
+          IconButton.styleFrom(
+            foregroundColor: scheme.onSurfaceVariant,
+            shape: const CircleBorder(),
+          ).copyWith(
+            animationDuration: const Duration(milliseconds: 200),
+            splashFactory: InkSparkle.splashFactory,
+          ),
+    ),
+    listTileTheme: ListTileThemeData(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+      minVerticalPadding: 10,
+      horizontalTitleGap: 12,
+      enableFeedback: true,
+    ),
+    cardTheme: CardThemeData(
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
     ),
     dividerTheme: DividerThemeData(
       color: scheme.outlineVariant.withValues(alpha: dark ? .36 : .48),
@@ -469,8 +516,18 @@ class _AmbientGlowState extends State<_AmbientGlow>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 1400),
-  )..forward();
+    duration: const Duration(seconds: 18),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller.stop();
+    } else if (!_controller.isAnimating) {
+      _controller.repeat(reverse: true);
+    }
+  }
 
   @override
   void dispose() {
@@ -516,16 +573,22 @@ class _AmbientPainter extends CustomPainter {
     }
 
     glow(
-      Offset(size.width * (.20 + .10 * math.sin(phase)), size.height * .14),
-      size.width * .70,
+      Offset(size.width * (.18 + .14 * math.sin(phase)), size.height * .16),
+      size.width * .78,
       scheme.primary,
-      dark ? .19 : .20,
+      dark ? .28 : .24,
     );
     glow(
-      Offset(size.width * (.88 - .11 * math.sin(phase)), size.height * .68),
-      size.width * .58,
+      Offset(size.width * (.84 - .12 * math.sin(phase)), size.height * .64),
+      size.width * .68,
       scheme.tertiary,
-      dark ? .13 : .15,
+      dark ? .22 : .19,
+    );
+    glow(
+      Offset(size.width * (.48 + .10 * math.cos(phase)), size.height * .98),
+      size.width * .56,
+      scheme.secondary,
+      dark ? .14 : .15,
     );
   }
 
@@ -568,10 +631,19 @@ class Glass extends StatelessWidget {
           boxShadow: [
             BoxShadow(
               color: theme.colorScheme.primary.withValues(
-                alpha: dark ? .08 : .07,
+                alpha: dark ? .20 : .13,
               ),
-              blurRadius: 28,
-              offset: const Offset(0, 10),
+              blurRadius: 34,
+              spreadRadius: -3,
+              offset: const Offset(0, 11),
+            ),
+            BoxShadow(
+              color: theme.colorScheme.tertiary.withValues(
+                alpha: dark ? .11 : .08,
+              ),
+              blurRadius: 38,
+              spreadRadius: -8,
+              offset: const Offset(0, 18),
             ),
           ],
         ),
@@ -683,12 +755,29 @@ class _SoftEntranceState extends State<SoftEntrance>
       builder: (context, child) {
         final value = reduced
             ? 1.0
-            : Curves.easeOutCubic.transform(_controller.value);
+            : Curves.easeOutBack
+                  .transform(_controller.value)
+                  .clamp(0.0, 1.0)
+                  .toDouble();
+        final depth = Matrix4.identity()
+          ..setEntry(3, 2, .0015)
+          ..rotateX((1 - value) * .12)
+          ..rotateY((1 - value) * -.16)
+          ..scaleByDouble(
+            .90 + .10 * value,
+            .90 + .10 * value,
+            .90 + .10 * value,
+            1,
+          );
         return Opacity(
           opacity: value,
-          child: Transform.translate(
-            offset: Offset(0, 16 * (1 - value)),
-            child: child,
+          child: Transform(
+            alignment: Alignment.center,
+            transform: depth,
+            child: Transform.translate(
+              offset: Offset(0, 16 * (1 - value)),
+              child: child,
+            ),
           ),
         );
       },
@@ -1161,89 +1250,110 @@ class Home extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.book_outlined),
-                    title: const Text('Offline notebook'),
-                    subtitle: const Text('A note that stays on this device'),
-                    onTap: () => notebook(context),
-                  ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.psychology_outlined),
-                    title: const Text('Chosen memories'),
-                    subtitle: const Text(
-                      'Local · inspect, edit, export or forget',
+                  TapMotion(
+                    depth: .7,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.book_outlined),
+                      title: const Text('Offline notebook'),
+                      subtitle: const Text('A note that stays on this device'),
+                      onTap: () => notebook(context),
                     ),
-                    onTap: () => Navigator.pushNamed(context, '/memory'),
                   ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.checklist_rounded),
-                    title: const Text('Tasks & history'),
-                    subtitle: const Text(
-                      'Local tasks, chat search and data export',
+                  TapMotion(
+                    depth: .7,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.psychology_outlined),
+                      title: const Text('Chosen memories'),
+                      subtitle: const Text(
+                        'Local · inspect, edit, export or forget',
+                      ),
+                      onTap: () => Navigator.pushNamed(context, '/memory'),
                     ),
-                    onTap: () => Navigator.pushNamed(context, '/library'),
                   ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.school_outlined),
-                    title: const Text('Study mode'),
-                    subtitle: const Text(
-                      'Tutoring prompts and recorded practice attempts',
+                  TapMotion(
+                    depth: .7,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.checklist_rounded),
+                      title: const Text('Tasks & history'),
+                      subtitle: const Text(
+                        'Local tasks, chat search and data export',
+                      ),
+                      onTap: () => Navigator.pushNamed(context, '/library'),
                     ),
-                    onTap: () => Navigator.pushNamed(context, '/study'),
                   ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.description_outlined),
-                    title: const Text('Selected files'),
-                    subtitle: const Text(
-                      'Open only a file you choose; no broad storage access',
+                  TapMotion(
+                    depth: .7,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.school_outlined),
+                      title: const Text('Study mode'),
+                      subtitle: const Text(
+                        'Tutoring prompts and recorded practice attempts',
+                      ),
+                      onTap: () => Navigator.pushNamed(context, '/study'),
                     ),
-                    onTap: () => Navigator.pushNamed(context, '/files'),
                   ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.notifications_outlined),
-                    title: const Text('Set a reminder'),
-                    subtitle: const Text('Choose the details, then approve'),
-                    onTap: () => reminder(context),
+                  TapMotion(
+                    depth: .7,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.description_outlined),
+                      title: const Text('Selected files'),
+                      subtitle: const Text(
+                        'Open only a file you choose; no broad storage access',
+                      ),
+                      onTap: () => Navigator.pushNamed(context, '/files'),
+                    ),
                   ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.open_in_new_rounded),
-                    title: const Text('Open an Android app'),
-                    subtitle: const Text('Only supported installed apps'),
-                    onTap: () async {
-                      final package = await showModalBottomSheet<String>(
-                        context: context,
-                        builder: (c) => SafeArea(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              for (final entry in const {
-                                'Settings': 'com.android.settings',
-                                'Chrome': 'com.android.chrome',
-                                'YouTube': 'com.google.android.youtube',
-                                'Calculator': 'com.google.android.calculator',
-                              }.entries)
-                                ListTile(
-                                  title: Text(entry.key),
-                                  onTap: () => Navigator.pop(c, entry.value),
-                                ),
-                            ],
+                  TapMotion(
+                    depth: .7,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.notifications_outlined),
+                      title: const Text('Set a reminder'),
+                      subtitle: const Text('Choose the details, then approve'),
+                      onTap: () => reminder(context),
+                    ),
+                  ),
+                  TapMotion(
+                    depth: .7,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.open_in_new_rounded),
+                      title: const Text('Open an Android app'),
+                      subtitle: const Text('Only supported installed apps'),
+                      onTap: () async {
+                        final package = await showModalBottomSheet<String>(
+                          context: context,
+                          builder: (c) => SafeArea(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                for (final entry in const {
+                                  'Settings': 'com.android.settings',
+                                  'Chrome': 'com.android.chrome',
+                                  'YouTube': 'com.google.android.youtube',
+                                  'Calculator': 'com.google.android.calculator',
+                                }.entries)
+                                  ListTile(
+                                    title: Text(entry.key),
+                                    onTap: () => Navigator.pop(c, entry.value),
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                      );
-                      if (package != null && context.mounted) {
-                        await action(context, {
-                          'kind': 'open_app',
-                          'package': package,
-                        });
-                      }
-                    },
+                        );
+                        if (package != null && context.mounted) {
+                          await action(context, {
+                            'kind': 'open_app',
+                            'package': package,
+                          });
+                        }
+                      },
+                    ),
                   ),
                 ],
               ),
