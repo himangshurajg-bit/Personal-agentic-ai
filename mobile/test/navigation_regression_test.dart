@@ -54,6 +54,18 @@ void main() {
       expect(find.text('Prepare a reminder'), findsOneWidget);
       expect(tester.takeException(), isNull, reason: 'Entering Actions');
 
+      for (final entry in [
+        ('Skills & actions', 'Sub-agent execution isn’t available yet'),
+        ('Message & social drafts', 'Write it here, send it yourself'),
+      ]) {
+        await tester.tap(find.byTooltip('Open navigation menu'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(entry.$1).last);
+        await tester.pumpAndSettle();
+        expect(find.text(entry.$2), findsOneWidget);
+        expect(tester.takeException(), isNull, reason: 'Entering ${entry.$1}');
+      }
+
       for (final label in ['Chat', 'Memory', 'Settings', 'Home', 'Memory']) {
         await tester.tap(find.text(label).last);
         await tester.pumpAndSettle();
