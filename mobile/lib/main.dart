@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import 'assistant_state.dart';
 import 'phone_screens.dart';
+import 'image_generation_screen.dart';
 import 'ui_motion.dart';
 
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -83,6 +84,10 @@ class _AssistantAppState extends State<AssistantApp>
         '/study': (_) => StudyScreen(state: widget.state),
         '/files': (_) => SelectedFiles(state: widget.state),
         '/automations': (_) => ActionHistory(state: widget.state),
+        '/images': (_) => ImageGenerationScreen(
+          endpoint: widget.state.endpoint,
+          token: widget.state.token,
+        ),
       },
     ),
   );
@@ -2313,6 +2318,15 @@ class _SettingsState extends State<Settings> {
                 },
                 child: const Text('Save settings'),
               ),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.pushNamed(context, '/images'),
+                icon: const Icon(Icons.image_outlined),
+                label: const Text('Create an image (Cloudflare)'),
+              ),
+              const Text(
+                'This sends only the prompt you type in the image screen—not chat history, saved memories or files. The private service must be explicitly configured.',
+              ),
+              const SizedBox(height: 12),
               TextButton(
                 onPressed: () async {
                   try {
