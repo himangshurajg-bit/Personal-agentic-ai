@@ -32,6 +32,16 @@ The provider key stays on the service computer, never in the Android APK, reposi
 
 The API key and model are not checked into this repository. The provider is selected only when `ASSISTANT_PROVIDER=groq`; merely setting a key does not activate it. If the key or model is missing/invalid, startup fails rather than falling back to Ollama. Tests use a mocked HTTPS response only: no live Groq request, key creation, Assamese quality check, JEE evaluation, or billing-tier verification has been performed. Verify English, Assamese and JEE responses yourself before relying on the service; quality is not guaranteed by API compatibility.
 
+## Optional Cloudflare Workers AI image generation
+
+This adds a separate, opt-in prompt-to-image endpoint using Cloudflare Workers AI `@cf/black-forest-labs/flux-1-schnell`. It is disabled unless `ASSISTANT_IMAGE_PROVIDER=cloudflare` and both `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are set in the private FastAPI process environment. Create a Cloudflare API token scoped to Workers AI inference for the account, set its account ID and token directly in the server environment, then restart the service. The token stays server-side; never place it in the APK, repository, or chat. The Flutter screen sends only the exact prompt entered there—no conversation history, saved memory, selected file, or other context—to this service and then Cloudflare.
+
+The free Workers AI allowance is 10,000 neurons per day. Free-plan requests fail after that allowance is exhausted; this code never retries or switches to a paid model. However, the app cannot inspect or enforce your Cloudflare account's plan: Paid accounts can be charged above the free allowance. If zero-cost use matters, verify the account is on Free and monitor its usage/billing settings before enabling this option. This is a free allowance, not an unlimited guarantee.
+
+Cloudflare's stateless inference documentation says customer content is not retained after processing and is not used to train models; operational metadata may still be retained. Avoid entering sensitive prompts. The endpoint accepts one prompt (1–1,000 characters), authenticates with the existing private-service token, allows at most three attempts per minute, has no paid fallback, and returns only a validated PNG/JPEG/WebP image. Tests use mocked HTTP and make no Cloudflare account, key, or live API request.
+
+The image creation page is a separate route under Settings. Generation requires a reachable private FastAPI service plus the server-side Cloudflare configuration; an unconfigured service returns 503 and no image is generated.
+
 ## Optional ElevenLabs expressive speech
 
 `POST /voice/speech` creates an MP3 only when an authenticated client explicitly requests it. Set `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` in the private service process environment (never in the APK, repo, or chat); optional `ELEVENLABS_MODEL_ID` accepts `eleven_v4` or `eleven_v4_turbo` and defaults to `eleven_v4`. The API key remains on this service and is sent only to ElevenLabs over HTTPS. ElevenLabs TTS input/output history is retained by default; this project does not enable Zero Retention Mode, which is limited to select Enterprise customers and requires `enable_logging=false`. The app warns before sending each selected reply. This endpoint returns 503 until both required settings are present, permits at most three requests per minute, limits text to 2,000 characters, and does not retry provider failures. Each generation may consume the owner's ElevenLabs credits. The Android app asks before sending one selected assistant reply and stores no provider key.
@@ -51,6 +61,7 @@ The smoke script uses a temporary database, synthetic facts and no personal data
 ## API and safety boundaries
 
 - `POST /chat`: conversation ID and prompt; NDJSON `start`, `delta`, `done`/`error`. One active response per conversation, ten accepted requests/minute, provider connection/read timeouts and a total 120-second response budget. The client must not call a truncated stream complete.
+- `POST /images/generate`: a single, explicit 1–1,000-character prompt; returns an image only with the opt-in Cloudflare adapter configured. Three requests per minute, bounded validated image response, no retries or provider fallback.
 - `GET /conversations`: most recent 100 conversation scopes, title and message count for reopening history.
 - `GET/DELETE /conversations/{id}`: persisted last 100 messages/deletion. Incomplete assistant messages keep an explicit state; the model context uses only complete messages from the latest 20. Deletion refuses while a stream is active.
 - `GET/POST /memories`, `DELETE /memories/{id}`, `GET /memories/export`: explicit, owner-controlled facts. Relevant retrieval selects up to five lexical matches within the conversation only. Memory content is quoted data, not authorization. This is intentionally limited lexical recall, not semantic retrieval or inferred personalization.
@@ -64,6 +75,6 @@ A receipt is a device report and always has `independently_verified: false`. And
 uv run --project service pytest service/tests -q
 ```
 
-The tests cover auth/origins, strict schemas, persisted history, conversation-scoped factual selection and forgetting, unconfigured/provider errors, rate limits, expired/used approvals and device-reported results. The client suite separately exercises weak/disconnected streams, status failures, timeout cancellation and denied-permission flows with mocks. No test-provider response should be described as a real AI conversation or physical-device result.
+The tests cover auth/origins, strict schemas, persisted history, conversation-scoped factual selection and forgetting, unconfigured/provider errors, opt-in Cloudflare selection and mocked image generation, rate limits, expired/used approvals and device-reported results. The client suite separately exercises weak/disconnected streams, status failures, timeout cancellation and denied-permission flows with mocks. No test-provider response should be described as a real AI conversation or physical-device result.
 
 Forgetting a saved memory deletes that record only. It does not erase facts already present in conversation history; delete that conversation separately if needed. Exported JSON files are outside the memory database and must be handled by their owner.
