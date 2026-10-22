@@ -10,6 +10,7 @@ import 'phone_data.dart';
 import 'app_lock.dart';
 import 'engines.dart';
 import 'mcp_servers.dart';
+import 'wajo_oauth.dart';
 import 'visual_theme.dart';
 
 class LaunchableApp {
@@ -85,6 +86,10 @@ class AssistantState extends ChangeNotifier {
        authenticator = authenticator ?? LocalAuthDeviceAuthenticator();
   late final PhoneData local = PhoneData(storage);
   late final McpServerStore mcpStore = McpServerStore(storage, clientFactory);
+  late final WajoOAuthFlow mcpOAuth = WajoOAuthFlow(
+    storage: storage,
+    clientFactory: clientFactory,
+  );
   List<McpServer> customMcpServers = [];
   String mcpLoadError = '';
   String speechMode = 'offline';
@@ -358,8 +363,19 @@ class AssistantState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> addMcpServer(String name, String endpoint, String token) async {
+  Future<void> addMcpServer(
+    String name,
+    String endpoint,
+    String token, {
+    McpAuthMode authMode = McpAuthMode.bearer,
+  }) async {
     validateMcpServer(name, endpoint);
+    if (authMode == McpAuthMode.wajoOAuth &&
+        (endpoint.trim() != wajoMcpEndpoint || name.trim() != 'Wajo Fo')) {
+      throw const McpException(
+        'Use the exact Wajo Fo preset for its OAuth connection.',
+      );
+    }
     if (customMcpServers.length >= 25) {
       throw const McpException('You can add up to 25 MCP servers.');
     }
@@ -370,6 +386,7 @@ class AssistantState extends ChangeNotifier {
       id: 'mcp-${DateTime.now().microsecondsSinceEpoch}',
       name: name.trim(),
       endpoint: endpoint.trim(),
+      authMode: authMode,
     );
     final next = [...customMcpServers, server];
     await mcpStore.save(next);
@@ -388,14 +405,34 @@ class AssistantState extends ChangeNotifier {
     final server = customMcpServers.where((s) => s.id == id).firstOrNull;
     if (server == null) return;
     await mcpStore.remove(server, customMcpServers);
+    if (server.authMode == McpAuthMode.wajoOAuth) {
+      await mcpOAuth.remove(server);
+    }
     customMcpServers = customMcpServers.where((s) => s.id != id).toList();
+    notifyListeners();
+  }
+
+  Future<bool> isMcpOAuthConnected(McpServer server) =>
+      mcpOAuth.isConnected(server);
+
+  Future<void> connectMcpOAuth(String id) async {
+    final server = customMcpServers.where((s) => s.id == id).firstOrNull;
+    if (server == null) {
+      throw const McpException('MCP server is no longer configured.');
+    }
+    await mcpOAuth.connect(server);
     notifyListeners();
   }
 
   Future<List<McpToolInfo>> discoverMcpTools(String id) async {
     final server = customMcpServers.where((s) => s.id == id).firstOrNull;
-    if (server == null) throw const McpException('MCP server is no longer configured.');
-    return mcpStore.discoverTools(server);
+    if (server == null) {
+      throw const McpException('MCP server is no longer configured.');
+    }
+    final accessToken = server.authMode == McpAuthMode.wajoOAuth
+        ? await mcpOAuth.accessTokenForDiscovery(server)
+        : null;
+    return mcpStore.discoverTools(server, oauthAccessToken: accessToken);
   }
 
   Future<void> saveNote(String value) async {

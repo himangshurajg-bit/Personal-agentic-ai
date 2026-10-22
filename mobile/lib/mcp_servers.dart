@@ -4,17 +4,33 @@ import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
+enum McpAuthMode { bearer, wajoOAuth }
+
 class McpServer {
   final String id;
   final String name;
   final String endpoint;
-  const McpServer({required this.id, required this.name, required this.endpoint});
+  final McpAuthMode authMode;
+  const McpServer({
+    required this.id,
+    required this.name,
+    required this.endpoint,
+    this.authMode = McpAuthMode.bearer,
+  });
 
-  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'endpoint': endpoint};
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'endpoint': endpoint,
+    'authMode': authMode.name,
+  };
   factory McpServer.fromJson(Map<String, dynamic> value) => McpServer(
     id: value['id'] as String,
     name: value['name'] as String,
     endpoint: value['endpoint'] as String,
+    authMode: value['authMode'] == McpAuthMode.wajoOAuth.name
+        ? McpAuthMode.wajoOAuth
+        : McpAuthMode.bearer,
   );
 }
 
@@ -75,7 +91,9 @@ class McpServerStore {
     final ids = <String>{};
     final names = <String>{};
     for (final item in decoded) {
-      if (item is! Map) throw const McpException('Saved MCP server entry is invalid.');
+      if (item is! Map) {
+        throw const McpException('Saved MCP server entry is invalid.');
+      }
       final server = McpServer.fromJson(Map<String, dynamic>.from(item));
       validateMcpServer(server.name, server.endpoint);
       if (!RegExp(r'^mcp-[A-Za-z0-9-]{1,60}$').hasMatch(server.id) ||
@@ -88,7 +106,9 @@ class McpServerStore {
   }
 
   Future<List<McpServer>> save(List<McpServer> servers) async {
-    if (servers.length > 25) throw const McpException('You can add up to 25 MCP servers.');
+    if (servers.length > 25) {
+      throw const McpException('You can add up to 25 MCP servers.');
+    }
     final ids = <String>{};
     final names = <String>{};
     for (final server in servers) {
@@ -121,9 +141,19 @@ class McpServerStore {
     await storage.delete(key: 'custom_mcp_token_${server.id}');
   }
 
-  Future<List<McpToolInfo>> discoverTools(McpServer server) async {
+  Future<List<McpToolInfo>> discoverTools(
+    McpServer server, {
+    String? oauthAccessToken,
+  }) async {
     validateMcpServer(server.name, server.endpoint);
-    final token = await storage.read(key: 'custom_mcp_token_${server.id}') ?? '';
+    final token = server.authMode == McpAuthMode.wajoOAuth
+        ? (oauthAccessToken ?? '')
+        : (await storage.read(key: 'custom_mcp_token_${server.id}') ?? '');
+    if (server.authMode == McpAuthMode.wajoOAuth && token.isEmpty) {
+      throw const McpException(
+        'Connect with OAuth before testing this server.',
+      );
+    }
     final client = clientFactory();
     var requestId = 0;
     String? sessionId;
@@ -170,9 +200,15 @@ class McpServerStore {
       final boundedBytes = await readResponse().timeout(const Duration(seconds: 15));
       final text = utf8.decode(boundedBytes, allowMalformed: false);
       final dynamic decoded = jsonDecode(text);
-      if (decoded is! Map<String, dynamic>) throw const McpException('MCP response was not a JSON-RPC object.');
-      if (decoded['error'] != null) throw const McpException('MCP server rejected the protocol request.');
-      if (decoded['id'] != body['id'] && !notification) throw const McpException('MCP response ID did not match the request.');
+      if (decoded is! Map<String, dynamic>) {
+        throw const McpException('MCP response was not a JSON-RPC object.');
+      }
+      if (decoded['error'] != null) {
+        throw const McpException('MCP server rejected the protocol request.');
+      }
+      if (decoded['id'] != body['id'] && !notification) {
+        throw const McpException('MCP response ID did not match the request.');
+      }
       final result = decoded['result'];
       return result is Map<String, dynamic> ? result : <String, dynamic>{};
     }
