@@ -55,7 +55,7 @@ class Provider(Protocol):
     async def stream(self, messages: list[dict]) -> AsyncIterator[str]: ...
 class Unconfigured:
     async def stream(self, messages):
-        raise RuntimeError("No AI provider configured. Configure a local Ollama model; offline tools remain available.")
+        raise RuntimeError("No AI provider configured. Choose an explicit provider; no fallback is used.")
         yield ""
 class Ollama:
     def __init__(self, model: str, url: str):
@@ -78,6 +78,78 @@ class Ollama:
                         if text: yield text
                         if obj.get("done") is True: completed=True
                 if not completed: raise RuntimeError("Local model stream ended before completion")
+
+class GroqProvider:
+    """Optional server-side Groq adapter; its key never enters the Android app."""
+    URL = "https://api.groq.com/openai/v1/chat/completions"
+
+    def __init__(self, api_key: str, model: str = "openai/gpt-oss-120b"):
+        api_key = api_key.strip() if isinstance(api_key, str) else ""
+        model = model.strip() if isinstance(model, str) else ""
+        if not api_key or len(api_key) > 512 or "\n" in api_key or "\r" in api_key:
+            raise ValueError("Set a valid GROQ_API_KEY for the explicitly selected Groq provider")
+        if not re.fullmatch(r"[A-Za-z0-9_./:-]{1,128}", model) or ".." in model.split("/"):
+            raise ValueError("Set a valid Groq model identifier")
+        self.api_key, self.model = api_key, model
+
+    async def stream(self, messages):
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,
+            "max_completion_tokens": 2048,
+        }
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(110, connect=10), follow_redirects=False
+        ) as client:
+            async with client.stream(
+                "POST", self.URL,
+                headers={"Authorization": "Bearer " + self.api_key, "Content-Type": "application/json"},
+                json=payload,
+            ) as response:
+                if response.status_code != 200:
+                    # Never echo the provider body: it can contain private prompts or account details.
+                    raise RuntimeError("Groq API request failed")
+                if not (response.headers.get("content-type", "").lower().startswith("text/event-stream")):
+                    raise RuntimeError("Groq API returned an unexpected stream format")
+                completed = False
+                async for line in response.aiter_lines():
+                    if not line or line.startswith(":") or not line.startswith("data:"):
+                        continue
+                    event_data = line[5:].strip()
+                    if event_data == "[DONE]":
+                        completed = True
+                        break
+                    try:
+                        event = json.loads(event_data)
+                    except (ValueError, RecursionError):
+                        raise RuntimeError("Groq API returned an invalid stream event") from None
+                    if not isinstance(event, dict) or event.get("error") is not None:
+                        raise RuntimeError("Groq API reported an error")
+                    choices = event.get("choices")
+                    if choices is None:
+                        continue  # Usage-only chunk.
+                    if not isinstance(choices, list):
+                        raise RuntimeError("Groq API returned an invalid choice")
+                    if not choices:
+                        continue
+                    choice = choices[0]
+                    if not isinstance(choice, dict):
+                        raise RuntimeError("Groq API returned an invalid choice")
+                    delta = choice.get("delta", {})
+                    if not isinstance(delta, dict):
+                        raise RuntimeError("Groq API returned an invalid delta")
+                    content = delta.get("content")
+                    if content is not None:
+                        if not isinstance(content, str):
+                            raise RuntimeError("Groq API returned non-text content")
+                        if content:
+                            yield content
+                    finish_reason = choice.get("finish_reason")
+                    if finish_reason is not None and finish_reason != "stop":
+                        raise RuntimeError("Groq API stopped before a complete text answer")
+                if not completed:
+                    raise RuntimeError("Groq API stream ended before completion")
 
 VOICE_TAGS = {
     "neutral": "",
@@ -156,8 +228,17 @@ def create_app(path=None, provider=None, token=None, voice_provider=None):
     if len(token)<24: raise ValueError("Set ASSISTANT_TOKEN to at least 24 random characters")
     store=Store(path or os.environ.get("ASSISTANT_DB","assistant.sqlite3"))
     if provider is None:
-        model=os.environ.get("OLLAMA_MODEL")
-        provider=Ollama(model,os.environ.get("OLLAMA_URL","http://127.0.0.1:11434")) if model else Unconfigured()
+        selected_provider = os.environ.get("ASSISTANT_PROVIDER", "ollama").strip().lower()
+        if selected_provider == "ollama":
+            model = os.environ.get("OLLAMA_MODEL")
+            provider = Ollama(model, os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")) if model else Unconfigured()
+        elif selected_provider == "groq":
+            provider = GroqProvider(
+                os.environ.get("GROQ_API_KEY", ""),
+                os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
+            )
+        else:
+            raise ValueError("ASSISTANT_PROVIDER must be 'ollama' or 'groq'; no fallback is used")
     if voice_provider is None:
         key=os.environ.get("ELEVENLABS_API_KEY", "")
         voice_id=os.environ.get("ELEVENLABS_VOICE_ID", "")
@@ -165,6 +246,8 @@ def create_app(path=None, provider=None, token=None, voice_provider=None):
             voice_provider=ElevenLabsVoice(key, voice_id, os.environ.get("ELEVENLABS_MODEL_ID", "eleven_v4"))
     app=FastAPI(title="Personal assistant private service",docs_url=None,redoc_url=None,openapi_url=None)
     app.state.store=store
+    app.state.provider=provider
+    app.state.provider_configured=not isinstance(provider, Unconfigured)
     app.state.voice_provider=voice_provider
     calls=defaultdict(deque)
     voice_calls=deque()
