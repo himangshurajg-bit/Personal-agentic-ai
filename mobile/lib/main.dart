@@ -1087,7 +1087,14 @@ class Home extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  Center(child: AssistantOrb(busy: state.busy)),
+                  Center(
+                    child: HolographicAssistantOrb(
+                      state: state.busy
+                          ? HolographicOrbState.thinking
+                          : HolographicOrbState.idle,
+                      size: 128,
+                    ),
+                  ),
                   const SizedBox(height: 14),
                   Text(
                     'A clearer day,\none thought at a time.',
@@ -1874,9 +1881,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
                 children: [
                   if (state.messages.isEmpty)
-                    const Glass(
-                      child: Text(
-                        'Start with a thought, a question, or a plan. No model is bundled with this private test.',
+                    Glass(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const HolographicAssistantOrb(size: 146),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Start with a thought, a question, or a plan.',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Your assistant is ready when you are.',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                          ),
+                        ],
                       ),
                     ),
                   for (final m in state.messages)
@@ -1972,6 +2000,36 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ],
               ),
             ),
+            if (listening || state.busy || speaking)
+              Padding(
+                padding: const EdgeInsets.only(top: 2, bottom: 2),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    HolographicAssistantOrb(
+                      state: listening
+                          ? HolographicOrbState.listening
+                          : state.busy
+                          ? HolographicOrbState.thinking
+                          : HolographicOrbState.speaking,
+                      size: 92,
+                      audioLevel: level,
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      listening
+                          ? 'Listening'
+                          : state.busy
+                          ? 'Thinking'
+                          : 'Speaking',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        letterSpacing: .35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             AnimatedSwitcher(
               duration: MediaQuery.disableAnimationsOf(context)
                   ? Duration.zero
@@ -2026,11 +2084,36 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    IconButton.filledTonal(
-                      tooltip: listening ? 'Stop microphone' : 'Use microphone',
-                      onPressed: listen,
-                      icon: Icon(
-                        listening ? Icons.mic_rounded : Icons.mic_none_rounded,
+                    ActivityHalo(
+                      active: listening,
+                      color: Theme.of(context).colorScheme.primary,
+                      child: IconButton.filledTonal(
+                        tooltip: listening
+                            ? 'Stop microphone'
+                            : 'Use microphone',
+                        onPressed: listen,
+                        icon: AnimatedSwitcher(
+                          duration: MediaQuery.disableAnimationsOf(context)
+                              ? Duration.zero
+                              : const Duration(milliseconds: 220),
+                          transitionBuilder: (child, animation) =>
+                              ScaleTransition(
+                                scale: animation,
+                                child: RotationTransition(
+                                  turns: Tween<double>(
+                                    begin: -.08,
+                                    end: 0,
+                                  ).animate(animation),
+                                  child: child,
+                                ),
+                              ),
+                          child: Icon(
+                            listening
+                                ? Icons.mic_rounded
+                                : Icons.mic_none_rounded,
+                            key: ValueKey(listening),
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 4),
@@ -2056,22 +2139,46 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       ),
                     ),
                     const SizedBox(width: 4),
-                    IconButton.filled(
-                      tooltip: state.busy || speaking
-                          ? 'Stop response'
-                          : 'Send message',
-                      onPressed: state.busy || speaking ? stopAll : send,
-                      style: IconButton.styleFrom(
-                        fixedSize: const Size(48, 48),
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor: Theme.of(context)
-                            .colorScheme
-                            .onPrimary,
-                      ),
-                      icon: Icon(
-                        state.busy || speaking
-                            ? Icons.stop_rounded
-                            : Icons.arrow_upward_rounded,
+                    ActivityHalo(
+                      active: state.busy || speaking,
+                      color: Theme.of(context).colorScheme.tertiary,
+                      strength: .9,
+                      child: IconButton.filled(
+                        tooltip: state.busy || speaking
+                            ? 'Stop response'
+                            : 'Send message',
+                        onPressed: state.busy || speaking ? stopAll : send,
+                        style: IconButton.styleFrom(
+                          fixedSize: const Size(48, 48),
+                          backgroundColor: Theme.of(context)
+                              .colorScheme
+                              .primary,
+                          foregroundColor: Theme.of(context)
+                              .colorScheme
+                              .onPrimary,
+                        ),
+                        icon: AnimatedSwitcher(
+                          duration: MediaQuery.disableAnimationsOf(context)
+                              ? Duration.zero
+                              : const Duration(milliseconds: 220),
+                          transitionBuilder: (child, animation) =>
+                              ScaleTransition(
+                                scale: animation,
+                                child: RotationTransition(
+                                  turns: Tween<double>(
+                                    begin: -.10,
+                                    end: 0,
+                                  ).animate(animation),
+                                  child: child,
+                                ),
+                              ),
+                          child: Icon(
+                            state.busy || speaking
+                                ? Icons.stop_rounded
+                                : Icons.arrow_upward_rounded,
+                            key: ValueKey(state.busy || speaking),
+                          ),
+                        ),
                       ),
                     ),
                   ],

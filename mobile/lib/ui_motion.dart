@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 /// Adds a short, directional 3D press to an existing control without taking
@@ -157,4 +159,484 @@ class GlassDepthPageTransitionsBuilder extends PageTransitionsBuilder {
       },
     );
   }
+}
+
+/// A restrained glow for controls that are actively listening or working.
+/// It stops while idle, off-screen or when the user requests reduced motion.
+class ActivityHalo extends StatefulWidget {
+  final Widget child;
+  final bool active;
+  final Color color;
+  final double strength;
+
+  const ActivityHalo({
+    super.key,
+    required this.child,
+    required this.active,
+    required this.color,
+    this.strength = 1,
+  });
+
+  @override
+  State<ActivityHalo> createState() => _ActivityHaloState();
+}
+
+class _ActivityHaloState extends State<ActivityHalo>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1250),
+  );
+
+  void _syncAnimation() {
+    if (!widget.active ||
+        MediaQuery.disableAnimationsOf(context) ||
+        !TickerMode.valuesOf(context).enabled) {
+      _controller.stop();
+      _controller.value = 0;
+    } else if (!_controller.isAnimating) {
+      _controller.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncAnimation();
+  }
+
+  @override
+  void didUpdateWidget(covariant ActivityHalo oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active != widget.active || oldWidget.color != widget.color) {
+      _syncAnimation();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _controller,
+    child: widget.child,
+    builder: (context, child) {
+      final reduced = MediaQuery.disableAnimationsOf(context);
+      final phase = widget.active ? (reduced ? .4 : _controller.value) : 0.0;
+      return Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(26),
+          boxShadow: widget.active
+              ? [
+                  BoxShadow(
+                    color: widget.color.withValues(
+                      alpha: (.10 + .12 * phase) * widget.strength,
+                    ),
+                    blurRadius: 12 + 16 * phase,
+                    spreadRadius: phase * 1.5,
+                  ),
+                ]
+              : null,
+        ),
+        child: child,
+      );
+    },
+  );
+}
+
+enum HolographicOrbState { idle, listening, thinking, speaking }
+
+/// A custom-painted particle-mesh assistant orb. It is decorative and never
+/// captures gestures; animation is paused for reduced motion and ticker-off.
+class HolographicAssistantOrb extends StatefulWidget {
+  final HolographicOrbState state;
+  final double size;
+  final double audioLevel;
+
+  const HolographicAssistantOrb({
+    super.key,
+    this.state = HolographicOrbState.idle,
+    this.size = 128,
+    this.audioLevel = 0,
+  });
+
+  @override
+  State<HolographicAssistantOrb> createState() => _HolographicOrbState();
+}
+
+class _HolographicOrbState extends State<HolographicAssistantOrb>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _rotation = AnimationController(
+    vsync: this,
+    duration: _durationFor(widget.state),
+  );
+
+  static Duration _durationFor(HolographicOrbState state) => switch (state) {
+    HolographicOrbState.idle => const Duration(seconds: 34),
+    HolographicOrbState.listening => const Duration(seconds: 5),
+    HolographicOrbState.thinking => const Duration(seconds: 7),
+    HolographicOrbState.speaking => const Duration(seconds: 4),
+  };
+
+  void _syncMotion() {
+    if (MediaQuery.disableAnimationsOf(context) ||
+        !TickerMode.valuesOf(context).enabled) {
+      _rotation.stop();
+      _rotation.value = 0.12;
+    } else if (!_rotation.isAnimating) {
+      _rotation.repeat();
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncMotion();
+  }
+
+  @override
+  void didUpdateWidget(covariant HolographicAssistantOrb oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state != widget.state) {
+      _rotation.duration = _durationFor(widget.state);
+      _syncMotion();
+    }
+  }
+
+  @override
+  void dispose() {
+    _rotation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = switch (widget.state) {
+      HolographicOrbState.idle => const [
+        Color(0xff75d9ff),
+        Color(0xffb18cff),
+        Color(0xffff8eae),
+        Color(0xffffb16f),
+      ],
+      HolographicOrbState.listening => const [
+        Color(0xff70f2ff),
+        Color(0xff7db4ff),
+        Color(0xffbd8eff),
+        Color(0xffff86bd),
+      ],
+      HolographicOrbState.thinking => const [
+        Color(0xff70dfff),
+        Color(0xffa890ff),
+        Color(0xffed8cff),
+        Color(0xffffaa76),
+      ],
+      HolographicOrbState.speaking => const [
+        Color(0xff8cf4ff),
+        Color(0xff9ca9ff),
+        Color(0xffff91ce),
+        Color(0xffffbc70),
+      ],
+    };
+    final label = switch (widget.state) {
+      HolographicOrbState.idle => 'Assistant is ready',
+      HolographicOrbState.listening => 'Assistant is listening',
+      HolographicOrbState.thinking => 'Assistant is thinking',
+      HolographicOrbState.speaking => 'Assistant is speaking',
+    };
+    return Semantics(
+      label: label,
+      liveRegion: widget.state != HolographicOrbState.idle,
+      child: ExcludeSemantics(
+        child: SizedBox.square(
+          dimension: widget.size,
+          child: RepaintBoundary(
+            child: AnimatedBuilder(
+              animation: _rotation,
+              builder: (context, _) => CustomPaint(
+                painter: _HolographicAssistantOrbPainter(
+                  phase: _rotation.value,
+                  state: widget.state,
+                  colors: colors,
+                  audioLevel: widget.audioLevel,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HolographicAssistantOrbPainter extends CustomPainter {
+  final double phase;
+  final HolographicOrbState state;
+  final List<Color> colors;
+  final double audioLevel;
+
+  const _HolographicAssistantOrbPainter({
+    required this.phase,
+    required this.state,
+    required this.colors,
+    required this.audioLevel,
+  });
+
+  double get _activity => switch (state) {
+    HolographicOrbState.idle => .08,
+    HolographicOrbState.listening => .65 + .35 * (audioLevel / 20).clamp(0, 1),
+    HolographicOrbState.thinking => .8,
+    HolographicOrbState.speaking => .75,
+  };
+
+  Color _spectrum(double latitude, double alpha) {
+    final position = ((latitude / math.pi) + .5).clamp(0.0, 1.0);
+    final scaled = position * (colors.length - 1);
+    final index = scaled.floor().clamp(0, colors.length - 2);
+    return Color.lerp(
+      colors[index],
+      colors[index + 1],
+      scaled - index,
+    )!.withValues(alpha: alpha);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final shortest = size.shortestSide;
+    if (shortest <= 1) return;
+    final center = size.center(Offset.zero);
+    final radius = shortest * .345;
+    final activity = _activity;
+    final angle = phase * math.pi * 2;
+    final pulse =
+        .5 +
+        .5 * math.sin(angle * (state == HolographicOrbState.speaking ? 3 : 1));
+    final breathing = 1 + .018 * activity * pulse;
+    final orbRadius = radius * breathing;
+
+    // A broad, softly colored bloom sits behind the dark glass sphere.
+    final auraRect = Rect.fromCircle(center: center, radius: radius * 1.65);
+    canvas.drawCircle(
+      center,
+      radius * 1.5,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            colors[0].withValues(alpha: .20 + .10 * activity * pulse),
+            colors[1].withValues(alpha: .13),
+            colors[2].withValues(alpha: .06),
+            Colors.transparent,
+          ],
+          stops: const [0, .40, .70, 1],
+        ).createShader(auraRect),
+    );
+
+    // Sphere body with a cool luminous crown and a warm reflected lower edge.
+    final sphereRect = Rect.fromCircle(center: center, radius: orbRadius);
+    canvas.drawCircle(
+      center,
+      orbRadius,
+      Paint()
+        ..shader = RadialGradient(
+          center: const Alignment(-.30, -.38),
+          radius: 1.12,
+          colors: const [
+            Color(0xff25365a),
+            Color(0xff11152d),
+            Color(0xff080a17),
+            Color(0xff04050b),
+          ],
+          stops: const [0, .36, .78, 1],
+        ).createShader(sphereRect),
+    );
+
+    final clip = Path()..addOval(sphereRect);
+    canvas.save();
+    canvas.clipPath(clip);
+    // The latitude/longitude point field gives a holographic particle shell.
+    const latitudeCount = 11;
+    const longitudeCount = 25;
+    final points = List.generate(
+      latitudeCount,
+      (row) => List<({Offset point, double depth, double latitude})>.generate(
+        longitudeCount,
+        (column) {
+          final latitude = -math.pi / 2 + math.pi * (row + .5) / latitudeCount;
+          final longitude = math.pi * 2 * column / longitudeCount + angle;
+          final ripple =
+              math.sin(longitude * 3 + angle * 1.5) *
+              math.cos(latitude * 4 - angle) *
+              .035 *
+              activity;
+          final lat = latitude + ripple;
+          final x = math.cos(lat) * math.sin(longitude);
+          final y = math.sin(lat);
+          final z = math.cos(lat) * math.cos(longitude);
+          final tiltY = y * math.cos(.18) - z * math.sin(.18);
+          final depth = y * math.sin(.18) + z * math.cos(.18);
+          return (
+            point: Offset(
+              center.dx + x * orbRadius,
+              center.dy + tiltY * orbRadius,
+            ),
+            depth: depth,
+            latitude: latitude,
+          );
+        },
+      ),
+    );
+
+    final meshPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(.45, shortest * .0045);
+    for (var row = 0; row < latitudeCount; row++) {
+      for (var column = 0; column < longitudeCount; column++) {
+        final current = points[row][column];
+        final next = points[row][(column + 1) % longitudeCount];
+        final frontness = ((current.depth + next.depth) / 2 + .22).clamp(
+          0.0,
+          1.0,
+        );
+        if (frontness > .08) {
+          meshPaint.color = _spectrum(
+            (current.latitude + next.latitude) / 2,
+            (.08 + .32 * frontness) * (.58 + .42 * activity),
+          );
+          canvas.drawLine(current.point, next.point, meshPaint);
+        }
+        if (row + 1 < latitudeCount) {
+          final below = points[row + 1][column];
+          final verticalFrontness = ((current.depth + below.depth) / 2 + .22)
+              .clamp(0.0, 1.0);
+          if (verticalFrontness > .08) {
+            meshPaint.color = _spectrum(
+              (current.latitude + below.latitude) / 2,
+              (.055 + .27 * verticalFrontness) * (.58 + .42 * activity),
+            );
+            canvas.drawLine(current.point, below.point, meshPaint);
+          }
+        }
+      }
+    }
+
+    final dotPaint = Paint()..style = PaintingStyle.fill;
+    for (final row in points) {
+      for (var column = 0; column < row.length; column++) {
+        final particle = row[column];
+        final visibility = ((particle.depth + .35) / 1.35).clamp(0.0, 1.0);
+        if (visibility <= .03) continue;
+        final radiusJitter =
+            .68 +
+            .32 * (.5 + .5 * math.sin(column * 7 + particle.latitude * 19));
+        final dotRadius = shortest * (.0031 + .0022 * activity) * radiusJitter;
+        dotPaint.color = _spectrum(
+          particle.latitude,
+          (.30 + .62 * visibility) * (.72 + .28 * pulse * activity),
+        );
+        canvas.drawCircle(particle.point, dotRadius, dotPaint);
+        if (visibility > .84 && dotRadius > 0.5) {
+          dotPaint.color = Colors.white.withValues(alpha: .24 * visibility);
+          canvas.drawCircle(
+            particle.point.translate(-dotRadius * .25, -dotRadius * .25),
+            dotRadius * .28,
+            dotPaint,
+          );
+        }
+      }
+    }
+
+    // Holographic vertical glints and a low warm reflection add depth.
+    final glintRect = Rect.fromCircle(
+      center: center.translate(-orbRadius * .18, -orbRadius * .18),
+      radius: orbRadius * .92,
+    );
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: center.translate(-orbRadius * .34, 0),
+        width: orbRadius * .16,
+        height: orbRadius * 1.46,
+      ),
+      Paint()
+        ..shader = LinearGradient(
+          colors: [
+            Colors.transparent,
+            colors[0].withValues(alpha: .15 + .18 * activity),
+            Colors.white.withValues(alpha: .10),
+            Colors.transparent,
+          ],
+        ).createShader(glintRect)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
+    );
+    canvas.restore();
+
+    // Bright partial rim: cool on top, violet through the middle, warm below.
+    final rimRect = Rect.fromCircle(center: center, radius: orbRadius * .985);
+    canvas.drawArc(
+      rimRect,
+      math.pi * 1.08,
+      math.pi * .84,
+      false,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = shortest * .012
+        ..strokeCap = StrokeCap.round
+        ..color = colors[0].withValues(alpha: .55 + .25 * activity)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7),
+    );
+    canvas.drawArc(
+      rimRect,
+      math.pi * .02,
+      math.pi * .91,
+      false,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = shortest * .009
+        ..strokeCap = StrokeCap.round
+        ..shader = SweepGradient(
+          colors: [colors[1], colors[2], colors[3], colors[1]],
+        ).createShader(rimRect)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+    );
+
+    // A light orbit and moving spark reinforce the 3D hologram silhouette.
+    final orbitRect = Rect.fromCenter(
+      center: center,
+      width: radius * 2.52,
+      height: radius * .82,
+    );
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(-.30 + .16 * math.sin(angle));
+    canvas.translate(-center.dx, -center.dy);
+    canvas.drawOval(
+      orbitRect,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = shortest * .0028
+        ..color = colors[0].withValues(alpha: .16 + .12 * activity),
+    );
+    final sparkAngle = angle * (state == HolographicOrbState.idle ? .5 : 1.1);
+    final spark = Offset(
+      center.dx + math.cos(sparkAngle) * orbitRect.width / 2,
+      center.dy + math.sin(sparkAngle) * orbitRect.height / 2,
+    );
+    canvas.drawCircle(
+      spark,
+      shortest * .012,
+      Paint()
+        ..color = colors[0].withValues(alpha: .88)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+    );
+    canvas.drawCircle(spark, shortest * .0045, Paint()..color = Colors.white);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _HolographicAssistantOrbPainter oldDelegate) =>
+      phase != oldDelegate.phase ||
+      state != oldDelegate.state ||
+      audioLevel != oldDelegate.audioLevel ||
+      colors != oldDelegate.colors;
 }
