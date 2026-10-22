@@ -290,6 +290,7 @@ void main() {
         'role': 'assistant',
         'text': 'A local answer.',
         'state': 'complete',
+        'engine': 'offline',
       });
       expect(s.error, isEmpty);
 

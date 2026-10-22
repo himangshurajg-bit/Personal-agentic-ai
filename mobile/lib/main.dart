@@ -11,6 +11,7 @@ import 'assistant_state.dart';
 import 'mcp_servers.dart';
 import 'wajo_oauth.dart';
 import 'offline_model.dart';
+import 'offline_voice.dart';
 import 'phone_screens.dart';
 import 'safe_workflows.dart';
 import 'ui_motion.dart';
@@ -2268,7 +2269,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Timer? _deepgramLimit;
   int _deepgramBytes = 0;
   bool _deepgramLimitHit = false;
-  bool listening = false, speaking = false;
+  bool listening = false, speaking = false, comparing = false;
   bool _draftApplied = false;
   bool _initialVoiceStarted = false;
   double level = 0;
@@ -2627,6 +2628,52 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> playOfflineVoice(Map<String, dynamic> message) async {
+    if (speaking) {
+      await stopAll();
+      return;
+    }
+    if (widget.state.engine != 'offline' ||
+        !isEligibleForOfflineGemmaSpeech(
+          message,
+          optedIn: widget.state.experimentalOfflineChatEnabled,
+        )) {
+      notice(
+        context,
+        'Offline playback is available only for opted-in Offline · Gemma chat.',
+      );
+      return;
+    }
+    try {
+      if (await tts.isLanguageAvailable(widget.state.language) != true) {
+        throw StateError('Selected speech language is unavailable');
+      }
+      final voices = await tts.getVoices as List;
+      final voice = selectInstalledOfflineVoice(voices, widget.state.language);
+      if (voice == null) {
+        throw StateError(
+          'No installed offline voice for the selected language',
+        );
+      }
+      await tts.setLanguage(widget.state.language);
+      await tts.setVoice({
+        'name': voice['name'].toString(),
+        'locale': voice['locale'].toString(),
+      });
+      await tts.awaitSpeakCompletion(true);
+      await tts.speak(message['text'] as String);
+    } catch (_) {
+      if (mounted) {
+        notice(
+          context,
+          'No installed offline voice for this language, or local playback is unavailable. No network voice was used.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => speaking = false);
+    }
+  }
+
   Future<void> playExpressiveVoice(String text) async {
     if (speaking) {
       await stopAll();
@@ -2721,6 +2768,139 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> compareAis() async {
+    final prompt = input.text;
+    if (prompt.trim().isEmpty) {
+      notice(context, 'Write the exact prompt you want to compare first.');
+      return;
+    }
+    final configured = widget.state.providerProfiles
+        .where((p) => p.isConfigured)
+        .toList(growable: false);
+    if (configured.length < 2) {
+      notice(
+        context,
+        'Configure at least two provider profiles in Settings > AI & Voice first.',
+      );
+      return;
+    }
+    final selectedIds = await showDialog<List<String>>(
+      context: context,
+      builder: (dialogContext) {
+        final selected = <String>{};
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AlertDialog(
+            title: const Text('Review AI comparison'),
+            scrollable: true,
+            content: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Choose two or more configured providers. This is separate from normal chat, including when Offline · Gemma is selected.',
+                ),
+                const SizedBox(height: 10),
+                for (final profile in widget.state.providerProfiles)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: selected.contains(profile.id),
+                    onChanged: profile.isConfigured
+                        ? (value) => setDialogState(() {
+                            if (value == true) {
+                              selected.add(profile.id);
+                            } else {
+                              selected.remove(profile.id);
+                            }
+                          })
+                        : null,
+                    title: Text(profile.name),
+                    subtitle: Text(
+                      profile.isConfigured
+                          ? '${profile.model} · ${Uri.tryParse(profile.origin)?.host ?? 'endpoint'}'
+                          : 'Not configured',
+                    ),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                const SizedBox(height: 12),
+                const Text('Exact prompt sent to each selected provider:'),
+                const SizedBox(height: 6),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(dialogContext)
+                        .colorScheme
+                        .surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: SelectableText(prompt),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Each selected provider receives this text directly. Their API may retain it and may charge your account. No request is sent until you tap “Send to selected AIs”. No retries or hidden fan-out.',
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: selected.length >= 2
+                    ? () => Navigator.pop(dialogContext, selected.toList())
+                    : null,
+                child: const Text('Send to selected AIs'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (selectedIds == null || !mounted) return;
+    setState(() => comparing = true);
+    try {
+      final results = await widget.state.compareProviders(
+        providerIds: selectedIds,
+        prompt: prompt,
+        approvedThisRun: true,
+      );
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Comparison results'),
+          scrollable: true,
+          content: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final result in results) ...[
+                Text(
+                  result.providerName,
+                  style: Theme.of(dialogContext).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 4),
+                SelectableText(result.answer ?? result.error ?? 'No result.'),
+                const Divider(height: 24),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) notice(context, error);
+    } finally {
+      if (mounted) setState(() => comparing = false);
+    }
+  }
+
   Future<void> send([String? retry]) async {
     final text = retry ?? input.text;
     if (text.trim().isEmpty) {
@@ -2753,15 +2933,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             throw StateError('Selected speech language is unavailable');
           }
           final voices = await tts.getVoices as List;
-          final localVoice = voices
-              .cast<Map>()
-              .where(
-                (v) =>
-                    v['locale'].toString().replaceAll('_', '-').toLowerCase() ==
-                        widget.state.language.toLowerCase() &&
-                    v['network_required'].toString() == '0',
-              )
-              .firstOrNull;
+          final localVoice = selectInstalledOfflineVoice(
+            voices,
+            widget.state.language,
+          );
           if (localVoice == null) {
             throw StateError(
               'No verified offline voice installed for this language',
@@ -2816,7 +2991,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         assistantName: state.assistantName,
         actions: [
           IconButton(
-            tooltip: 'Read replies aloud',
+            tooltip: 'Read replies with an installed on-device voice',
             onPressed: () async {
               try {
                 await state.saveSpeakReplies(!state.speakReplies);
@@ -3006,7 +3181,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                   ),
                                 ),
                                 if (m['state'] == 'complete' &&
-                                    m['role'] == 'assistant')
+                                    m['role'] == 'assistant' &&
+                                    state.engine == 'offline' &&
+                                    isEligibleForOfflineGemmaSpeech(
+                                      m,
+                                      optedIn:
+                                          state.experimentalOfflineChatEnabled,
+                                    ))
+                                  TextButton.icon(
+                                    onPressed: () => playOfflineVoice(m),
+                                    icon: Icon(
+                                      speaking
+                                          ? Icons.stop_circle_outlined
+                                          : Icons.record_voice_over,
+                                    ),
+                                    label: Text(
+                                      speaking
+                                          ? 'Stop voice'
+                                          : 'Play installed offline voice',
+                                    ),
+                                  )
+                                else if (m['state'] == 'complete' &&
+                                    m['role'] == 'assistant' &&
+                                    state.engine != 'offline')
                                   TextButton.icon(
                                     onPressed: () => playExpressiveVoice(
                                       m['text'] as String,
@@ -3019,7 +3216,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                     label: Text(
                                       speaking
                                           ? 'Stop voice'
-                                          : 'Play expressive voice',
+                                          : 'Generate online ElevenLabs voice',
                                     ),
                                   ),
                                 if (m['state'] != 'complete')
@@ -3247,6 +3444,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     ),
                   ],
                 ),
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: comparing || state.busy || speaking
+                    ? null
+                    : compareAis,
+                icon: comparing
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.compare_arrows_rounded),
+                label: Text(comparing ? 'Comparing…' : 'Compare AIs'),
               ),
             ),
           ],
@@ -3679,6 +3892,137 @@ class _AndroidAccessPanelState extends State<AndroidAccessPanel> {
   }
 }
 
+class ProviderProfilesEditor extends StatefulWidget {
+  final AssistantState state;
+  const ProviderProfilesEditor({super.key, required this.state});
+
+  @override
+  State<ProviderProfilesEditor> createState() => _ProviderProfilesEditorState();
+}
+
+class _ProviderProfilesEditorState extends State<ProviderProfilesEditor> {
+  late final Map<String, TextEditingController> _origins = {
+    for (final p in widget.state.providerProfiles)
+      p.id: TextEditingController(text: p.origin),
+  };
+  late final Map<String, TextEditingController> _models = {
+    for (final p in widget.state.providerProfiles)
+      p.id: TextEditingController(text: p.model),
+  };
+  late final Map<String, TextEditingController> _keys = {
+    for (final p in widget.state.providerProfiles)
+      p.id: TextEditingController(),
+  };
+  final Set<String> _clearKeys = {};
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    for (final c in [..._origins.values, ..._models.values, ..._keys.values]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      final profiles = [
+        for (final p in widget.state.providerProfiles)
+          p.copyWith(
+            origin: _origins[p.id]!.text.trim(),
+            model: _models[p.id]!.text.trim(),
+            apiKey: _clearKeys.contains(p.id)
+                ? ''
+                : _keys[p.id]!.text.isEmpty
+                ? p.apiKey
+                : _keys[p.id]!.text.trim(),
+          ),
+      ];
+      await widget.state.saveProviderProfiles(profiles);
+      if (mounted) Navigator.pop(context);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _saving = false);
+        notice(context, error);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Provider profiles'),
+    scrollable: true,
+    content: SizedBox(
+      width: 520,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'These profiles are used only when you explicitly start Compare AIs and approve that run. OpenAI API access is separate from a ChatGPT subscription. ElevenLabs is separate online speech, not a chat provider.',
+          ),
+          const SizedBox(height: 12),
+          for (final p in widget.state.providerProfiles) ...[
+            Text(p.name, style: Theme.of(context).textTheme.titleSmall),
+            TextField(
+              controller: _origins[p.id],
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              decoration: const InputDecoration(labelText: 'HTTPS API base'),
+            ),
+            TextField(
+              controller: _models[p.id],
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: const InputDecoration(labelText: 'Model ID'),
+            ),
+            Text(
+              'API key: ${p.apiKey.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
+            ),
+            TextField(
+              controller: _keys[p.id],
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              autofillHints: const [],
+              decoration: const InputDecoration(
+                labelText: 'New API key (leave blank to keep saved key)',
+              ),
+            ),
+            if (p.apiKey.isNotEmpty)
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _clearKeys.contains(p.id),
+                onChanged: (clear) => setState(() {
+                  if (clear == true) {
+                    _clearKeys.add(p.id);
+                    _keys[p.id]!.clear();
+                  } else {
+                    _clearKeys.remove(p.id);
+                  }
+                }),
+                title: const Text('Clear saved key from this phone'),
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+            const Divider(height: 24),
+          ],
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: _saving ? null : () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: _saving ? null : _save,
+        child: Text(_saving ? 'Saving…' : 'Save profiles'),
+      ),
+    ],
+  );
+}
+
 class Settings extends StatefulWidget {
   final AssistantState state;
   const Settings({super.key, required this.state});
@@ -3901,10 +4245,6 @@ class _SettingsState extends State<Settings> {
                   labelText: 'Speech recognition — independent of AI',
                 ),
                 items: const [
-                  DropdownMenuItem(
-                    value: 'openai',
-                    child: Text('Online · OpenAI ChatGPT'),
-                  ),
                   DropdownMenuItem(
                     value: 'offline',
                     child: Text('Offline · installed on-device service'),
@@ -4399,6 +4739,10 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
                     child: Text('Online · Gemini 2.5 Flash (default)'),
                   ),
                   DropdownMenuItem(
+                    value: 'openai',
+                    child: Text('Online · OpenAI ChatGPT'),
+                  ),
+                  DropdownMenuItem(
                     value: 'offline',
                     child: Text('Offline · Gemma (experimental)'),
                   ),
@@ -4659,6 +5003,23 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
           'Online requests require your review before sending. This screen never runs tools automatically.',
         ),
         const SizedBox(height: 16),
+        const SizedBox(height: 12),
+        Glass(
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.compare_arrows_rounded),
+            title: const Text('Configure multi-provider comparison'),
+            subtitle: const Text(
+              'Set up Gemini, OpenAI, Groq, and OpenRouter profiles. Each comparison sends your exact prompt only to the providers you select and review.',
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => showDialog<void>(
+              context: context,
+              builder: (_) => ProviderProfilesEditor(state: widget.state),
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
         const _SettingsSectionLabel('MCP SERVERS'),
         CustomMcpPanel(state: widget.state),
       ],
