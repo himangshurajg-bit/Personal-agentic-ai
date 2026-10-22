@@ -2388,6 +2388,154 @@ class _PaletteOrbPreview extends StatelessWidget {
   );
 }
 
+class AndroidAccessPanel extends StatefulWidget {
+  const AndroidAccessPanel({super.key});
+
+  @override
+  State<AndroidAccessPanel> createState() => _AndroidAccessPanelState();
+}
+
+class _AndroidAccessPanelState extends State<AndroidAccessPanel> {
+  Map<String, dynamic>? _status;
+  String? _loadingPermission;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    try {
+      final status = await AssistantState.device
+          .invokeMapMethod<String, dynamic>('device_status');
+      if (!mounted) return;
+      setState(() {
+        _status = status;
+        _error = status == null
+            ? 'Android access status is unavailable.'
+            : null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _status = null;
+        _error = 'Android access status is unavailable on this build.';
+      });
+    }
+  }
+
+  Future<void> _request(String permission) async {
+    if (_loadingPermission != null) return;
+    setState(() => _loadingPermission = permission);
+    try {
+      final result = await AssistantState.device
+          .invokeMapMethod<String, dynamic>('request_access_permission', {
+            'permission': permission,
+          });
+      await _refresh();
+      if (!mounted) return;
+      final granted = result?['granted'] == true;
+      notice(
+        context,
+        granted
+            ? '${permission == 'microphone' ? 'Microphone' : 'Notifications'} access is available.'
+            : '${permission == 'microphone' ? 'Microphone' : 'Notifications'} access was not granted. You can keep using other features.',
+      );
+    } catch (error) {
+      if (mounted) notice(context, error);
+    } finally {
+      if (mounted) setState(() => _loadingPermission = null);
+    }
+  }
+
+  Widget _permissionRow({
+    required String title,
+    required String subtitle,
+    required String permission,
+    required bool granted,
+  }) {
+    final requesting = _loadingPermission == permission;
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(
+        granted ? Icons.check_circle_outline : Icons.radio_button_unchecked,
+        color: granted ? Theme.of(context).colorScheme.primary : null,
+      ),
+      title: Text(title),
+      subtitle: Text(subtitle),
+      trailing: granted
+          ? const Text('Available')
+          : TextButton(
+              key: ValueKey('request-$permission'),
+              onPressed: _loadingPermission == null
+                  ? () => _request(permission)
+                  : null,
+              child: requesting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Request'),
+            ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sdk = _status?['sdk'];
+    final microphoneGranted = _status?['microphone_granted'] == true;
+    final notificationsGranted = _status?['notifications_granted'] == true;
+    return Glass(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Android access', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 6),
+          const Text(
+            'Optional access is requested only when you tap Request. Typed chat needs neither permission. There is no always-listening microphone or blanket automation access.',
+          ),
+          const SizedBox(height: 8),
+          _permissionRow(
+            title: 'Microphone',
+            subtitle: 'Only for voice input started by you.',
+            permission: 'microphone',
+            granted: microphoneGranted,
+          ),
+          _permissionRow(
+            title: 'Notifications',
+            subtitle: sdk is int && sdk < 33
+                ? 'Not required on Android API $sdk.'
+                : 'Used for reminders you prepare and approve.',
+            permission: 'notifications',
+            granted: notificationsGranted,
+          ),
+          const Text(
+            'App launches and reminders stay individually approved. Accessibility, screen capture, and background automation are not enabled.',
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: _loadingPermission == null ? _refresh : null,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Refresh access status'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class Settings extends StatefulWidget {
   final AssistantState state;
   const Settings({super.key, required this.state});
@@ -2502,6 +2650,7 @@ class _SettingsState extends State<Settings> {
             ),
           ),
         ),
+        const AndroidAccessPanel(),
         Padding(
           padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
           child: Text('VOICE & AI', style: Theme.of(context).textTheme.labelLarge?.copyWith(letterSpacing: 1.1, color: Theme.of(context).colorScheme.primary)),
