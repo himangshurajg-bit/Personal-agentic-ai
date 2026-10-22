@@ -59,7 +59,7 @@ void main() {
       expect(tester.takeException(), isNull, reason: 'Entering Actions');
 
       for (final entry in [
-        ('Skills & actions', 'Sub-agent execution isn’t available yet'),
+        ('Skills & actions', 'What the team can and can’t do'),
         ('Message & social drafts', 'Write it here, send it yourself'),
       ]) {
         await tester.tap(find.byTooltip('Open navigation menu'));

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'assistant_state.dart';
+import 'multi_agent_workflow.dart';
 import 'main.dart' show Glass, Home, Shell, notice;
 
 /// User-edited text handed to Android's chooser only after an explicit tap.
@@ -34,9 +35,13 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
         'text': body,
       });
     } on PlatformException catch (error) {
-      if (mounted) notice(context, error.message ?? 'Android could not open the share sheet.');
+      if (mounted) {
+        notice(context, error.message ?? 'Android could not open the share sheet.');
+      }
     } on MissingPluginException {
-      if (mounted) notice(context, 'Text sharing is available in the Android app only.');
+      if (mounted) {
+        notice(context, 'Text sharing is available in the Android app only.');
+      }
     } finally {
       if (mounted) setState(() => _opening = false);
     }
@@ -155,6 +160,20 @@ class SafeSkillsScreen extends StatelessWidget {
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Home(state: state).reminder(context),
               ),
+              const Divider(),
+              ListTile(
+                key: const ValueKey('multi-agent-workflow-entry'),
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.hub_outlined),
+                title: const Text('Try a multi-agent workflow'),
+                subtitle: const Text('A reviewed, four-pass team using your selected online model.'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => MultiAgentWorkflowScreen(state: state),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -163,9 +182,9 @@ class SafeSkillsScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Sub-agent execution isn’t available yet', style: TextStyle(fontWeight: FontWeight.w700)),
+              Text('What the team can and can’t do', style: TextStyle(fontWeight: FontWeight.w700)),
               SizedBox(height: 6),
-              Text('This app can discover MCP tool names, but it does not invoke them or delegate chat work. There is no background workflow runner, and no AccessibilityService, screen capture, shell command or blanket device-control permission is enabled.'),
+              Text('The workflow runs four sequential roles—planner, specialist, reviewer and synthesizer—through the same configured online model. It is not a parallel swarm or independent models. It has no tools, memory, chat history, files or permission to execute actions; you review the result yourself. MCP tool discovery remains display-only.'),
             ],
           ),
         ),
@@ -178,4 +197,251 @@ class SafeSkillsScreen extends StatelessWidget {
       ],
     ),
   );
+}
+
+/// A user-started, approval-gated sequence of role-specific model passes.
+class MultiAgentWorkflowScreen extends StatefulWidget {
+  final AssistantState state;
+  const MultiAgentWorkflowScreen({super.key, required this.state});
+
+  @override
+  State<MultiAgentWorkflowScreen> createState() =>
+      _MultiAgentWorkflowScreenState();
+}
+
+class _MultiAgentWorkflowScreenState extends State<MultiAgentWorkflowScreen> {
+  final _task = TextEditingController();
+  late final MultiAgentWorkflowRunner _runner = MultiAgentWorkflowRunner(
+    widget.state.clientFactory,
+  );
+  List<AgentPassResult> _passes = const [];
+  bool _running = false;
+  String _progress = '';
+  String _error = '';
+
+  @override
+  void dispose() {
+    if (_running) _runner.cancel();
+    _task.dispose();
+    super.dispose();
+  }
+
+  Future<void> _reviewAndRun() async {
+    final goal = _task.text.trim();
+    final config = widget.state.config;
+    try {
+      _runner.validate(config, goal);
+    } catch (error) {
+      setState(() => _error = error.toString());
+      return;
+    }
+    final providerHost = Uri.parse(config.origin).host;
+    final approved =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Review the four-pass run'),
+            scrollable: true,
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Same online model: ${config.model}'),
+                Text('Provider: $providerHost'),
+                const SizedBox(height: 12),
+                const Text(
+                  'Passes run in order: planner → specialist → reviewer → synthesizer.',
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'The first request contains your task and fixed role instructions. Each later request also includes the earlier model outputs. This can use API credits, and the provider may retain submitted text. Chat history, saved memory and files are not added. Don’t put passwords, API keys or verification codes in the task; the configured API key is sent only as the provider’s authentication header. No tools or external actions are included.',
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'All four passes use the same model; this is not parallel or independent agents. Nothing the model suggests is executed automatically.',
+                ),
+                const SizedBox(height: 12),
+                const Text('Exact task to send:'),
+                const SizedBox(height: 6),
+                SelectableText(goal),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Run four passes'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!approved || !mounted) return;
+
+    setState(() {
+      _running = true;
+      _passes = const [];
+      _error = '';
+      _progress = 'Starting…';
+    });
+    try {
+      final result = await _runner.run(
+        config: config,
+        goal: goal,
+        approvedThisRun: true,
+        onPassStarted: (role, index) {
+          if (mounted) setState(() => _progress = 'Pass $index of 4 · $role');
+        },
+      );
+      if (mounted) setState(() => _passes = result.passes);
+    } on MultiAgentWorkflowException catch (error) {
+      if (mounted) {
+        setState(() {
+          _passes = error.completedPasses;
+          _error = error.message;
+        });
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) {
+        setState(() {
+          _running = false;
+          _progress = '';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final config = widget.state.config;
+    final ready =
+        config.mode == 'compatible' &&
+        config.token.isNotEmpty &&
+        config.model.trim().isNotEmpty;
+    return Shell(
+      title: 'Multi-agent workflow',
+      assistantName: widget.state.assistantName,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 118),
+        children: [
+          Text(
+            'A small team, one model',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Planner, specialist, reviewer and synthesizer run one after another using the same configured OpenAI-compatible model. Each pass sees your task and prior pass outputs. This is a bounded multi-role workflow, not separate models or a parallel swarm.',
+          ),
+          const SizedBox(height: 14),
+          const Glass(
+            child: Text(
+              'No tools or actions are available to the model. It does not get your chat history, saved memories or files. The app does not save the result or take actions; the reviewed task and earlier outputs are sent to the configured provider. Review any suggestions yourself.',
+            ),
+          ),
+          const SizedBox(height: 14),
+          Glass(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  key: const ValueKey('multi-agent-task'),
+                  controller: _task,
+                  minLines: 4,
+                  maxLines: 9,
+                  maxLength: MultiAgentWorkflowRunner.maxGoalCharacters,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    labelText: 'Task for the team',
+                    hintText: 'Describe one task for the four passes…',
+                    alignLabelWithHint: true,
+                    border: OutlineInputBorder(),
+                  ),
+                  readOnly: _running,
+                  onChanged: (_) => setState(() {
+                    _error = '';
+                    _passes = const [];
+                  }),
+                ),
+                const SizedBox(height: 8),
+                if (!ready)
+                  const Text(
+                    'Select and configure an OpenAI-compatible online model in Settings. Offline Gemma and the private FastAPI service are not supported by this first version.',
+                  ),
+                if (_error.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _error,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+                if (_running) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text(_progress)),
+                      TextButton(
+                        onPressed: _runner.cancel,
+                        child: const Text('Stop'),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      key: const ValueKey('review-multi-agent-run'),
+                      onPressed: ready && _task.text.trim().isNotEmpty
+                          ? _reviewAndRun
+                          : null,
+                      icon: const Icon(Icons.hub_outlined),
+                      label: const Text('Review & run four passes'),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (_passes.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text('Team notes', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            for (final pass in _passes)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Glass(
+                  child: ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    initiallyExpanded: pass.role == 'Synthesizer',
+                    title: Text(pass.role),
+                    subtitle: Text(
+                      '${pass.text.length} characters · model output, not verified',
+                    ),
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: SelectableText(pass.text),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
 }
