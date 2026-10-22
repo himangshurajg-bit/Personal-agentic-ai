@@ -225,6 +225,17 @@ internal class Gemma4OfflineCoordinator(
             if (!Gemma4TransferPolicy.hasEnoughSpace(free, existingBytes, Gemma4Artifact.MODEL_BYTES)) {
                 throw IllegalStateException("Not enough free app storage for the remaining model and a 512 MB safety reserve. Free space, then try again.")
             }
+            if (existingBytes == Gemma4Artifact.MODEL_BYTES) {
+                if (downloadCancelled.get()) throw DownloadPaused()
+                if (!Gemma4FileIntegrity.verify(part, Gemma4Artifact.MODEL_BYTES, Gemma4Artifact.SHA256)) {
+                    part.delete()
+                    throw IllegalStateException("The saved file failed SHA-256 verification and was discarded. Start a fresh download.")
+                }
+                if (downloadCancelled.get()) throw DownloadPaused()
+                Gemma4FileIntegrity.installAtomically(part, modelFile, Gemma4Artifact.MODEL_BYTES, Gemma4Artifact.SHA256)
+                emit("download_state", "state" to "complete", "bytes" to Gemma4Artifact.MODEL_BYTES, "total" to Gemma4Artifact.MODEL_BYTES, "message" to "Verified model saved in app-private storage. It is not enabled for chat.")
+                return
+            }
             if (downloadCancelled.get()) throw DownloadPaused()
             val resumeAt = Gemma4TransferPolicy.resumeOffset(existingBytes, Gemma4Artifact.MODEL_BYTES) ?: 0L
             emit("download_state", "state" to "downloading", "bytes" to resumeAt, "total" to Gemma4Artifact.MODEL_BYTES)
@@ -286,6 +297,7 @@ internal class Gemma4OfflineCoordinator(
                 partialFile.delete()
                 throw IllegalStateException("SHA-256 verification failed. The downloaded file was discarded; start a fresh download.")
             }
+            if (downloadCancelled.get()) throw DownloadPaused()
             Gemma4FileIntegrity.installAtomically(partialFile, modelFile, Gemma4Artifact.MODEL_BYTES, Gemma4Artifact.SHA256)
             emit("download_state", "state" to "complete", "bytes" to Gemma4Artifact.MODEL_BYTES, "total" to Gemma4Artifact.MODEL_BYTES, "message" to "Verified model saved in app-private storage. It is not enabled for chat.")
         } catch (_: DownloadPaused) {

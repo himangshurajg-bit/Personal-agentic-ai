@@ -3,6 +3,19 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+const int gemma4ModelSizeBytes = 3659530240;
+const int gemma4StorageReserveBytes = 536870912;
+
+bool gemma4DownloadHasSpace({
+  required int availableBytes,
+  required int partialBytes,
+}) {
+  var savedBytes = partialBytes;
+  if (savedBytes < 0 || savedBytes > gemma4ModelSizeBytes) savedBytes = 0;
+  final remainingBytes = gemma4ModelSizeBytes - savedBytes;
+  return availableBytes >= remainingBytes + gemma4StorageReserveBytes;
+}
+
 /// A separate, opt-in screening surface. It never supplies normal chat turns.
 class OfflineModelPanel extends StatefulWidget {
   const OfflineModelPanel({super.key});
@@ -142,10 +155,13 @@ class _OfflineModelPanelState extends State<OfflineModelPanel>
     final loaded = _status['runtime_loaded'] == true;
     final downloading = _status['download_active'] == true || _stage == 'downloading';
     final bytes = (_status['partial_bytes'] as num?)?.toInt() ?? 0;
-    const total = 3659530240;
+    const total = gemma4ModelSizeBytes;
     final progress = (bytes / total).clamp(0.0, 1.0).toDouble();
     final free = (_status['available_bytes'] as num?)?.toInt() ?? 0;
-    final canDownload = free >= total + 536870912;
+    final canDownload = gemma4DownloadHasSpace(
+      availableBytes: free,
+      partialBytes: bytes,
+    );
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
