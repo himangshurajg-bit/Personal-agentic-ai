@@ -13,11 +13,12 @@ class EngineConfig {
     required this.model,
     required this.token,
   });
-  String get description => mode == 'offline'
-      ? 'Offline · Gemma experimental'
-      : mode == 'compatible'
-      ? 'Online · OpenAI-compatible'
-      : 'Online · private FastAPI service';
+  String get description => switch (mode) {
+    'offline' => 'Offline · Gemma experimental',
+    'gemini' => 'Online · Gemini 2.5 Flash',
+    'compatible' => 'Online · OpenAI-compatible',
+    _ => 'Online · private FastAPI service',
+  };
   http.Request request(String conversation, String prompt) {
     if (mode == 'offline') {
       throw ServiceException(
@@ -29,14 +30,17 @@ class EngineConfig {
         'Configure this provider in Settings first. No data was sent.',
       );
     }
-    final base = checkedEndpoint(origin);
+    final base = mode == 'gemini' ? Uri.parse(origin) : checkedEndpoint(origin);
+    if (mode == 'gemini' && base.scheme != 'https') {
+      throw ServiceException('Gemini API requires HTTPS.');
+    }
     if (mode == 'compatible' && base.scheme != 'https') {
       throw ServiceException('Online providers require HTTPS.');
     }
     if (mode == 'compatible' && model.trim().isEmpty) {
       throw ServiceException('Enter the provider model identifier.');
     }
-    if (!['private_service', 'compatible'].contains(mode)) {
+    if (!['private_service', 'compatible', 'gemini'].contains(mode)) {
       throw ServiceException('Unsupported AI engine.');
     }
     if (mode == 'private_service' && prompt.length > 8000) {
@@ -46,27 +50,77 @@ class EngineConfig {
     }
     final req = http.Request(
       'POST',
-      base.resolve(mode == 'compatible' ? '/v1/chat/completions' : '/chat'),
+      mode == 'gemini'
+          ? Uri.parse('$origin:generateContent')
+          : base.resolve(
+              mode == 'compatible' ? '/v1/chat/completions' : '/chat',
+            ),
     )..followRedirects = false;
-    req.headers.addAll({
-      'Authorization': 'Bearer $token',
-      'Content-Type': 'application/json',
-    });
-    req.body = jsonEncode(
-      mode == 'compatible'
-          ? {
-              'model': model,
-              'stream': true,
-              'messages': [
-                {'role': 'user', 'content': prompt},
-              ],
-            }
-          : {'conversation': conversation, 'text': prompt},
-    );
+    req.headers['Content-Type'] = 'application/json';
+    if (mode == 'gemini') {
+      req.headers['x-goog-api-key'] = token;
+      req.body = jsonEncode({
+        'contents': [
+          {
+            'role': 'user',
+            'parts': [
+              {'text': prompt},
+            ],
+          },
+        ],
+      });
+    } else {
+      req.headers['Authorization'] = 'Bearer $token';
+      req.body = jsonEncode(
+        mode == 'compatible'
+            ? {
+                'model': model,
+                'stream': true,
+                'messages': [
+                  {'role': 'user', 'content': prompt},
+                ],
+              }
+            : {'conversation': conversation, 'text': prompt},
+      );
+    }
     return req;
   }
 
   Stream<Map<String, dynamic>> events(Stream<List<int>> bytes) async* {
+    if (mode == 'gemini') {
+      final body = await bytes.transform(utf8.decoder).join();
+      final decoded = jsonDecode(body);
+      if (decoded is! Map) {
+        throw ServiceException('Gemini returned an unexpected response.');
+      }
+      if (decoded['error'] != null) {
+        throw ServiceException(
+          'Gemini could not complete this request. Check model access and quota; nothing was retried.',
+        );
+      }
+      final candidates = decoded['candidates'];
+      final candidate =
+          candidates is List && candidates.isNotEmpty && candidates.first is Map
+          ? candidates.first as Map
+          : null;
+      final content = candidate == null ? null : candidate['content'];
+      final parts = content is Map ? content['parts'] : null;
+      final text = parts is List
+          ? parts
+                .whereType<Map>()
+                .map((part) => part['text'])
+                .whereType<String>()
+                .join()
+          : '';
+      if (text.isEmpty) {
+        throw ServiceException(
+          'Gemini returned no text. The response may have been blocked or incomplete; nothing was retried.',
+        );
+      }
+      yield {'type': 'delta', 'text': text};
+      yield {'type': 'done'};
+      return;
+    }
     await for (final line
         in bytes.transform(utf8.decoder).transform(const LineSplitter())) {
       if (mode == 'private_service') {

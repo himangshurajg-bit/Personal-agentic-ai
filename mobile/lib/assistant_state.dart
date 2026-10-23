@@ -94,29 +94,41 @@ class AssistantState extends ChangeNotifier {
   String mcpLoadError = '';
   String speechMode = 'offline';
   String assistantName = 'Personal assistant';
-  String engine = 'offline',
-      model = '',
+  String engine = 'gemini',
+      model = 'gemini-2.5-flash',
       language = 'en-IN',
       specialist = 'general';
   String privateServiceEndpoint = 'http://127.0.0.1:8766';
   String compatibleApiEndpoint = '';
   String privateServiceToken = '';
   String compatibleApiKey = '';
-  String get endpoint =>
-      engine == 'compatible' ? compatibleApiEndpoint : privateServiceEndpoint;
+  String geminiApiKey = '';
+  static const geminiModel = 'gemini-2.5-flash';
+  static const geminiEndpoint =
+      'https://generativelanguage.googleapis.com/v1beta/models/$geminiModel';
+  String get endpoint => switch (engine) {
+    'gemini' => geminiEndpoint,
+    'compatible' => compatibleApiEndpoint,
+    _ => privateServiceEndpoint,
+  };
   set endpoint(String value) {
     if (engine == 'compatible') {
       compatibleApiEndpoint = value;
-    } else {
+    } else if (engine != 'gemini') {
       privateServiceEndpoint = value;
     }
   }
 
-  String get token =>
-      engine == 'compatible' ? compatibleApiKey : privateServiceToken;
+  String get token => switch (engine) {
+    'gemini' => geminiApiKey,
+    'compatible' => compatibleApiKey,
+    _ => privateServiceToken,
+  };
   set token(String value) {
     if (engine == 'compatible') {
       compatibleApiKey = value;
+    } else if (engine == 'gemini') {
+      geminiApiKey = value;
     } else {
       privateServiceToken = value;
     }
@@ -157,7 +169,7 @@ class AssistantState extends ChangeNotifier {
           await storage.read(key: 'assistant_name') ?? 'Personal assistant';
       speechMode = await storage.read(key: 'speech_mode') ?? 'offline';
       speakReplies = await storage.read(key: 'speak_replies') == 'yes';
-      engine = await storage.read(key: 'engine') ?? 'offline';
+      engine = await storage.read(key: 'engine') ?? 'gemini';
       experimentalOfflineChatEnabled =
           await storage.read(key: 'experimental_offline_chat') == 'yes';
       if (experimentalOfflineChatEnabled) {
@@ -172,7 +184,9 @@ class AssistantState extends ChangeNotifier {
           // Non-Android builds never enable the local runtime.
         }
       }
-      model = await storage.read(key: 'model') ?? '';
+      model = await storage.read(key: 'model') ?? geminiModel;
+      geminiApiKey = await storage.read(key: 'gemini_api_key') ?? '';
+      if (engine == 'gemini') model = geminiModel;
       final savedLanguage = await storage.read(key: 'language') ?? 'en-IN';
       language = languageLabels.containsKey(savedLanguage)
           ? savedLanguage
@@ -343,6 +357,87 @@ class AssistantState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> saveTheme(String mode) async {
+    if (!['system', 'light', 'dark'].contains(mode)) {
+      throw ServiceException('Unsupported theme mode.');
+    }
+    await storage.write(key: 'theme', value: mode);
+    theme = mode;
+    notifyListeners();
+  }
+
+  /// Probes the OpenAI-compatible model-list endpoint without sending a prompt.
+  Future<String> testCompatibleApi() async {
+    if (compatibleApiEndpoint.trim().isEmpty) {
+      throw ServiceException('Add the provider HTTPS API origin first.');
+    }
+    if (compatibleApiKey.isEmpty) {
+      throw ServiceException('Add the provider API key before testing.');
+    }
+    final origin = checkedEndpoint(compatibleApiEndpoint);
+    final client = clientFactory();
+    try {
+      final request = http.Request('GET', origin.resolve('/v1/models'))
+        ..followRedirects = false
+        ..headers['Authorization'] = 'Bearer $compatibleApiKey';
+      final response = await client
+          .send(request)
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        await response.stream.drain<void>();
+        throw ServiceException(
+          'Provider rejected the API key. Check the key and endpoint; it was not displayed.',
+        );
+      }
+      if (response.statusCode == 404 || response.statusCode == 405) {
+        await response.stream.drain<void>();
+        throw ServiceException(
+          'This endpoint does not expose GET /v1/models. Check that the API origin is correct and OpenAI-compatible.',
+        );
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        await response.stream.drain<void>();
+        throw ServiceException(
+          'Provider returned HTTP ${response.statusCode}. Check its API status and endpoint; nothing was retried.',
+        );
+      }
+      final body = await response.stream.bytesToString().timeout(
+        const Duration(seconds: 10),
+      );
+      final decoded = jsonDecode(body);
+      if (decoded is! Map<String, dynamic>) {
+        throw ServiceException(
+          'Provider responded, but its model-list response was not valid JSON. Check the API origin.',
+        );
+      }
+      final models = decoded['data'];
+      if (models is List) {
+        final configuredModel = model.trim();
+        final listed = models.any(
+          (item) => item is Map && item['id'] == configuredModel,
+        );
+        return configuredModel.isNotEmpty && listed
+            ? 'Connected · provider responded and lists the configured model. This probe did not run inference.'
+            : 'Connected · provider responded with ${models.length} model${models.length == 1 ? '' : 's'}, but the configured model was not confirmed. Check its exact model ID.';
+      }
+      return 'Connected · provider responded to the model-list request. This probe did not run inference.';
+    } on TimeoutException {
+      throw ServiceException(
+        'Provider connection timed out. Check the server address and network; nothing was retried.',
+      );
+    } on http.ClientException {
+      throw ServiceException(
+        'Could not reach the provider. Check the HTTPS address, server availability and network; nothing was retried.',
+      );
+    } on FormatException {
+      throw ServiceException(
+        'Provider responded with invalid JSON. Check that the URL is the API origin.',
+      );
+    } finally {
+      client.close();
+    }
+  }
+
   Future<void> setVisualTheme(String id) async {
     if (!FuturisticPalette.all.any((palette) => palette.id == id)) {
       throw ArgumentError.value(id, 'id', 'Unknown visual theme');
@@ -353,10 +448,128 @@ class AssistantState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> clearProviderCredential({required bool compatible}) async {
-    final key = compatible ? 'compatible_api_key' : 'private_service_token';
+  Future<void> saveGeminiApiKey(String value) async {
+    final key = value.trim();
+    if (key.isNotEmpty) {
+      await storage.write(key: 'gemini_api_key', value: key);
+      geminiApiKey = key;
+    }
+    notifyListeners();
+  }
+
+  Future<String> testGeminiApi() async {
+    if (geminiApiKey.isEmpty) {
+      throw ServiceException(
+        'Add your Gemini API key first. No request was sent.',
+      );
+    }
+    final client = clientFactory();
+    try {
+      // A deliberate, tiny fixed inference proves this key can actually run the
+      // selected model. Never include chat, memory, or other user content here.
+      final request =
+          http.Request('POST', Uri.parse('$geminiEndpoint:generateContent'))
+            ..followRedirects = false
+            ..headers['x-goog-api-key'] = geminiApiKey
+            ..headers['content-type'] = 'application/json'
+            ..body = jsonEncode({
+              'contents': [
+                {
+                  'role': 'user',
+                  'parts': [
+                    {'text': 'Reply with exactly: OK'},
+                  ],
+                },
+              ],
+              'generationConfig': {'maxOutputTokens': 8, 'temperature': 0},
+            });
+      final response = await client
+          .send(request)
+          .timeout(const Duration(seconds: 12));
+      final status = response.statusCode;
+      if (status == 401 || status == 403) {
+        await response.stream.drain<void>();
+        throw ServiceException(
+          'Google rejected this key or this project cannot access Gemini 2.5 Flash. Check the key and model access; no other model was selected.',
+        );
+      }
+      if (status == 404) {
+        await response.stream.drain<void>();
+        throw ServiceException(
+          'Google did not find Gemini 2.5 Flash for this key. Access may be restricted; no other model was selected.',
+        );
+      }
+      if (status == 429) {
+        await response.stream.drain<void>();
+        throw ServiceException(
+          'Gemini rejected the test because the project reached a quota or rate limit. Check your available quota; nothing was retried.',
+        );
+      }
+      if (status < 200 || status >= 300) {
+        await response.stream.drain<void>();
+        throw ServiceException(
+          'Gemini returned HTTP $status for the connection test. No chat prompt was sent or retried.',
+        );
+      }
+      final body = await response.stream.bytesToString().timeout(
+        const Duration(seconds: 12),
+      );
+      final decoded = jsonDecode(body);
+      if (decoded is! Map<String, dynamic>) {
+        throw ServiceException(
+          'Gemini responded, but the connection-test response was not valid JSON.',
+        );
+      }
+      final candidates = decoded['candidates'];
+      final candidate = candidates is List && candidates.isNotEmpty
+          ? candidates.first
+          : null;
+      final content = candidate is Map ? candidate['content'] : null;
+      final parts = content is Map ? content['parts'] : null;
+      final hasText =
+          parts is List &&
+          parts.any(
+            (part) =>
+                part is Map &&
+                part['text'] is String &&
+                (part['text'] as String).trim().isNotEmpty,
+          );
+      if (!hasText) {
+        throw ServiceException(
+          'Gemini accepted the request but returned no test text. Check model access or safety settings; no chat prompt was sent.',
+        );
+      }
+      return 'Connected · Gemini 2.5 Flash replied to the fixed connection test. No chat content was sent.';
+    } on TimeoutException {
+      throw ServiceException(
+        'Gemini connection test timed out. No chat content was sent.',
+      );
+    } on http.ClientException {
+      throw ServiceException(
+        'Could not reach Google Gemini API. No chat content was sent.',
+      );
+    } on FormatException {
+      throw ServiceException(
+        'Gemini returned invalid JSON for the connection test. No chat content was sent.',
+      );
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> clearProviderCredential({
+    required bool compatible,
+    bool gemini = false,
+  }) async {
+    final key = gemini
+        ? 'gemini_api_key'
+        : compatible
+        ? 'compatible_api_key'
+        : 'private_service_token';
     await storage.delete(key: key);
-    if (compatible) {
+    if (gemini) {
+      geminiApiKey = '';
+    } else if (compatible) {
       compatibleApiKey = '';
     } else {
       privateServiceToken = '';
@@ -380,7 +593,9 @@ class AssistantState extends ChangeNotifier {
     if (customMcpServers.length >= 25) {
       throw const McpException('You can add up to 25 MCP servers.');
     }
-    if (customMcpServers.any((s) => s.name.toLowerCase() == name.trim().toLowerCase())) {
+    if (customMcpServers.any(
+      (s) => s.name.toLowerCase() == name.trim().toLowerCase(),
+    )) {
       throw const McpException('A server with that name already exists.');
     }
     final server = McpServer(
@@ -473,11 +688,17 @@ class AssistantState extends ChangeNotifier {
 
   EngineConfig get config => EngineConfig(
     mode: engine,
-    origin: engine == 'compatible'
+    origin: engine == 'gemini'
+        ? geminiEndpoint
+        : engine == 'compatible'
         ? compatibleApiEndpoint
         : privateServiceEndpoint,
-    model: model,
-    token: engine == 'compatible' ? compatibleApiKey : privateServiceToken,
+    model: engine == 'gemini' ? geminiModel : model,
+    token: engine == 'gemini'
+        ? geminiApiKey
+        : engine == 'compatible'
+        ? compatibleApiKey
+        : privateServiceToken,
   );
   Future<void> saveExperimentalOfflineChat(bool enabled) async {
     await storage.write(
@@ -486,10 +707,9 @@ class AssistantState extends ChangeNotifier {
     );
     experimentalOfflineChatEnabled = enabled;
     try {
-      await offlineModel.invokeMethod<void>(
-        'set_experimental_chat_enabled',
-        {'enabled': enabled},
-      );
+      await offlineModel.invokeMethod<void>('set_experimental_chat_enabled', {
+        'enabled': enabled,
+      });
     } on PlatformException {
       // Opt-in is stored locally, but unsupported builds still cannot run native inference.
     } on MissingPluginException {
@@ -504,7 +724,12 @@ class AssistantState extends ChangeNotifier {
     String modelName,
     String locale,
   ) async {
-    if (!['offline', 'private_service', 'compatible'].contains(selected)) {
+    if (![
+      'offline',
+      'private_service',
+      'compatible',
+      'gemini',
+    ].contains(selected)) {
       throw ServiceException('Unsupported engine.');
     }
     if (!languageLabels.containsKey(locale)) {
@@ -512,10 +737,13 @@ class AssistantState extends ChangeNotifier {
     }
     stop();
     await storage.write(key: 'engine', value: selected);
-    await storage.write(key: 'model', value: modelName.trim());
+    final effectiveModel = selected == 'gemini'
+        ? geminiModel
+        : modelName.trim();
+    await storage.write(key: 'model', value: effectiveModel);
     await storage.write(key: 'language', value: locale);
     engine = selected;
-    model = modelName.trim();
+    model = effectiveModel;
     language = locale;
     notifyListeners();
   }
@@ -756,7 +984,7 @@ class AssistantState extends ChangeNotifier {
   Future<dynamic> request(String method, String path, [Object? body]) async {
     if (privateServiceToken.isEmpty) {
       throw ServiceException(
-        'Connect your private service in Settings first. Offline notebook is available now.',
+        'Configure your selected provider in API & MCP connections first. Offline notebook is available now.',
       );
     }
     final client = clientFactory();
@@ -906,8 +1134,7 @@ class AssistantState extends ChangeNotifier {
       return;
     }
     if (engine == 'offline' && !experimentalOfflineChatEnabled) {
-      error =
-          'Experimental Gemma chat is off. Turn it on in Settings > AI & Voice after reviewing the warning. No online fallback was used.';
+      error = 'Experimental Gemma chat is off. Turn it on in Settings > AI & Voice after reviewing the warning. No online fallback was used.';
       notifyListeners();
       return;
     }
@@ -948,10 +1175,10 @@ class AssistantState extends ChangeNotifier {
       if (generation != _generation) return;
       if (selectedEngine == 'offline') {
         _localInferenceActive = true;
-        final answer = await offlineModel.invokeMethod<String>(
-          'run_chat',
-          {'prompt': prompt, 'experimental_opt_in': true},
-        );
+        final answer = await offlineModel.invokeMethod<String>('run_chat', {
+          'prompt': prompt,
+          'experimental_opt_in': true,
+        });
         if (generation == _generation) {
           if (answer == null || answer.trim().isEmpty) {
             throw ServiceException(
@@ -967,13 +1194,27 @@ class AssistantState extends ChangeNotifier {
         }
       } else {
         final req = selectedConfig!.request(conversation, prompt);
-        final res = await client!.send(req).timeout(const Duration(seconds: 10));
+        final res = await client!
+            .send(req)
+            .timeout(const Duration(seconds: 10));
         if (res.statusCode >= 300) {
+          if (selectedEngine == 'gemini') {
+            final message = switch (res.statusCode) {
+              401 || 403 => 'Google rejected the key or this project cannot access Gemini 2.5 Flash. Check the key and eligibility; no fallback was used.',
+              404 => 'Google did not find Gemini 2.5 Flash for this key. Access may be restricted; no other model was selected.',
+              429 => 'Google Gemini quota or rate limit reached. Check your available quota; no other model was selected or retried.',
+              _ =>
+                'Gemini API request failed (${res.statusCode}). No other model was selected or retried.',
+            };
+            throw ServiceException(message);
+          }
           throw ServiceException(describeStatus(res.statusCode));
         }
         var done = false;
         await for (final event
-            in selectedConfig.events(res.stream).timeout(const Duration(seconds: 65))) {
+            in selectedConfig
+                .events(res.stream)
+                .timeout(const Duration(seconds: 65))) {
           if (generation != _generation) break;
           if (event['type'] == 'delta') {
             partial += event['text'] as String;
@@ -1005,7 +1246,8 @@ class AssistantState extends ChangeNotifier {
     } on PlatformException catch (e) {
       if (generation == _generation) {
         final message = e.message ?? 'Local Gemma could not answer.';
-        error = selectedEngine == 'offline' &&
+        error =
+            selectedEngine == 'offline' &&
                 !message.toLowerCase().contains('fallback')
             ? '$message No online fallback was used.'
             : message;
