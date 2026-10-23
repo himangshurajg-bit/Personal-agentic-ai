@@ -1323,13 +1323,80 @@ class AssistantState extends ChangeNotifier {
     }
   }
 
-  static String describeStatus(int status) => switch (status) {
-    401 => 'Service token rejected. Check Settings.',
-    409 => 'This request is already running, expired or already used. Check its outcome before trying again.',
-    429 => 'Too many messages. Wait one minute, then retry.',
-    503 => 'No AI provider is configured. Set up a local model on the service computer; this app does not invent AI replies.',
-    _ => 'Service request failed ($status). Check the service before retrying.',
-  };
+  static int? _retryAfterSeconds(String? value) {
+    final raw = value?.trim();
+    if (raw == null || raw.isEmpty) return null;
+    final delay = int.tryParse(raw);
+    if (delay != null) return delay > 0 ? delay : null;
+
+    // Retry-After may be either delay-seconds or an HTTP-date (IMF-fixdate).
+    final match = RegExp(
+      r'^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), (\d{2}) '
+      r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) '
+      r'(\d{4}) (\d{2}):(\d{2}):(\d{2}) GMT$',
+      caseSensitive: false,
+    ).firstMatch(raw);
+    if (match == null) return null;
+
+    const months = {
+      'jan': 1,
+      'feb': 2,
+      'mar': 3,
+      'apr': 4,
+      'may': 5,
+      'jun': 6,
+      'jul': 7,
+      'aug': 8,
+      'sep': 9,
+      'oct': 10,
+      'nov': 11,
+      'dec': 12,
+    };
+    final month = months[match.group(2)!.toLowerCase()];
+    if (month == null) return null;
+    final year = int.parse(match.group(3)!);
+    final day = int.parse(match.group(1)!);
+    final hour = int.parse(match.group(4)!);
+    final minute = int.parse(match.group(5)!);
+    final second = int.parse(match.group(6)!);
+    final retryAt = DateTime.utc(year, month, day, hour, minute, second);
+    if (retryAt.year != year || retryAt.month != month || retryAt.day != day) {
+      return null;
+    }
+    final milliseconds = retryAt
+        .difference(DateTime.now().toUtc())
+        .inMilliseconds;
+    if (milliseconds <= 0) return null;
+    return (milliseconds + 999) ~/ 1000;
+  }
+
+  static String describeStatus(
+    int status, {
+    String engine = 'private_service',
+    String? retryAfter,
+  }) {
+    if (status == 429 && engine != 'private_service') {
+      final provider = switch (engine) {
+        'openai' => 'OpenAI',
+        'gemini' => 'Google Gemini',
+        _ => 'The selected AI provider',
+      };
+      final seconds = _retryAfterSeconds(retryAfter);
+      final wait = seconds != null
+          ? ' The provider asked you to wait at least $seconds seconds.'
+          : ' Wait until the provider allows another request.';
+      return '$provider rate-limited this request (HTTP 429).$wait Retry only when you choose; there was no automatic retry or provider fallback. If it keeps happening, check your API usage and rate limits.';
+    }
+    return switch (status) {
+      401 => 'Service token rejected. Check Settings.',
+      409 => 'This request is already running, expired or already used. Check its outcome before trying again.',
+      429 => 'Too many messages. Wait one minute, then retry.',
+      503 => 'No AI provider is configured. Set up a local model on the service computer; this app does not invent AI replies.',
+      _ =>
+        'Service request failed ($status). Check the service before retrying.',
+    };
+  }
+
   Future<void> selectConversation(String id, {bool load = true}) async {
     if (!RegExp(r'^[a-zA-Z0-9_-]{1,80}$').hasMatch(id)) {
       throw ServiceException('Invalid conversation identifier.');
@@ -1356,6 +1423,7 @@ class AssistantState extends ChangeNotifier {
     bool approvedOnline = false,
     bool shareMemories = false,
     bool shareHistory = false,
+    bool retryLastMessage = false,
   }) async {
     if (busy || text.trim().isEmpty) {
       return;
@@ -1370,6 +1438,12 @@ class AssistantState extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    final trimmedText = text.trim();
+    if (retryLastMessage && trimmedText != lastPrompt) {
+      error = 'The retry no longer matches the last message. Send it again as a new message.';
+      notifyListeners();
+      return;
+    }
     error = '';
     final selectedEngine = engine;
     final selectedConfig = selectedEngine == 'offline' ? null : config;
@@ -1378,11 +1452,19 @@ class AssistantState extends ChangeNotifier {
         .where((m) => m['state'] == 'complete')
         .map((m) => {'role': m['role'], 'text': m['text']})
         .toList();
-    lastPrompt = text.trim();
+    if (retryLastMessage) {
+      final retryIndex = prior.lastIndexWhere(
+        (m) => m['role'] == 'user' && m['text'] == lastPrompt,
+      );
+      if (retryIndex >= 0) prior.removeAt(retryIndex);
+    }
+    lastPrompt = trimmedText;
     partial = '';
     busy = true;
     final generation = ++_generation;
-    messages.add({'role': 'user', 'text': lastPrompt, 'state': 'complete'});
+    if (!retryLastMessage) {
+      messages.add({'role': 'user', 'text': lastPrompt, 'state': 'complete'});
+    }
     notifyListeners();
     final client = selectedEngine == 'offline' ? null : clientFactory();
     _stream = client;
@@ -1427,6 +1509,15 @@ class AssistantState extends ChangeNotifier {
             .send(req)
             .timeout(const Duration(seconds: 10));
         if (res.statusCode >= 300) {
+          if (res.statusCode == 429) {
+            throw ServiceException(
+              describeStatus(
+                res.statusCode,
+                engine: selectedEngine,
+                retryAfter: res.headers['retry-after'],
+              ),
+            );
+          }
           if (selectedEngine == 'gemini') {
             final message = switch (res.statusCode) {
               401 || 403 =>

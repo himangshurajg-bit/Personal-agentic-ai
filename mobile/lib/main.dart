@@ -2926,6 +2926,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       approvedOnline: true,
       shareMemories: widget.state.shareMemories,
       shareHistory: widget.state.shareHistory,
+      retryLastMessage: retry != null,
     );
     if (widget.state.speakReplies &&
         widget.state.error.isEmpty &&

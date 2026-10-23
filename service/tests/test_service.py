@@ -110,14 +110,14 @@ async def test_elevenlabs_adapter_uses_server_key_and_official_tag_without_live_
     def handler(request):
         seen.append(request)
         assert request.url.host=="api.elevenlabs.io"
-        assert request.url.path=="/v1/text-to-speech/voice_12345678"
+        assert request.url.path=="/v1/text-to-speech/test_voice"
         assert request.url.query==b"output_format=mp3_44100_128"
-        assert request.headers["xi-api-key"]=="server-secret-test-only"
+        assert request.headers["xi-api-key"]=="unit-test-key"
         payload=json.loads(request.content)
         assert payload=={"text":"[curious] Is this working?","model_id":"eleven_v4"}
         return httpx.Response(200,content=b"mock-audio",headers={"content-type":"audio/mpeg"})
     monkeypatch.setattr(httpx,"AsyncClient",lambda **kw:original(transport=httpx.MockTransport(handler),**kw))
-    voice=__import__("app").ElevenLabsVoice("server-secret-test-only","voice_12345678")
+    voice=__import__("app").ElevenLabsVoice("unit-test-key","test_voice")
     assert await voice.synthesize("Is this working?","curious")==b"mock-audio"
     assert len(seen)==1
 
@@ -132,7 +132,7 @@ def test_provider_rejects_non_origin_and_credential_urls(url):
 def test_groq_configuration_is_explicit_and_never_falls_back(monkeypatch, tmp_path):
     monkeypatch.delenv("ASSISTANT_PROVIDER", raising=False)
     monkeypatch.delenv("OLLAMA_MODEL", raising=False)
-    monkeypatch.setenv("GROQ_API_KEY", "server-secret-test-only")
+    monkeypatch.setenv("GROQ_API_KEY", "unit-test-key")
     # Merely having a Groq key present must not enable a network provider.
     default_app = create_app(tmp_path / "default", token=TOKEN)
     assert default_app.state.provider.__class__.__name__ == "Unconfigured"
@@ -166,7 +166,7 @@ async def test_groq_adapter_streams_from_fixed_endpoint_without_live_calls(monke
     def handler(request):
         seen.append(request)
         assert str(request.url) == GroqProvider.URL
-        assert request.headers["authorization"] == "Bearer server-secret-test-only"
+        assert request.headers["authorization"] == "Bearer unit-test-key"
         payload = json.loads(request.content)
         assert payload == {
             "model": "openai/gpt-oss-120b",
@@ -182,7 +182,7 @@ async def test_groq_adapter_streams_from_fixed_endpoint_without_live_calls(monke
         )
         return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs))
-    provider = GroqProvider("server-secret-test-only", "openai/gpt-oss-120b")
+    provider = GroqProvider("unit-test-key", "openai/gpt-oss-120b")
     messages = [{"role": "user", "content": "hello"}]
     assert [part async for part in provider.stream(messages)] == ["Hello ", "world"]
     assert len(seen) == 1
@@ -191,7 +191,7 @@ async def test_groq_adapter_streams_from_fixed_endpoint_without_live_calls(monke
 async def test_groq_adapter_fails_closed_on_http_errors_and_truncated_streams(monkeypatch):
     import httpx
     original = httpx.AsyncClient
-    provider = GroqProvider("server-secret-test-only", "openai/gpt-oss-120b")
+    provider = GroqProvider("unit-test-key", "openai/gpt-oss-120b")
     messages = [{"role": "user", "content": "private prompt"}]
 
     def error_handler(request):
@@ -323,7 +323,7 @@ def test_cloudflare_image_provider_is_opt_in_and_validates_server_configuration(
     from app import CloudflareFluxImageProvider
     monkeypatch.setenv("ASSISTANT_IMAGE_PROVIDER", "disabled")
     monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "0123456789abcdef0123456789abcdef")
-    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "server-secret-test-only")
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "unit-test-key")
     disabled = create_app(tmp_path / "cloudflare-disabled", token=TOKEN)
     assert disabled.state.image_provider is None
     monkeypatch.setenv("ASSISTANT_IMAGE_PROVIDER", "cloudflare")
