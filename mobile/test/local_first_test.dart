@@ -47,6 +47,21 @@ void main() {
       expect(restored.rows('memories'), hasLength(1));
     },
   );
+  test('spoken-reply preference persists only after the user enables it', () async {
+    final state = AssistantState();
+    await state.initialize();
+    expect(state.speakReplies, isFalse);
+
+    await state.saveSpeakReplies(true);
+    final restored = AssistantState();
+    await restored.initialize();
+    expect(restored.speakReplies, isTrue);
+
+    await restored.saveSpeakReplies(false);
+    final disabled = AssistantState();
+    await disabled.initialize();
+    expect(disabled.speakReplies, isFalse);
+  });
   test(
     'flashcards migrate old local records and schedule only actual reviews',
     () async {

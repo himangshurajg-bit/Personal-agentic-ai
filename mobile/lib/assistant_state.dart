@@ -156,6 +156,7 @@ class AssistantState extends ChangeNotifier {
       assistantName =
           await storage.read(key: 'assistant_name') ?? 'Personal assistant';
       speechMode = await storage.read(key: 'speech_mode') ?? 'offline';
+      speakReplies = await storage.read(key: 'speak_replies') == 'yes';
       engine = await storage.read(key: 'engine') ?? 'offline';
       experimentalOfflineChatEnabled =
           await storage.read(key: 'experimental_offline_chat') == 'yes';
@@ -452,6 +453,12 @@ class AssistantState extends ChangeNotifier {
     }
     await storage.write(key: 'assistant_name', value: value);
     assistantName = value;
+    notifyListeners();
+  }
+
+  Future<void> saveSpeakReplies(bool enabled) async {
+    await storage.write(key: 'speak_replies', value: enabled ? 'yes' : 'no');
+    speakReplies = enabled;
     notifyListeners();
   }
 

@@ -2601,8 +2601,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         actions: [
           IconButton(
             tooltip: 'Read replies aloud',
-            onPressed: () =>
-                setState(() => state.speakReplies = !state.speakReplies),
+            onPressed: () async {
+              try {
+                await state.saveSpeakReplies(!state.speakReplies);
+              } catch (e) {
+                if (context.mounted) notice(context, e);
+              }
+            },
             icon: Icon(state.speakReplies ? Icons.volume_up : Icons.volume_off),
           ),
           IconButton(
