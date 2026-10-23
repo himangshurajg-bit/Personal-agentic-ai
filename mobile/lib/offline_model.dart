@@ -4,17 +4,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 const int gemma4ModelSizeBytes = 2588147712;
+const int qwen3ModelSizeBytes = 613722264;
 const int gemma4StorageReserveBytes = 536870912;
+
+bool offlineModelDownloadHasSpace({
+  required int availableBytes,
+  required int partialBytes,
+  required int modelSizeBytes,
+}) {
+  var savedBytes = partialBytes;
+  if (savedBytes < 0 || savedBytes > modelSizeBytes) savedBytes = 0;
+  final remainingBytes = modelSizeBytes - savedBytes;
+  return availableBytes >= remainingBytes + gemma4StorageReserveBytes;
+}
 
 bool gemma4DownloadHasSpace({
   required int availableBytes,
   required int partialBytes,
-}) {
-  var savedBytes = partialBytes;
-  if (savedBytes < 0 || savedBytes > gemma4ModelSizeBytes) savedBytes = 0;
-  final remainingBytes = gemma4ModelSizeBytes - savedBytes;
-  return availableBytes >= remainingBytes + gemma4StorageReserveBytes;
-}
+}) => offlineModelDownloadHasSpace(
+  availableBytes: availableBytes,
+  partialBytes: partialBytes,
+  modelSizeBytes: gemma4ModelSizeBytes,
+);
 
 /// Opt-in model manager for fixed screening and separately enabled experimental local chat.
 class OfflineModelPanel extends StatefulWidget {
@@ -140,6 +151,10 @@ class _OfflineModelPanelState extends State<OfflineModelPanel>
     }
   }
 
+  String _formatModelSize(int bytes) => bytes >= 1000000000
+      ? '${(bytes / 1000000000).toStringAsFixed(2)} GB'
+      : '${(bytes / 1000000).toStringAsFixed(0)} MB';
+
   String _formatBytes(Object? value) {
     if (value is! num || value < 0) return 'unavailable';
     final bytes = value.toInt();
@@ -158,12 +173,17 @@ class _OfflineModelPanelState extends State<OfflineModelPanel>
     final loaded = _status['runtime_loaded'] == true;
     final downloading = _status['download_active'] == true || _stage == 'downloading';
     final bytes = (_status['partial_bytes'] as num?)?.toInt() ?? 0;
-    const total = gemma4ModelSizeBytes;
+    final selectedModelId = _status['selected_model_id'] as String? ?? 'gemma-4-E2B-it';
+    final isQwen = selectedModelId == 'qwen3-0.6b';
+    final selectedModelName = isQwen ? 'Qwen3 0.6B' : 'Gemma 4 E2B';
+    final selectedModelDescription = _status['model_description'] as String? ?? '5.1B total · 2.3B effective parameters · 8 GB minimum listed';
+    final total = (_status['model_bytes'] as num?)?.toInt() ?? gemma4ModelSizeBytes;
     final progress = (bytes / total).clamp(0.0, 1.0).toDouble();
     final free = (_status['available_bytes'] as num?)?.toInt() ?? 0;
-    final canDownload = gemma4DownloadHasSpace(
+    final canDownload = offlineModelDownloadHasSpace(
       availableBytes: free,
       partialBytes: bytes,
+      modelSizeBytes: total,
     );
 
     return Card(
@@ -182,9 +202,9 @@ class _OfflineModelPanelState extends State<OfflineModelPanel>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Gemma 4 E2B · experimental local AI', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                      Text('$selectedModelName · experimental local AI', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
                       const SizedBox(height: 5),
-                      Text('5.1B total · 2.3B effective parameters · Apache-2.0', style: theme.textTheme.bodySmall),
+                      Text('$selectedModelDescription · ${_status['license'] ?? 'Apache-2.0'}', style: theme.textTheme.bodySmall),
                     ],
                   ),
                 ),
@@ -192,23 +212,39 @@ class _OfflineModelPanelState extends State<OfflineModelPanel>
               ],
             ),
             const SizedBox(height: 14),
-            Text('2.59 GB model · 8 GB minimum listed · app-private storage · no network inference', style: theme.textTheme.bodyMedium),
+            DropdownButtonFormField<String>(
+              initialValue: selectedModelId,
+              decoration: const InputDecoration(labelText: 'Offline model'),
+              items: const [
+                DropdownMenuItem(value: 'gemma-4-E2B-it', child: Text('Gemma 4 E2B · larger option')),
+                DropdownMenuItem(value: 'qwen3-0.6b', child: Text('Qwen3 0.6B · lighter option')),
+              ],
+              onChanged: _calling || _status['model_selection_locked'] == true
+                  ? null
+                  : (value) { if (value != null) _invoke('select_model', {'model_id': value}); },
+            ),
+            if (_status['other_model_present'] == true) ...[
+              const SizedBox(height: 6),
+              Text('The other model file stays in app storage when you switch. Select it to remove its files.', style: theme.textTheme.bodySmall),
+            ],
+            const SizedBox(height: 14),
+            Text('${_formatModelSize(total)} model · ${isQwen ? 'device-memory minimum not published' : '8 GB minimum listed'} · app-private storage · no network inference', style: theme.textTheme.bodyMedium),
             const SizedBox(height: 4),
             Text(
               'Available RAM: ${_formatBytes(_status['available_memory_bytes'])}${_status['low_memory'] == true ? ' · Android reports low memory' : ''}. This is only a momentary reading, not a fit guarantee.',
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 6),
-            Text('The allowlist minimum is 8 GB RAM, which is not a fit guarantee; runtime headroom and Redmi performance are untested. Downloading or loading can use substantial storage, memory, battery and heat. Normal chat needs a separate experimental opt-in; this model is not qualified for your phone.', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            Text('${isQwen ? 'Qwen3 is a much smaller LiteRT-LM option, but its fit and quality on lower-end phones are untested; no device-memory minimum is published.' : 'The allowlist minimum is 8 GB RAM, which is not a fit guarantee; runtime headroom and Redmi performance are untested.'} Downloading or loading can use substantial storage, memory, battery and heat. Normal chat needs a separate experimental opt-in; this model is not qualified for your phone.', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
             if (previousModelPresent || previousPartialPresent) ...[
               const SizedBox(height: 8),
-              const Text('A previous Gemma 4 E4B model or partial download is still in app storage. This E2B version will not use it; remove files below only if you want to reclaim that space.'),
+              const Text('A previous Gemma 4 E4B model or partial download is still in app storage. The selected option will not use it; remove files below only if you want to reclaim that space.'),
             ],
             const SizedBox(height: 14),
             if (downloading) ...[
               LinearProgressIndicator(value: progress == 0 ? null : progress),
               const SizedBox(height: 8),
-              Text('Downloaded ${_formatBytes(bytes)} of 2.59 GB · resumes only when you start it again', style: theme.textTheme.labelMedium),
+              Text('Downloaded ${_formatBytes(bytes)} of ${_formatModelSize(total)} · resumes only when you start it again', style: theme.textTheme.labelMedium),
             ],
             if (_message.isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -226,7 +262,7 @@ class _OfflineModelPanelState extends State<OfflineModelPanel>
                         : () async {
                             final proceed = await _confirm(
                               bytes > 0 ? 'Resume model download?' : 'Download model for screening?',
-                              'This starts a user-requested 2.59 GB download. It uses app-private storage and keeps 512 MB free as a reserve. Downloading alone does not load it or opt it into normal chat.',
+                              'This starts a user-requested ${_formatModelSize(total)} download of $selectedModelName. It uses app-private storage and keeps 512 MB free as a reserve. Downloading alone does not load it or opt it into normal chat.',
                               bytes > 0 ? 'Resume download' : 'Download',
                             );
                             if (proceed && mounted) await _invoke('download');
@@ -239,7 +275,7 @@ class _OfflineModelPanelState extends State<OfflineModelPanel>
                 if (modelPresent && !loaded)
                   FilledButton.icon(
                     onPressed: _calling || !sizeMatches ? null : () async {
-                      final proceed = await _confirm('Load Gemma locally?', 'This checks Android’s low-memory warning first, then loads the model in app memory. It may still fail, run slowly, or heat the phone. It remains unqualified. If you explicitly opted in above, the loaded model can also answer normal chat without network fallback.', 'Load model');
+                      final proceed = await _confirm('Load $selectedModelName locally?', 'This checks Android’s low-memory warning first, then loads the model in app memory. It may still fail, run slowly, or heat the phone. It remains unqualified. If you explicitly opted in above, the loaded model can also answer normal chat without network fallback.', 'Load model');
                       if (proceed && mounted) await _invoke('load_for_screening');
                     },
                     icon: const Icon(Icons.memory_rounded),
@@ -256,7 +292,7 @@ class _OfflineModelPanelState extends State<OfflineModelPanel>
                   OutlinedButton.icon(onPressed: _calling ? null : () => _invoke('cancel_inference'), icon: const Icon(Icons.stop_rounded), label: const Text('Cancel test')),
                 if ((modelPresent || bytes > 0 || previousModelPresent || previousPartialPresent) && !downloading && !loaded)
                   TextButton.icon(onPressed: _calling ? null : () async {
-                    final proceed = await _confirm('Remove model files?', 'This removes the current Gemma 4 E2B model and any previous Gemma 4 E4B model or partial download from app-private storage. It does not affect chat history or online settings.', 'Remove model');
+                    final proceed = await _confirm('Remove model files?', 'This removes the selected $selectedModelName model and partial download, plus any previous Gemma 4 E4B files. The other model option is kept; it does not affect chat history or online settings.', 'Remove model');
                     if (proceed && mounted) await _invoke('remove_model');
                   }, icon: const Icon(Icons.delete_outline), label: const Text('Remove files')),
                 if (!modelPresent && !downloading && !canDownload)

@@ -36,6 +36,27 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
+internal data class OfflineModelArtifact(
+    val modelId: String,
+    val displayName: String,
+    val modelFile: String,
+    val modelBytes: Long,
+    val sha256: String,
+    val revision: String,
+    val url: String,
+    val license: String,
+    val minimumMemoryGb: Int?,
+    val description: String,
+) {
+    val partialFile: String get() = "$modelFile.part"
+
+    fun allowsRedirect(uri: URI): Boolean {
+        if (!uri.scheme.equals("https", ignoreCase = true) || uri.userInfo != null) return false
+        val host = uri.host?.lowercase(Locale.ROOT) ?: return false
+        return host == "huggingface.co" || host.endsWith(".huggingface.co") || host.endsWith(".hf.co")
+    }
+}
+
 internal object Gemma4Artifact {
     const val MODEL_ID = "gemma-4-E2B-it"
     const val MODEL_FILE = "gemma-4-E2B-it.litertlm"
@@ -56,6 +77,35 @@ internal object Gemma4Artifact {
         val host = uri.host?.lowercase(Locale.ROOT) ?: return false
         return host == "huggingface.co" || host.endsWith(".huggingface.co") || host.endsWith(".hf.co")
     }
+}
+
+internal object OfflineModelArtifacts {
+    val gemma4 = OfflineModelArtifact(
+        modelId = Gemma4Artifact.MODEL_ID,
+        displayName = "Gemma 4 E2B",
+        modelFile = Gemma4Artifact.MODEL_FILE,
+        modelBytes = Gemma4Artifact.MODEL_BYTES,
+        sha256 = Gemma4Artifact.SHA256,
+        revision = Gemma4Artifact.REVISION,
+        url = Gemma4Artifact.URL,
+        license = Gemma4Artifact.LICENSE,
+        minimumMemoryGb = Gemma4Artifact.MIN_DEVICE_MEMORY_GB,
+        description = "5.1B total · 2.3B effective parameters · 8 GB minimum listed",
+    )
+    val qwen3 = OfflineModelArtifact(
+        modelId = "qwen3-0.6b",
+        displayName = "Qwen3 0.6B",
+        modelFile = "Qwen3-0.6B.litertlm",
+        modelBytes = 613_722_264L,
+        sha256 = "c5f39b4191926786c3e6668b62af4d6eb15248dfc7a5348252a9b406f33f2108",
+        revision = "e6687177e00897731e7716267eebd4eba0dde7c2",
+        url = "https://huggingface.co/litert-community/Qwen3-0.6B/resolve/e6687177e00897731e7716267eebd4eba0dde7c2/Qwen3-0.6B.litertlm",
+        license = "Apache-2.0",
+        minimumMemoryGb = null,
+        description = "0.6B parameters · 614 MB download · no published device-memory minimum",
+    )
+    val all = listOf(gemma4, qwen3)
+    fun find(modelId: String): OfflineModelArtifact? = all.firstOrNull { it.modelId == modelId }
 }
 
 internal data class ByteRange(val start: Long, val end: Long, val total: Long)
@@ -158,6 +208,7 @@ internal class Gemma4OfflineCoordinator(
     private val downloadCancelled = AtomicBoolean(false)
     private val downloadConnection = AtomicReference<HttpURLConnection?>(null)
     @Volatile private var downloadActive = false
+    @Volatile private var fileRemovalActive = false
 
     private val inferenceExecutor = Executors.newSingleThreadExecutor()
     private val inferenceDispatcher = inferenceExecutor.asCoroutineDispatcher()
@@ -175,24 +226,30 @@ internal class Gemma4OfflineCoordinator(
     @Volatile private var experimentalChatEnabled = false
     private val disposed = AtomicBoolean(false)
 
-    private val modelFile get() = File(appContext.filesDir, Gemma4Artifact.MODEL_FILE)
-    private val partialFile get() = File(appContext.filesDir, Gemma4Artifact.PART_FILE)
+    private val modelPreferences = appContext.getSharedPreferences("offline_model_selection", Context.MODE_PRIVATE)
+    @Volatile private var selectedModelId: String = modelPreferences.getString("model_id", Gemma4Artifact.MODEL_ID)
+        ?.takeIf { OfflineModelArtifacts.find(it) != null } ?: Gemma4Artifact.MODEL_ID
+    private val selectedArtifact: OfflineModelArtifact
+        get() = OfflineModelArtifacts.find(selectedModelId) ?: OfflineModelArtifacts.gemma4
+    private val modelFile get() = File(appContext.filesDir, selectedArtifact.modelFile)
+    private val partialFile get() = File(appContext.filesDir, selectedArtifact.partialFile)
     private val previousModelFile get() = File(appContext.filesDir, Gemma4Artifact.PREVIOUS_MODEL_FILE)
     private val previousPartialFile get() = File(appContext.filesDir, Gemma4Artifact.PREVIOUS_PART_FILE)
 
     fun status(): Map<String, Any?> {
         val available = try { StatFs(appContext.filesDir.path).availableBytes } catch (_: Exception) { 0L }
         val memory = memorySnapshot()
+        val artifact = selectedArtifact
         val partialBytes: Long = partialFile.takeIf { it.isFile }?.length()
-            ?.coerceAtMost(Gemma4Artifact.MODEL_BYTES) ?: 0L
+            ?.coerceAtMost(artifact.modelBytes) ?: 0L
         return mapOf<String, Any?>(
-            "model_bytes" to Gemma4Artifact.MODEL_BYTES,
+            "model_bytes" to artifact.modelBytes,
             "available_bytes" to available,
             "partial_bytes" to partialBytes,
             "model_present" to modelFile.isFile,
             "previous_model_present" to previousModelFile.isFile,
             "previous_partial_present" to previousPartialFile.isFile,
-            "model_size_matches" to (modelFile.isFile && modelFile.length() == Gemma4Artifact.MODEL_BYTES),
+            "model_size_matches" to (modelFile.isFile && modelFile.length() == artifact.modelBytes),
             "download_active" to downloadActive,
             "runtime_loaded" to (engine != null),
             "inference_active" to inferenceActive,
@@ -203,9 +260,14 @@ internal class Gemma4OfflineCoordinator(
             "available_memory_bytes" to memory.availableBytes,
             "total_memory_bytes" to memory.totalBytes,
             "low_memory" to memory.lowMemory,
-            "model_id" to Gemma4Artifact.MODEL_ID,
-            "min_device_memory_gb" to Gemma4Artifact.MIN_DEVICE_MEMORY_GB,
-            "license" to Gemma4Artifact.LICENSE,
+            "model_id" to artifact.modelId,
+            "selected_model_id" to artifact.modelId,
+            "model_name" to artifact.displayName,
+            "model_description" to artifact.description,
+            "min_device_memory_gb" to artifact.minimumMemoryGb,
+            "license" to artifact.license,
+            "other_model_present" to OfflineModelArtifacts.all.any { it.modelId != artifact.modelId && File(appContext.filesDir, it.modelFile).isFile },
+            "model_selection_locked" to (downloadActive || fileRemovalActive || engine != null || runtimeOperation || inferenceActive),
         )
     }
 
@@ -214,14 +276,36 @@ internal class Gemma4OfflineCoordinator(
         emit("status", *status().toList().toTypedArray())
     }
 
+    fun selectModel(modelId: String) {
+        val artifact = OfflineModelArtifacts.find(modelId)
+        if (artifact == null) {
+            emit("model_selection", "state" to "error", "message" to "That offline model option is not supported.")
+            return
+        }
+        synchronized(this) {
+            if (downloadActive || fileRemovalActive || engine != null || runtimeOperation || inferenceActive) {
+                emit("model_selection", "state" to "error", "message" to "Pause or finish the current model operation and unload the model before switching.")
+                return
+            }
+            if (selectedModelId != artifact.modelId) {
+                selectedModelId = artifact.modelId
+                modelPreferences.edit().putString("model_id", artifact.modelId).apply()
+            }
+        }
+        emit("model_selection", "state" to "selected", "message" to "${artifact.displayName} selected. Its file is separate from the other option.")
+        emit("status", *status().toList().toTypedArray())
+    }
+
     fun startDownload() {
         if (disposed.get()) return
+        val artifact: OfflineModelArtifact
         synchronized(this) {
+            artifact = selectedArtifact
             if (downloadActive) {
                 emit("download_state", "state" to "downloading", "message" to "The model download is already running.")
                 return
             }
-            if (engine != null || runtimeOperation || inferenceActive) {
+            if (fileRemovalActive || engine != null || runtimeOperation || inferenceActive) {
                 emit("download_state", "state" to "error", "message" to "Unload the candidate before downloading or replacing files.")
                 return
             }
@@ -233,7 +317,7 @@ internal class Gemma4OfflineCoordinator(
             downloadCancelled.set(false)
         }
         emit("download_state", "state" to "starting", "message" to "Checking private storage before the user-requested download.")
-        downloadExecutor.execute { performDownload() }
+        downloadExecutor.execute { performDownload(artifact) }
     }
 
     fun cancelDownload() {
@@ -242,30 +326,30 @@ internal class Gemma4OfflineCoordinator(
         downloadConnection.get()?.disconnect()
     }
 
-    private fun performDownload() {
+    private fun performDownload(artifact: OfflineModelArtifact) {
         try {
             val part = partialFile
-            if (part.exists() && part.length() > Gemma4Artifact.MODEL_BYTES) part.delete()
+            if (part.exists() && part.length() > artifact.modelBytes) part.delete()
             val existingBytes = part.takeIf(File::isFile)?.length() ?: 0L
             val free = StatFs(appContext.filesDir.path).availableBytes
-            if (!Gemma4TransferPolicy.hasEnoughSpace(free, existingBytes, Gemma4Artifact.MODEL_BYTES)) {
+            if (!Gemma4TransferPolicy.hasEnoughSpace(free, existingBytes, artifact.modelBytes)) {
                 throw IllegalStateException("Not enough free app storage for the remaining model and a 512 MB safety reserve. Free space, then try again.")
             }
-            if (existingBytes == Gemma4Artifact.MODEL_BYTES) {
+            if (existingBytes == artifact.modelBytes) {
                 if (downloadCancelled.get()) throw DownloadPaused()
-                if (!Gemma4FileIntegrity.verify(part, Gemma4Artifact.MODEL_BYTES, Gemma4Artifact.SHA256)) {
+                if (!Gemma4FileIntegrity.verify(part, artifact.modelBytes, artifact.sha256)) {
                     part.delete()
                     throw IllegalStateException("The saved file failed SHA-256 verification and was discarded. Start a fresh download.")
                 }
                 if (downloadCancelled.get()) throw DownloadPaused()
-                Gemma4FileIntegrity.installAtomically(part, modelFile, Gemma4Artifact.MODEL_BYTES, Gemma4Artifact.SHA256)
-                emit("download_state", "state" to "complete", "bytes" to Gemma4Artifact.MODEL_BYTES, "total" to Gemma4Artifact.MODEL_BYTES, "message" to "Verified model saved in app-private storage. Loading and a separate experimental-chat opt-in are still required.")
+                Gemma4FileIntegrity.installAtomically(part, modelFile, artifact.modelBytes, artifact.sha256)
+                emit("download_state", "state" to "complete", "bytes" to artifact.modelBytes, "total" to artifact.modelBytes, "message" to "Verified model saved in app-private storage. Loading and a separate experimental-chat opt-in are still required.")
                 return
             }
             if (downloadCancelled.get()) throw DownloadPaused()
-            val resumeAt = Gemma4TransferPolicy.resumeOffset(existingBytes, Gemma4Artifact.MODEL_BYTES) ?: 0L
-            emit("download_state", "state" to "downloading", "bytes" to resumeAt, "total" to Gemma4Artifact.MODEL_BYTES)
-            val connection = openModelConnection(resumeAt)
+            val resumeAt = Gemma4TransferPolicy.resumeOffset(existingBytes, artifact.modelBytes) ?: 0L
+            emit("download_state", "state" to "downloading", "bytes" to resumeAt, "total" to artifact.modelBytes)
+            val connection = openModelConnection(resumeAt, artifact)
             downloadConnection.set(connection)
             try {
                 val code = connection.responseCode
@@ -276,13 +360,13 @@ internal class Gemma4OfflineCoordinator(
                 } else if (resumeAt > 0 && code == HttpURLConnection.HTTP_PARTIAL) {
                     val range = Gemma4TransferPolicy.parseContentRange(connection.getHeaderField("Content-Range"))
                         ?: throw IllegalStateException("The server returned an invalid resume range; the partial file was kept.")
-                    if (range.start != resumeAt || range.total != Gemma4Artifact.MODEL_BYTES) {
+                    if (range.start != resumeAt || range.total != artifact.modelBytes) {
                         throw IllegalStateException("The resume range did not match the pinned artifact; the partial file was kept.")
                     }
                 } else if (code != HttpURLConnection.HTTP_OK) {
                     throw IllegalStateException("The model host returned HTTP $code. The partial file was kept for a later retry.")
                 }
-                val expectedResponseBytes = Gemma4Artifact.MODEL_BYTES - writeAt
+                val expectedResponseBytes = artifact.modelBytes - writeAt
                 val contentLength = connection.contentLengthLong
                 if (contentLength >= 0 && contentLength != expectedResponseBytes) {
                     throw IllegalStateException("The model host returned an unexpected file length. The partial file was kept.")
@@ -296,7 +380,7 @@ internal class Gemma4OfflineCoordinator(
                             if (downloadCancelled.get()) throw DownloadPaused()
                             val count = input.read(buffer)
                             if (count < 0) break
-                            if (received + count > Gemma4Artifact.MODEL_BYTES) {
+                            if (received + count > artifact.modelBytes) {
                                 throw IllegalStateException("The downloaded data exceeded the pinned model size; the partial file was removed.")
                             }
                             output.write(buffer, 0, count)
@@ -304,11 +388,11 @@ internal class Gemma4OfflineCoordinator(
                             val now = SystemClock.elapsedRealtime()
                             if (now - lastProgressAt[0] >= 500L) {
                                 lastProgressAt[0] = now
-                                emit("download_progress", "bytes" to received, "total" to Gemma4Artifact.MODEL_BYTES)
+                                emit("download_progress", "bytes" to received, "total" to artifact.modelBytes)
                             }
                         }
                         output.fd.sync()
-                        if (received != Gemma4Artifact.MODEL_BYTES) {
+                        if (received != artifact.modelBytes) {
                             throw IllegalStateException("The model download stopped before the full pinned file arrived. Resume is available.")
                         }
                     }
@@ -318,21 +402,21 @@ internal class Gemma4OfflineCoordinator(
                 connection.disconnect()
             }
             if (downloadCancelled.get()) throw DownloadPaused()
-            emit("download_state", "state" to "verifying", "bytes" to Gemma4Artifact.MODEL_BYTES, "total" to Gemma4Artifact.MODEL_BYTES)
-            if (!Gemma4FileIntegrity.verify(partialFile, Gemma4Artifact.MODEL_BYTES, Gemma4Artifact.SHA256)) {
+            emit("download_state", "state" to "verifying", "bytes" to artifact.modelBytes, "total" to artifact.modelBytes)
+            if (!Gemma4FileIntegrity.verify(partialFile, artifact.modelBytes, artifact.sha256)) {
                 partialFile.delete()
                 throw IllegalStateException("SHA-256 verification failed. The downloaded file was discarded; start a fresh download.")
             }
             if (downloadCancelled.get()) throw DownloadPaused()
-            Gemma4FileIntegrity.installAtomically(partialFile, modelFile, Gemma4Artifact.MODEL_BYTES, Gemma4Artifact.SHA256)
-            emit("download_state", "state" to "complete", "bytes" to Gemma4Artifact.MODEL_BYTES, "total" to Gemma4Artifact.MODEL_BYTES, "message" to "Verified model saved in app-private storage. Loading and a separate experimental-chat opt-in are still required.")
+            Gemma4FileIntegrity.installAtomically(partialFile, modelFile, artifact.modelBytes, artifact.sha256)
+            emit("download_state", "state" to "complete", "bytes" to artifact.modelBytes, "total" to artifact.modelBytes, "message" to "Verified model saved in app-private storage. Loading and a separate experimental-chat opt-in are still required.")
         } catch (_: DownloadPaused) {
-            emit("download_state", "state" to "paused", "bytes" to (partialFile.takeIf(File::isFile)?.length() ?: 0L), "total" to Gemma4Artifact.MODEL_BYTES, "message" to "Download paused; verified progress stays in app-private storage. Resume is user-started.")
+            emit("download_state", "state" to "paused", "bytes" to (partialFile.takeIf(File::isFile)?.length() ?: 0L), "total" to artifact.modelBytes, "message" to "Download paused; verified progress stays in app-private storage. Resume is user-started.")
         } catch (error: Exception) {
             if (downloadCancelled.get()) {
-                emit("download_state", "state" to "paused", "bytes" to (partialFile.takeIf(File::isFile)?.length() ?: 0L), "total" to Gemma4Artifact.MODEL_BYTES, "message" to "Download paused; verified progress stays in app-private storage. Resume is user-started.")
+                emit("download_state", "state" to "paused", "bytes" to (partialFile.takeIf(File::isFile)?.length() ?: 0L), "total" to artifact.modelBytes, "message" to "Download paused; verified progress stays in app-private storage. Resume is user-started.")
             } else {
-                emit("download_state", "state" to "error", "bytes" to (partialFile.takeIf(File::isFile)?.length() ?: 0L), "total" to Gemma4Artifact.MODEL_BYTES, "message" to (error.message ?: "The model could not be downloaded."))
+                emit("download_state", "state" to "error", "bytes" to (partialFile.takeIf(File::isFile)?.length() ?: 0L), "total" to artifact.modelBytes, "message" to (error.message ?: "The model could not be downloaded."))
             }
         } finally {
             downloadConnection.set(null)
@@ -341,11 +425,11 @@ internal class Gemma4OfflineCoordinator(
         }
     }
 
-    private fun openModelConnection(resumeAt: Long): HttpURLConnection {
-        var current = URL(Gemma4Artifact.URL)
+    private fun openModelConnection(resumeAt: Long, artifact: OfflineModelArtifact): HttpURLConnection {
+        var current = URL(artifact.url)
         repeat(6) {
             if (downloadCancelled.get()) throw DownloadPaused()
-            if (!Gemma4Artifact.allowsRedirect(current.toURI())) {
+            if (!artifact.allowsRedirect(current.toURI())) {
                 throw IllegalStateException("The model download left the approved HTTPS host allowlist.")
             }
             val connection = (current.openConnection() as HttpURLConnection).apply {
@@ -364,7 +448,7 @@ internal class Gemma4OfflineCoordinator(
                 val location = connection.getHeaderField("Location")
                     ?: run { connection.disconnect(); throw IllegalStateException("The model host returned an invalid redirect.") }
                 val next = URL(current, location)
-                if (!Gemma4Artifact.allowsRedirect(next.toURI())) {
+                if (!artifact.allowsRedirect(next.toURI())) {
                     connection.disconnect()
                     throw IllegalStateException("The model download was redirected outside the approved HTTPS hosts.")
                 }
@@ -378,10 +462,14 @@ internal class Gemma4OfflineCoordinator(
     }
 
     fun removeModel() {
-        if (downloadActive || engine != null || runtimeOperation || inferenceActive) {
-            emit("download_state", "state" to "error", "message" to "Pause the download and unload the candidate before removing it.")
-            return
+        synchronized(this) {
+            if (downloadActive || fileRemovalActive || engine != null || runtimeOperation || inferenceActive) {
+                emit("download_state", "state" to "error", "message" to "Pause the download and unload the candidate before removing it.")
+                return
+            }
+            fileRemovalActive = true
         }
+        emit("status", *status().toList().toTypedArray())
         downloadExecutor.execute {
             try {
                 val deletedModel = !modelFile.exists() || modelFile.delete()
@@ -389,11 +477,13 @@ internal class Gemma4OfflineCoordinator(
                 val deletedPreviousModel = !previousModelFile.exists() || previousModelFile.delete()
                 val deletedPreviousPart = !previousPartialFile.exists() || previousPartialFile.delete()
                 if (!deletedModel || !deletedPart || !deletedPreviousModel || !deletedPreviousPart) throw IllegalStateException("The app could not remove all selected model files.")
-                emit("download_state", "state" to "removed", "bytes" to 0L, "total" to Gemma4Artifact.MODEL_BYTES, "message" to "The current model and any previous Gemma 4 model files selected for removal were removed from app-private storage.")
+                emit("download_state", "state" to "removed", "bytes" to 0L, "total" to selectedArtifact.modelBytes, "message" to "The selected model files and any previous Gemma 4 files were removed from app-private storage. The other model option was kept.")
             } catch (error: Exception) {
                 emit("download_state", "state" to "error", "message" to (error.message ?: "The model files could not be removed."))
+            } finally {
+                fileRemovalActive = false
+                emit("status", *status().toList().toTypedArray())
             }
-            emit("status", *status().toList().toTypedArray())
         }
     }
 
@@ -401,8 +491,9 @@ internal class Gemma4OfflineCoordinator(
         if (disposed.get()) return
         inferenceScope.launch {
             runtimeMutex.withLock {
+                val artifact = selectedArtifact
                 if (engine != null) {
-                    emit("runtime_state", "state" to "loaded", "message" to if (experimentalChatEnabled) "Gemma is loaded for fixed screening and explicitly opted-in experimental chat; it is not qualified." else "Gemma is loaded for screening. Turn on experimental chat in Settings if you want to use it for normal chat.")
+                    emit("runtime_state", "state" to "loaded", "message" to if (experimentalChatEnabled) "The selected model is loaded for fixed screening and explicitly opted-in experimental chat; it is not qualified." else "The selected model is loaded for screening. Turn on experimental chat in Settings if you want to use it for normal chat.")
                     return@withLock
                 }
                 if (runtimeOperation || inferenceActive) {
@@ -416,10 +507,10 @@ internal class Gemma4OfflineCoordinator(
                     if (memory.lowMemory) {
                         throw IllegalStateException("Android currently reports low memory. Close other apps and try later; loading is not guaranteed even when this warning clears. No network fallback was used.")
                     }
-                    if (!Gemma4FileIntegrity.verify(modelFile, Gemma4Artifact.MODEL_BYTES, Gemma4Artifact.SHA256)) {
+                    if (!Gemma4FileIntegrity.verify(modelFile, artifact.modelBytes, artifact.sha256)) {
                         throw IllegalStateException("The installed model failed its size or SHA-256 check. Remove it and download again.")
                     }
-                    emit("runtime_state", "state" to "loading", "message" to "Loading Gemma 4 E2B with the LiteRT-LM CPU backend. The published model card reports 2.3B effective parameters (5.1B including embeddings); this can still use substantial RAM.")
+                    emit("runtime_state", "state" to "loading", "message" to "Loading ${artifact.displayName} with the LiteRT-LM CPU backend. This model remains unqualified and may use substantial RAM.")
                     val candidate = Engine(
                         EngineConfig(
                             modelPath = modelFile.absolutePath,
@@ -434,9 +525,9 @@ internal class Gemma4OfflineCoordinator(
                         throw IllegalStateException("The model could not initialize on this device. It remains unqualified; no online fallback was used.", error)
                     }
                     engine = candidate
-                    emit("runtime_state", "state" to "loaded", "message" to if (experimentalChatEnabled) "Gemma is loaded for fixed screening and explicitly opted-in experimental chat. Quality and Redmi/HyperOS behavior are unqualified." else "Gemma is loaded for screening; normal chat needs separate opt-in in Settings. The model is not qualified.")
+                    emit("runtime_state", "state" to "loaded", "message" to if (experimentalChatEnabled) "The selected model is loaded for fixed screening and explicitly opted-in experimental chat. Quality and Redmi/HyperOS behavior are unqualified." else "The selected model is loaded for screening; normal chat needs separate opt-in in Settings. The model is not qualified.")
                 } catch (error: OutOfMemoryError) {
-                    emit("runtime_state", "state" to "error", "message" to "Android ran out of memory while loading Gemma. The model remains unqualified; close other apps and retry only if you choose. No online fallback was used.")
+                    emit("runtime_state", "state" to "error", "message" to "Android ran out of memory while loading the selected model. It remains unqualified; close other apps and retry only if you choose. No online fallback was used.")
                 } catch (error: Exception) {
                     emit("runtime_state", "state" to "error", "message" to (error.message ?: "The model could not be loaded locally."))
                 } finally {
@@ -535,7 +626,7 @@ internal class Gemma4OfflineCoordinator(
             return
         }
         if (!optedIn || !experimentalChatEnabled) {
-            finish(null, "opt_in_required", "Turn on experimental Gemma chat in Settings first. No online fallback was used.")
+            finish(null, "opt_in_required", "Turn on experimental local chat in Settings first. No online fallback was used.")
             return
         }
         if (prompt.isBlank() || prompt.toByteArray(Charsets.UTF_8).size > 48 * 1024) {
@@ -553,7 +644,7 @@ internal class Gemma4OfflineCoordinator(
                     }
                     val activeEngine = engine
                     if (activeEngine == null) {
-                        finish(null, "model_unavailable", "Download and load Gemma from Settings > Offline Model & Experimental Chat first. No online fallback was used.")
+                        finish(null, "model_unavailable", "Download and load a model from Settings > Offline Model & Experimental Chat first. No online fallback was used.")
                         return@withLock
                     }
                     if (inferenceActive || runtimeOperation) {
@@ -572,7 +663,7 @@ internal class Gemma4OfflineCoordinator(
                     inferenceCancelRequested = false
                     inferenceActive = true
                     activePurpose = "chat"
-                    emit("inference_state", "state" to "running", "purpose" to "chat", "message" to "Generating locally with experimental Gemma. No prompt is sent to a service.")
+                    emit("inference_state", "state" to "running", "purpose" to "chat", "message" to "Generating locally with the selected experimental model. No prompt is sent to a service.")
                     var conversation: Conversation? = null
                     val output = StringBuilder()
                     var finalState = "error"

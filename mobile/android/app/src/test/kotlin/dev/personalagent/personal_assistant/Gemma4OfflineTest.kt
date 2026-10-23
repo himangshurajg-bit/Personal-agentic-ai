@@ -25,8 +25,25 @@ class Gemma4OfflineTest {
     }
 
     @Test
+    fun lighterOptionIsPinnedToThePublicLiteRtLmArtifact() {
+        val qwen = OfflineModelArtifacts.qwen3
+        assertEquals("qwen3-0.6b", qwen.modelId)
+        assertEquals("Qwen3-0.6B.litertlm", qwen.modelFile)
+        assertEquals(613_722_264L, qwen.modelBytes)
+        assertEquals("c5f39b4191926786c3e6668b62af4d6eb15248dfc7a5348252a9b406f33f2108", qwen.sha256)
+        assertEquals("e6687177e00897731e7716267eebd4eba0dde7c2", qwen.revision)
+        assertTrue(qwen.url.contains("litert-community/Qwen3-0.6B/resolve/${qwen.revision}/${qwen.modelFile}"))
+        assertEquals("Apache-2.0", qwen.license)
+        assertEquals(null, qwen.minimumMemoryGb)
+        assertEquals(2, OfflineModelArtifacts.all.size)
+        assertEquals(Gemma4Artifact.MODEL_ID, OfflineModelArtifacts.find(Gemma4Artifact.MODEL_ID)?.modelId)
+        assertEquals(null, OfflineModelArtifacts.find("unlisted-model"))
+    }
+
+    @Test
     fun redirectsStayOnHttpsHuggingFaceDomains() {
         assertTrue(Gemma4Artifact.allowsRedirect(URI("https://huggingface.co/model")))
+        assertTrue(OfflineModelArtifacts.qwen3.allowsRedirect(URI("https://huggingface.co/model")))
         assertTrue(Gemma4Artifact.allowsRedirect(URI("https://us.gcp.cdn.hf.co/signed/model")))
         assertFalse(Gemma4Artifact.allowsRedirect(URI("http://huggingface.co/model")))
         assertFalse(Gemma4Artifact.allowsRedirect(URI("https://huggingface.co.attacker.example/model")))
