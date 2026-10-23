@@ -217,7 +217,7 @@ class McpServerStore {
       final initialized = await post('initialize', {
         'protocolVersion': protocolVersion,
         'capabilities': <String, dynamic>{},
-        'clientInfo': {'name': 'Personal Agentic AI', 'version': '0.3.0'},
+        'clientInfo': {'name': 'Personal Agentic AI', 'version': '1.0.0'},
       });
       if (initialized == null || initialized['protocolVersion'] != protocolVersion) {
         throw const McpException('MCP server did not negotiate the supported protocol version.');

@@ -24,6 +24,23 @@ jobs:
             exit 1
           fi
 
+      - name: Install pinned Gitleaks scanner
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.2'
+          cache: false
+
+      - name: Scan the exact source tree for embedded secrets
+        run: |
+          set -euo pipefail
+          go install github.com/zricethezav/gitleaks/v8@v8.28.0
+          "$(go env GOPATH)/bin/gitleaks" dir \
+            --redact \
+            --exit-code 1 \
+            --report-format json \
+            --report-path "$RUNNER_TEMP/source-gitleaks.json" \
+            "$GITHUB_WORKSPACE"
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -86,8 +103,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          expected_version_name='1.00.00.0000.0'
+          version_name="$(tr -d '\r\n' < mobile/android-version.txt)"
+          if [ "$version_name" != "$expected_version_name" ]; then
+            echo "Expected Android versionName $expected_version_name; found $version_name." >&2
+            exit 1
+          fi
           version_line="$(sed -n 's/^version:[[:space:]]*//p' mobile/pubspec.yaml | head -n 1)"
-          version_name="${version_line%%+*}"
           current_code="${version_line##*+}"
           if [ "$current_code" = "$version_line" ] || ! [[ "$current_code" =~ ^[0-9]+$ ]]; then current_code=0; fi
           max_code="$current_code"
@@ -123,6 +145,17 @@ jobs:
             --build-name='${{ steps.release.outputs.version_name }}' \
             --build-number='${{ steps.release.outputs.build_number }}'
 
+      - name: Verify the requested Android version in the APK
+        working-directory: mobile
+        run: |
+          set -euo pipefail
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          aapt="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          test -x "$aapt"
+          manifest_info="$("$aapt" dump badging "$apk" | sed -n '1p')"
+          printf '%s\n' "$manifest_info"
+          grep -F "versionCode='${{ steps.release.outputs.build_number }}' versionName='${{ steps.release.outputs.version_name }}'" <<< "$manifest_info"
+
       - name: Verify APK signature and integrity
         id: verify
         working-directory: mobile
@@ -136,12 +169,6 @@ jobs:
           unzip -tq "$apk"
           sha256sum "$apk" | tee "$RUNNER_TEMP/apk.sha256"
           echo "apk=$apk" >> "$GITHUB_OUTPUT"
-
-      - name: Install pinned Gitleaks scanner
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.24.2'
-          cache: false
 
       - name: Scan the exact signed APK for embedded secrets
         working-directory: mobile
@@ -176,9 +203,11 @@ jobs:
         run: |
           set -euo pipefail
           notes=$(cat <<EOF
-          Android release built from main commit $GITHUB_SHA (version ${{ steps.release.outputs.version_name }}, build ${{ steps.release.outputs.build_number }}).
+          Android release built from main commit $GITHUB_SHA (Android versionName ${{ steps.release.outputs.version_name }}, versionCode ${{ steps.release.outputs.build_number }}).
 
-          Signed with the owner's configured Android release key. This APK is for direct Android installation; it is not a Google Play Store listing.
+          Signed with the owner's configured Android release key. This ARM64 APK is for direct Android installation; it is not a Google Play Store listing.
+
+          The LiteRT-LM JNI callback keep-rule is included, but this APK has not been physically verified on Redmi 24090RA29I. Local Gemma chat remains experimental. Indic-Speak offline voice generation is not implemented; the app's existing Android TTS and optional ElevenLabs path are separate features, not an Indic-Speak replacement.
 
           SHA-256:
           $(cat "$RUNNER_TEMP/apk.sha256")
