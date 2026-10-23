@@ -137,6 +137,39 @@ jobs:
           sha256sum "$apk" | tee "$RUNNER_TEMP/apk.sha256"
           echo "apk=$apk" >> "$GITHUB_OUTPUT"
 
+      - name: Install pinned Gitleaks scanner
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.2'
+          cache: false
+
+      - name: Scan the exact signed APK for embedded secrets
+        working-directory: mobile
+        run: |
+          set -euo pipefail
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          test -s "$apk"
+          expected_sha="$(awk '{print $1}' "$RUNNER_TEMP/apk.sha256")"
+          actual_sha="$(sha256sum "$apk" | awk '{print $1}')"
+          test "$actual_sha" = "$expected_sha"
+          scan_dir="$(mktemp -d "$RUNNER_TEMP/apk-secret-scan.XXXXXX")"
+          trap 'rm -rf "$scan_dir"' EXIT
+          mkdir "$scan_dir/unpacked"
+          unzip -q "$apk" -d "$scan_dir/unpacked"
+          find "$scan_dir/unpacked" -type f -print0 | while IFS= read -r -d '' file; do
+            strings -a -n 4 "$file"
+          done > "$scan_dir/apk-strings.txt"
+          go install github.com/gitleaks/gitleaks/v8@v8.28.0
+          "$(go env GOPATH)/bin/gitleaks" dir \
+            --redact \
+            --exit-code 1 \
+            --report-format json \
+            --report-path "$scan_dir/report.json" \
+            "$scan_dir/apk-strings.txt"
+          after_sha="$(sha256sum "$apk" | awk '{print $1}')"
+          test "$after_sha" = "$expected_sha"
+          echo "Gitleaks found no secrets in strings extracted from the signed APK ($expected_sha)."
+
       - name: Publish downloadable GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
