@@ -144,21 +144,18 @@ void main() {
         {'enabled': false},
       );
       phase('opt-in local channel rejected an absent model without fallback');
+      phase('mounting app UI');
       await tester.pumpWidget(AssistantApp(state: s));
+      phase('app widget mounted');
       await pumpRouteFrames(tester);
+      phase('initial app frame pumped');
       expect(find.text('API36 Test assistant'), findsOneWidget);
       phase('initial app frame settled');
       // Use the grouped navigation drawer for routes; the glass dock only
       // shows labels for selected destinations and reserves its center for Voice.
-      for (final label in [
-        'Chat',
-        'Actions',
-        'Memory',
-        'Settings',
-        'Home',
-      ]) {
+      for (final label in ['Chat', 'Actions', 'Memory', 'Settings', 'Home']) {
         await tester.tap(find.byTooltip('Open navigation menu'));
-        await tester.pumpAndSettle();
+        await pumpRouteFrames(tester);
         phase('navigation tap started: $label');
         await tester.tap(find.text(label).last);
         phase('navigation tap completed: $label');
