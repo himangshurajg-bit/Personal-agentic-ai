@@ -56,6 +56,13 @@ android {
 
     buildTypes {
         release {
+            // LiteRT-LM calls its message callback through JNI by method name.
+            // Keep those callback entry points when R8 optimizes release builds.
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             // Never silently produce a debug-signed release APK.
             signingConfig = signingConfigs.getByName("release")
         }
@@ -101,4 +108,44 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.1")
     testImplementation("junit:junit:4.13.2")
+}
+
+
+// LiteRT-LM's nativeSendMessageAsync resolves these methods with JNI GetMethodID.
+// The native library is invisible to R8, so verify minified release names explicitly.
+val verifyLiteRtLmJniCallbackNames = tasks.register("verifyLiteRtLmJniCallbackNames") {
+    group = "verification"
+    description = "Checks that R8 preserves the LiteRT-LM JNI message callback names."
+    dependsOn("minifyReleaseWithR8")
+
+    doLast {
+        val mappingFile = layout.buildDirectory.file("outputs/mapping/release/mapping.txt").get().asFile
+        check(mappingFile.isFile) { "Release R8 mapping is missing: $mappingFile" }
+
+        val lines = mappingFile.readLines()
+        val callbackClass = "com.google.ai.edge.litertlm.Conversation\$JniMessageCallbackImpl"
+        val headerIndex = lines.indexOfFirst { it.startsWith("$callbackClass -> ") }
+        check(headerIndex >= 0) { "R8 mapping does not contain $callbackClass" }
+
+        // R8 inserts unindented mapping metadata comments between class headers and
+        // member mappings. Keep those comments in the block; only the next class
+        // header (an unindented, non-comment line) ends it.
+        val callbackBlock = lines.drop(headerIndex + 1).takeWhile { line ->
+            line.isBlank() || line.startsWith(" ") || line.startsWith("#")
+        }
+        val requiredMethods = listOf(
+            "void onMessage(java.lang.String)" to "onMessage",
+            "void onDone()" to "onDone",
+            "void onError(int,java.lang.String)" to "onError",
+        )
+        for ((signature, name) in requiredMethods) {
+            check(callbackBlock.any { it.contains(signature) && it.trim().endsWith("-> $name") }) {
+                "R8 did not preserve LiteRT-LM callback '$signature' as '$name' for $callbackClass"
+            }
+        }
+    }
+}
+
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    dependsOn(verifyLiteRtLmJniCallbackNames)
 }

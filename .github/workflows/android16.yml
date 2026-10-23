@@ -48,6 +48,9 @@ jobs:
       - name: Flutter checks
         working-directory: mobile
         run: flutter pub get && flutter analyze && flutter test
+      - name: Release shrinker check for LiteRT-LM JNI callbacks
+        working-directory: mobile/android
+        run: ./gradlew :app:verifyLiteRtLmJniCallbackNames --no-daemon
       - name: API36 instrumented local-first checks
         uses: reactivecircus/android-emulator-runner@v2
         with:

@@ -488,9 +488,15 @@ class AssistantState extends ChangeNotifier {
     if (key.isEmpty) return;
     await storage.write(key: storageKey, value: key);
     switch (provider) {
-      case 'openai': openAiApiKey = key; break;
-      case 'gemini': geminiApiKey = key; break;
-      case 'deepgram': deepgramApiKey = key; break;
+      case 'openai':
+        openAiApiKey = key;
+        break;
+      case 'gemini':
+        geminiApiKey = key;
+        break;
+      case 'deepgram':
+        deepgramApiKey = key;
+        break;
     }
     notifyListeners();
   }
@@ -504,9 +510,15 @@ class AssistantState extends ChangeNotifier {
     };
     await storage.delete(key: storageKey);
     switch (provider) {
-      case 'openai': openAiApiKey = ''; break;
-      case 'gemini': geminiApiKey = ''; break;
-      case 'deepgram': deepgramApiKey = ''; break;
+      case 'openai':
+        openAiApiKey = '';
+        break;
+      case 'gemini':
+        geminiApiKey = '';
+        break;
+      case 'deepgram':
+        deepgramApiKey = '';
+        break;
     }
     notifyListeners();
   }
@@ -613,7 +625,9 @@ class AssistantState extends ChangeNotifier {
 
   Future<String> testOpenAiApi() async {
     if (openAiApiKey.isEmpty) {
-      throw ServiceException('Add your OpenAI API key first. No request was sent.');
+      throw ServiceException(
+        'Add your OpenAI API key first. No request was sent.',
+      );
     }
     final client = clientFactory();
     try {
@@ -622,36 +636,50 @@ class AssistantState extends ChangeNotifier {
         Uri.parse('https://api.openai.com/v1/models'),
       )..followRedirects = false;
       request.headers['Authorization'] = 'Bearer $openAiApiKey';
-      final response = await client.send(request).timeout(
-        const Duration(seconds: 12),
-      );
+      final response = await client
+          .send(request)
+          .timeout(const Duration(seconds: 12));
       final status = response.statusCode;
       if (status == 401 || status == 403) {
         await response.stream.drain<void>();
-        throw ServiceException('OpenAI rejected this key. Check it and try again; no chat prompt was sent.');
+        throw ServiceException(
+          'OpenAI rejected this key. Check it and try again; no chat prompt was sent.',
+        );
       }
       if (status == 429) {
         await response.stream.drain<void>();
-        throw ServiceException('OpenAI rate-limited the connection test. Nothing was retried.');
+        throw ServiceException(
+          'OpenAI rate-limited the connection test. Nothing was retried.',
+        );
       }
       if (status < 200 || status >= 300) {
         await response.stream.drain<void>();
-        throw ServiceException('OpenAI returned HTTP $status for the connection test. No chat prompt was sent.');
+        throw ServiceException(
+          'OpenAI returned HTTP $status for the connection test. No chat prompt was sent.',
+        );
       }
       final body = await response.stream.bytesToString().timeout(
         const Duration(seconds: 12),
       );
       final decoded = jsonDecode(body);
       if (decoded is! Map || decoded['data'] is! List) {
-        throw ServiceException('OpenAI returned an unexpected model-list response.');
+        throw ServiceException(
+          'OpenAI returned an unexpected model-list response.',
+        );
       }
       return 'Connected · OpenAI accepted the key and returned its model list. No chat prompt was sent.';
     } on TimeoutException {
-      throw ServiceException('OpenAI connection test timed out. No chat prompt was sent.');
+      throw ServiceException(
+        'OpenAI connection test timed out. No chat prompt was sent.',
+      );
     } on http.ClientException {
-      throw ServiceException('Could not reach the OpenAI API. No chat prompt was sent.');
+      throw ServiceException(
+        'Could not reach the OpenAI API. No chat prompt was sent.',
+      );
     } on FormatException {
-      throw ServiceException('OpenAI returned invalid JSON for the connection test. No chat prompt was sent.');
+      throw ServiceException(
+        'OpenAI returned invalid JSON for the connection test. No chat prompt was sent.',
+      );
     } finally {
       client.close();
     }
@@ -1257,13 +1285,80 @@ class AssistantState extends ChangeNotifier {
     }
   }
 
-  static String describeStatus(int status) => switch (status) {
-    401 => 'Service token rejected. Check Settings.',
-    409 => 'This request is already running, expired or already used. Check its outcome before trying again.',
-    429 => 'Too many messages. Wait one minute, then retry.',
-    503 => 'No AI provider is configured. Set up a local model on the service computer; this app does not invent AI replies.',
-    _ => 'Service request failed ($status). Check the service before retrying.',
-  };
+  static int? _retryAfterSeconds(String? value) {
+    final raw = value?.trim();
+    if (raw == null || raw.isEmpty) return null;
+    final delay = int.tryParse(raw);
+    if (delay != null) return delay > 0 ? delay : null;
+
+    // Retry-After may be either delay-seconds or an HTTP-date (IMF-fixdate).
+    final match = RegExp(
+      r'^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), (\d{2}) '
+      r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) '
+      r'(\d{4}) (\d{2}):(\d{2}):(\d{2}) GMT$',
+      caseSensitive: false,
+    ).firstMatch(raw);
+    if (match == null) return null;
+
+    const months = {
+      'jan': 1,
+      'feb': 2,
+      'mar': 3,
+      'apr': 4,
+      'may': 5,
+      'jun': 6,
+      'jul': 7,
+      'aug': 8,
+      'sep': 9,
+      'oct': 10,
+      'nov': 11,
+      'dec': 12,
+    };
+    final month = months[match.group(2)!.toLowerCase()];
+    if (month == null) return null;
+    final year = int.parse(match.group(3)!);
+    final day = int.parse(match.group(1)!);
+    final hour = int.parse(match.group(4)!);
+    final minute = int.parse(match.group(5)!);
+    final second = int.parse(match.group(6)!);
+    final retryAt = DateTime.utc(year, month, day, hour, minute, second);
+    if (retryAt.year != year || retryAt.month != month || retryAt.day != day) {
+      return null;
+    }
+    final milliseconds = retryAt
+        .difference(DateTime.now().toUtc())
+        .inMilliseconds;
+    if (milliseconds <= 0) return null;
+    return (milliseconds + 999) ~/ 1000;
+  }
+
+  static String describeStatus(
+    int status, {
+    String engine = 'private_service',
+    String? retryAfter,
+  }) {
+    if (status == 429 && engine != 'private_service') {
+      final provider = switch (engine) {
+        'openai' => 'OpenAI',
+        'gemini' => 'Google Gemini',
+        _ => 'The selected AI provider',
+      };
+      final seconds = _retryAfterSeconds(retryAfter);
+      final wait = seconds != null
+          ? ' The provider asked you to wait at least $seconds seconds.'
+          : ' Wait until the provider allows another request.';
+      return '$provider rate-limited this request (HTTP 429).$wait Retry only when you choose; there was no automatic retry or provider fallback. If it keeps happening, check your API usage and rate limits.';
+    }
+    return switch (status) {
+      401 => 'Service token rejected. Check Settings.',
+      409 => 'This request is already running, expired or already used. Check its outcome before trying again.',
+      429 => 'Too many messages. Wait one minute, then retry.',
+      503 => 'No AI provider is configured. Set up a local model on the service computer; this app does not invent AI replies.',
+      _ =>
+        'Service request failed ($status). Check the service before retrying.',
+    };
+  }
+
   Future<void> selectConversation(String id, {bool load = true}) async {
     if (!RegExp(r'^[a-zA-Z0-9_-]{1,80}$').hasMatch(id)) {
       throw ServiceException('Invalid conversation identifier.');
@@ -1290,6 +1385,7 @@ class AssistantState extends ChangeNotifier {
     bool approvedOnline = false,
     bool shareMemories = false,
     bool shareHistory = false,
+    bool retryLastMessage = false,
   }) async {
     if (busy || text.trim().isEmpty) {
       return;
@@ -1304,6 +1400,12 @@ class AssistantState extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    final trimmedText = text.trim();
+    if (retryLastMessage && trimmedText != lastPrompt) {
+      error = 'The retry no longer matches the last message. Send it again as a new message.';
+      notifyListeners();
+      return;
+    }
     error = '';
     final selectedEngine = engine;
     final selectedConfig = selectedEngine == 'offline' ? null : config;
@@ -1311,11 +1413,19 @@ class AssistantState extends ChangeNotifier {
         .where((m) => m['state'] == 'complete')
         .map((m) => {'role': m['role'], 'text': m['text']})
         .toList();
-    lastPrompt = text.trim();
+    if (retryLastMessage) {
+      final retryIndex = prior.lastIndexWhere(
+        (m) => m['role'] == 'user' && m['text'] == lastPrompt,
+      );
+      if (retryIndex >= 0) prior.removeAt(retryIndex);
+    }
+    lastPrompt = trimmedText;
     partial = '';
     busy = true;
     final generation = ++_generation;
-    messages.add({'role': 'user', 'text': lastPrompt, 'state': 'complete'});
+    if (!retryLastMessage) {
+      messages.add({'role': 'user', 'text': lastPrompt, 'state': 'complete'});
+    }
     notifyListeners();
     final client = selectedEngine == 'offline' ? null : clientFactory();
     _stream = client;
@@ -1360,11 +1470,19 @@ class AssistantState extends ChangeNotifier {
             .send(req)
             .timeout(const Duration(seconds: 10));
         if (res.statusCode >= 300) {
+          if (res.statusCode == 429) {
+            throw ServiceException(
+              describeStatus(
+                res.statusCode,
+                engine: selectedEngine,
+                retryAfter: res.headers['retry-after'],
+              ),
+            );
+          }
           if (selectedEngine == 'gemini') {
             final message = switch (res.statusCode) {
               401 || 403 => 'Google rejected the key or this project cannot access Gemini 2.5 Flash. Check the key and eligibility; no fallback was used.',
               404 => 'Google did not find Gemini 2.5 Flash for this key. Access may be restricted; no other model was selected.',
-              429 => 'Google Gemini quota or rate limit reached. Check your available quota; no other model was selected or retried.',
               _ =>
                 'Gemini API request failed (${res.statusCode}). No other model was selected or retried.',
             };

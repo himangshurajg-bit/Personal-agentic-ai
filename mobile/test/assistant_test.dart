@@ -254,6 +254,125 @@ void main() {
     }
   });
   test(
+    'OpenAI rate limit respects Retry-After and never retries or falls back',
+    () async {
+      var calls = 0;
+      final state =
+          stateWith(
+              MockClient((_) async {
+                calls++;
+                return http.Response('{}', 429, headers: {'retry-after': '30'});
+              }),
+            )
+            ..engine = 'openai'
+            ..model = 'gpt-4o-mini'
+            ..openAiApiKey = 'test-only-key';
+
+      await state.send('Hello', approvedOnline: true);
+
+      expect(calls, 1);
+      expect(state.error, contains('OpenAI rate-limited'));
+      expect(state.error, contains('at least 30 seconds'));
+      expect(state.error, contains('no automatic retry or provider fallback'));
+      expect(state.messages.where((m) => m['role'] == 'user'), hasLength(1));
+      expect(state.messages.where((m) => m['role'] == 'assistant'), isEmpty);
+      state.dispose();
+    },
+  );
+
+  test('provider 429 honors an HTTP-date Retry-After value', () async {
+    final state =
+        stateWith(
+            MockClient(
+              (_) async => http.Response(
+                '{}',
+                429,
+                headers: {'retry-after': 'Fri, 23 Oct 2099 18:00:00 GMT'},
+              ),
+            ),
+          )
+          ..engine = 'openai'
+          ..model = 'gpt-4o-mini'
+          ..openAiApiKey = 'test-only-key';
+
+    await state.send('Hello', approvedOnline: true);
+
+    expect(state.error, contains('OpenAI rate-limited'));
+    expect(state.error, matches(RegExp(r'at least \d+ seconds')));
+    expect(state.error, contains('no automatic retry or provider fallback'));
+    state.dispose();
+  });
+
+  test(
+    'provider 429 without Retry-After does not invent a one-minute wait',
+    () async {
+      final state = stateWith(MockClient((_) async => http.Response('{}', 429)))
+        ..engine = 'openai'
+        ..model = 'gpt-4o-mini'
+        ..openAiApiKey = 'test-only-key';
+
+      await state.send('Hello', approvedOnline: true);
+
+      expect(
+        state.error,
+        contains('Wait until the provider allows another request'),
+      );
+      expect(state.error, isNot(contains('one minute')));
+      expect(state.error, isNot(contains('60 seconds')));
+      state.dispose();
+    },
+  );
+
+  test('an explicit retry reuses the original user turn and adds no duplicate history', () async {
+    final requestBodies = <Map<String, dynamic>>[];
+    var calls = 0;
+    final state =
+        AssistantState(
+            clientFactory: () => MockClient.streaming((request, body) async {
+              calls++;
+              requestBodies.add(
+                jsonDecode(utf8.decode(await body.toBytes()))
+                    as Map<String, dynamic>,
+              );
+              if (calls == 1) {
+                return http.StreamedResponse(Stream.empty(), 429);
+              }
+              return http.StreamedResponse(
+                Stream.value(
+                  utf8.encode(
+                    'data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":null}]}\n\n'
+                    'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+                  ),
+                ),
+                200,
+              );
+            }),
+          )
+          ..engine = 'openai'
+          ..model = 'gpt-4o-mini'
+          ..openAiApiKey = 'test-only-key';
+
+    await state.send('Hello', approvedOnline: true, shareHistory: true);
+    expect(state.messages.where((m) => m['role'] == 'user'), hasLength(1));
+    await state.send(
+      'Hello',
+      approvedOnline: true,
+      shareHistory: true,
+      retryLastMessage: true,
+    );
+
+    expect(calls, 2);
+    expect(state.messages.where((m) => m['role'] == 'user'), hasLength(1));
+    expect(state.messages.where((m) => m['role'] == 'assistant'), hasLength(1));
+    final secondPrompt = jsonDecode(
+      ((requestBodies[1]['messages'] as List).single as Map)['content']
+          as String,
+    ) as Map<String, dynamic>;
+    expect(secondPrompt['user_message'], 'Hello');
+    expect(secondPrompt['quoted_history'], isEmpty);
+    state.dispose();
+  });
+  test(
     'timeout fails once; settings/unconfigured notebook stays available',
     () async {
       var calls = 0;

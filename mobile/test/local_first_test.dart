@@ -302,6 +302,48 @@ void main() {
     },
   );
 
+  test(
+    'native offline inference failure stays local and never falls back online',
+    () async {
+      final calls = <MethodCall>[];
+      var networkCalls = 0;
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(AssistantState.offlineModel, null),
+      );
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(AssistantState.offlineModel, (call) async {
+            calls.add(call);
+            if (call.method == 'run_chat') {
+              throw PlatformException(
+                code: 'memory_exhausted',
+                message: 'Android ran out of memory during local generation.',
+              );
+            }
+            return true;
+          });
+      final s = AssistantState(
+        clientFactory: () => MockClient((_) async {
+          networkCalls++;
+          return http.Response('{}', 200);
+        }),
+      );
+      await s.initialize();
+      await s.saveEngine('offline', '', 'en-IN');
+      await s.saveExperimentalOfflineChat(true);
+
+      await s.send('Do a local task.');
+
+      expect(calls.where((call) => call.method == 'run_chat'), hasLength(1));
+      expect(networkCalls, 0);
+      expect(s.error, contains('Android ran out of memory'));
+      expect(s.error, contains('No online fallback was used'));
+      expect(s.messages.where((m) => m['role'] == 'user'), hasLength(1));
+      expect(s.messages.where((m) => m['role'] == 'assistant'), isEmpty);
+      s.dispose();
+    },
+  );
+
   for (final entry in const {
     'en-IN': 'English',
     'as-IN': 'Assamese (অসমীয়া)',

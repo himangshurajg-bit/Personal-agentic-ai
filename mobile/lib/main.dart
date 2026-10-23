@@ -2926,6 +2926,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       approvedOnline: true,
       shareMemories: widget.state.shareMemories,
       shareHistory: widget.state.shareHistory,
+      retryLastMessage: retry != null,
     );
     if (widget.state.speakReplies &&
         widget.state.error.isEmpty &&
@@ -4352,7 +4353,8 @@ class _SettingsState extends State<Settings> {
                     await widget.state.saveSpeechMode(speechMode);
                     if (speechMode == 'deepgram') {
                       await widget.state.saveCloudProviderKey(
-                        'deepgram', deepgramSecret.text,
+                        'deepgram',
+                        deepgramSecret.text,
                       );
                     }
                     deepgramSecret.clear();
@@ -4616,9 +4618,14 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
           widget.state.language,
         );
       } else if (engine == 'openai') {
-        await widget.state.saveCloudProviderKey('openai', compatibleSecret.text);
+        await widget.state.saveCloudProviderKey(
+          'openai',
+          compatibleSecret.text,
+        );
         await widget.state.saveEngine(
-          'openai', model.text, widget.state.language,
+          'openai',
+          model.text,
+          widget.state.language,
         );
       } else {
         await widget.state.saveSettings(
@@ -4847,7 +4854,8 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
                       onPressed: saving || testing
                           ? null
                           : () => _clearCredential(
-                              compatible: false, cloudProvider: 'openai',
+                              compatible: false,
+                              cloudProvider: 'openai',
                             ),
                       icon: const Icon(Icons.key_off),
                       label: const Text('Clear OpenAI API key'),
