@@ -24,16 +24,19 @@ void main() {
 
       final gemini = const EngineConfig(
         mode: 'gemini',
-        origin: 'https://generativelanguage.googleapis.com',
+        origin: AssistantState.geminiEndpoint,
         model: 'gemini-2.5-flash',
         token: 'gemini-key',
       ).request('local', 'hello');
       expect(
         gemini.url.toString(),
-        'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
       );
-      expect(gemini.headers['Authorization'], 'Bearer gemini-key');
-      expect(jsonDecode(gemini.body)['model'], 'gemini-2.5-flash');
+      expect(gemini.headers['x-goog-api-key'], 'gemini-key');
+      expect(
+        jsonDecode(gemini.body)['contents'][0]['parts'][0]['text'],
+        'hello',
+      );
     },
   );
 

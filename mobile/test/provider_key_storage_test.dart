@@ -21,7 +21,7 @@ void main() {
         await state.storage.read(key: 'deepgram_api_key'),
         'deepgram-secret',
       );
-      expect(state.config.token, isEmpty);
+      expect(state.config.token, 'gemini-secret');
 
       final restored = AssistantState();
       await restored.initialize();
