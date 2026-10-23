@@ -115,6 +115,7 @@ void main() {
         'command': 'never-run',
       });
       expect(bad!['result'], 'failed');
+      await s.saveEngine('offline', '', 'en-IN');
       await s.send('No network should be used');
       expect(s.error, contains('Experimental Gemma chat is off'));
       phase('unopted offline chat failed closed');
