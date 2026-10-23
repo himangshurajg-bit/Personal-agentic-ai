@@ -14,6 +14,7 @@ import 'offline_model.dart';
 import 'offline_voice.dart';
 import 'phone_screens.dart';
 import 'safe_workflows.dart';
+import 'image_generation_screen.dart';
 import 'ui_motion.dart';
 import 'visual_theme.dart';
 import 'voice_services.dart';
@@ -106,6 +107,10 @@ class _AssistantAppState extends State<AssistantApp>
         '/automations': (_) => ActionHistory(state: widget.state),
         '/drafts': (_) => const OutboundDraftsScreen(),
         '/skills': (_) => SafeSkillsScreen(state: widget.state),
+        '/images': (_) => ImageGenerationScreen(
+          endpoint: widget.state.endpoint,
+          token: widget.state.token,
+        ),
       },
     ),
   );
@@ -4365,6 +4370,15 @@ class _SettingsState extends State<Settings> {
                 },
                 child: const Text('Save settings'),
               ),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.pushNamed(context, '/images'),
+                icon: const Icon(Icons.image_outlined),
+                label: const Text('Create an image (Cloudflare)'),
+              ),
+              const Text(
+                'This sends only the prompt you type in the image screen—not chat history, saved memories or files. The private service must be explicitly configured.',
+              ),
+              const SizedBox(height: 12),
             ],
           ),
         ),
