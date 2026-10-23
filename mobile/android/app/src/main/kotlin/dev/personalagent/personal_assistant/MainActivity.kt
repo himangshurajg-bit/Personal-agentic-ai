@@ -187,6 +187,11 @@ class MainActivity : FlutterFragmentActivity() {
                         }
                     }
                     "cancel_chat" -> { offline.cancelChat(); result.success(true) }
+                    "select_model" -> {
+                        val modelId = call.argument<String>("model_id")
+                        if (modelId.isNullOrBlank()) result.error("invalid_model", "Choose a supported local model.", null)
+                        else { offline.selectModel(modelId); result.success(true) }
+                    }
                     "download" -> { offline.startDownload(); result.success(true) }
                     "cancel_download" -> { offline.cancelDownload(); result.success(true) }
                     "remove_model" -> { offline.removeModel(); result.success(true) }

@@ -1,6 +1,6 @@
 # Offline model language qualification
 
-Status: not passed. This is a candidate evaluation plan, not evidence that any model supports these languages. Gemma 4 E4B may be tried only through the explicitly opted-in experimental local-chat path; do not call it qualified or production-ready until one specifically licensed artifact passes the language/tutoring checks and Android runtime/device gates below. Do not download or bundle a candidate as part of this qualification document.
+Status: not passed. This is a candidate evaluation plan, not evidence that any model supports these languages. Gemma 4 E2B may be tried only through the explicitly opted-in experimental local-chat path; do not call it qualified or production-ready until one specifically licensed artifact passes the language/tutoring checks and Android runtime/device gates below. Do not download or bundle a candidate as part of this qualification document.
 
 ## Candidate record
 

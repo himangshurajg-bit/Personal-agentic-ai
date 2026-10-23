@@ -12,16 +12,38 @@ import org.junit.Test
 class Gemma4OfflineTest {
     @Test
     fun artifactIsPinnedToTheReviewedImmutableFile() {
-        assertTrue(Gemma4Artifact.URL.contains("/${Gemma4Artifact.REVISION}/${Gemma4Artifact.MODEL_FILE}"))
-        assertEquals(3_659_530_240L, Gemma4Artifact.MODEL_BYTES)
-        assertEquals("0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0", Gemma4Artifact.SHA256)
+        assertEquals("gemma-4-E2B-it", Gemma4Artifact.MODEL_ID)
+        assertEquals("gemma-4-E2B-it.litertlm", Gemma4Artifact.MODEL_FILE)
+        assertEquals("gemma-4-E4B-it.litertlm", Gemma4Artifact.PREVIOUS_MODEL_FILE)
+        assertTrue(Gemma4Artifact.URL.contains("litert-community/gemma-4-E2B-it-litert-lm/resolve/${Gemma4Artifact.REVISION}/${Gemma4Artifact.MODEL_FILE}"))
+        assertEquals("6e5c4f1e395deb959c494953478fa5cec4b8008f", Gemma4Artifact.REVISION)
+        assertEquals(2_588_147_712L, Gemma4Artifact.MODEL_BYTES)
+        assertEquals("181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c", Gemma4Artifact.SHA256)
+        assertEquals(8, Gemma4Artifact.MIN_DEVICE_MEMORY_GB)
         assertEquals("0.18.1", Gemma4Artifact.LITERT_LM_VERSION)
         assertEquals("Apache-2.0", Gemma4Artifact.LICENSE)
     }
 
     @Test
+    fun lighterOptionIsPinnedToThePublicLiteRtLmArtifact() {
+        val qwen = OfflineModelArtifacts.qwen3
+        assertEquals("qwen3-0.6b", qwen.modelId)
+        assertEquals("Qwen3-0.6B.litertlm", qwen.modelFile)
+        assertEquals(613_722_264L, qwen.modelBytes)
+        assertEquals("c5f39b4191926786c3e6668b62af4d6eb15248dfc7a5348252a9b406f33f2108", qwen.sha256)
+        assertEquals("e6687177e00897731e7716267eebd4eba0dde7c2", qwen.revision)
+        assertTrue(qwen.url.contains("litert-community/Qwen3-0.6B/resolve/${qwen.revision}/${qwen.modelFile}"))
+        assertEquals("Apache-2.0", qwen.license)
+        assertEquals(null, qwen.minimumMemoryGb)
+        assertEquals(2, OfflineModelArtifacts.all.size)
+        assertEquals(Gemma4Artifact.MODEL_ID, OfflineModelArtifacts.find(Gemma4Artifact.MODEL_ID)?.modelId)
+        assertEquals(null, OfflineModelArtifacts.find("unlisted-model"))
+    }
+
+    @Test
     fun redirectsStayOnHttpsHuggingFaceDomains() {
         assertTrue(Gemma4Artifact.allowsRedirect(URI("https://huggingface.co/model")))
+        assertTrue(OfflineModelArtifacts.qwen3.allowsRedirect(URI("https://huggingface.co/model")))
         assertTrue(Gemma4Artifact.allowsRedirect(URI("https://us.gcp.cdn.hf.co/signed/model")))
         assertFalse(Gemma4Artifact.allowsRedirect(URI("http://huggingface.co/model")))
         assertFalse(Gemma4Artifact.allowsRedirect(URI("https://huggingface.co.attacker.example/model")))
