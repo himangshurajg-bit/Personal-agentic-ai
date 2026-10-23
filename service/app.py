@@ -1,6 +1,8 @@
 """Private single-user chat service. No external action executes on this server."""
 from __future__ import annotations
 import asyncio
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -47,6 +49,9 @@ class Receipt(Strict):
     result: Literal["scheduled", "opened", "denied", "failed", "unknown"]
     detail: str = Field(max_length=300)
 
+class ImageRequest(Strict):
+    prompt: str = Field(min_length=1, max_length=1000)
+
 class SpeechRequest(Strict):
     text: str = Field(min_length=1, max_length=2000)
     style: Literal["neutral", "curious", "crying", "mischievous", "whispering", "shouting", "laughing", "sighing"] = "neutral"
@@ -55,7 +60,7 @@ class Provider(Protocol):
     async def stream(self, messages: list[dict]) -> AsyncIterator[str]: ...
 class Unconfigured:
     async def stream(self, messages):
-        raise RuntimeError("No AI provider configured. Configure a local Ollama model; offline tools remain available.")
+        raise RuntimeError("No AI provider configured. Choose an explicit provider; no fallback is used.")
         yield ""
 class Ollama:
     def __init__(self, model: str, url: str):
@@ -79,6 +84,78 @@ class Ollama:
                         if obj.get("done") is True: completed=True
                 if not completed: raise RuntimeError("Local model stream ended before completion")
 
+class GroqProvider:
+    """Optional server-side Groq adapter; its key never enters the Android app."""
+    URL = "https://api.groq.com/openai/v1/chat/completions"
+
+    def __init__(self, api_key: str, model: str = "openai/gpt-oss-120b"):
+        api_key = api_key.strip() if isinstance(api_key, str) else ""
+        model = model.strip() if isinstance(model, str) else ""
+        if not api_key or len(api_key) > 512 or "\n" in api_key or "\r" in api_key:
+            raise ValueError("Set a valid GROQ_API_KEY for the explicitly selected Groq provider")
+        if not re.fullmatch(r"[A-Za-z0-9_./:-]{1,128}", model) or ".." in model.split("/"):
+            raise ValueError("Set a valid Groq model identifier")
+        self.api_key, self.model = api_key, model
+
+    async def stream(self, messages):
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,
+            "max_completion_tokens": 2048,
+        }
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(110, connect=10), follow_redirects=False
+        ) as client:
+            async with client.stream(
+                "POST", self.URL,
+                headers={"Authorization": "Bearer " + self.api_key, "Content-Type": "application/json"},
+                json=payload,
+            ) as response:
+                if response.status_code != 200:
+                    # Never echo the provider body: it can contain private prompts or account details.
+                    raise RuntimeError("Groq API request failed")
+                if not (response.headers.get("content-type", "").lower().startswith("text/event-stream")):
+                    raise RuntimeError("Groq API returned an unexpected stream format")
+                completed = False
+                async for line in response.aiter_lines():
+                    if not line or line.startswith(":") or not line.startswith("data:"):
+                        continue
+                    event_data = line[5:].strip()
+                    if event_data == "[DONE]":
+                        completed = True
+                        break
+                    try:
+                        event = json.loads(event_data)
+                    except (ValueError, RecursionError):
+                        raise RuntimeError("Groq API returned an invalid stream event") from None
+                    if not isinstance(event, dict) or event.get("error") is not None:
+                        raise RuntimeError("Groq API reported an error")
+                    choices = event.get("choices")
+                    if choices is None:
+                        continue  # Usage-only chunk.
+                    if not isinstance(choices, list):
+                        raise RuntimeError("Groq API returned an invalid choice")
+                    if not choices:
+                        continue
+                    choice = choices[0]
+                    if not isinstance(choice, dict):
+                        raise RuntimeError("Groq API returned an invalid choice")
+                    delta = choice.get("delta", {})
+                    if not isinstance(delta, dict):
+                        raise RuntimeError("Groq API returned an invalid delta")
+                    content = delta.get("content")
+                    if content is not None:
+                        if not isinstance(content, str):
+                            raise RuntimeError("Groq API returned non-text content")
+                        if content:
+                            yield content
+                    finish_reason = choice.get("finish_reason")
+                    if finish_reason is not None and finish_reason != "stop":
+                        raise RuntimeError("Groq API stopped before a complete text answer")
+                if not completed:
+                    raise RuntimeError("Groq API stream ended before completion")
+
 VOICE_TAGS = {
     "neutral": "",
     "curious": "[curious]",
@@ -89,6 +166,77 @@ VOICE_TAGS = {
     "laughing": "[laughs]",
     "sighing": "[sighs]",
 }
+
+class CloudflareFluxImageProvider:
+    """Opt-in Cloudflare Workers AI image generation; credentials stay server-side."""
+    MODEL = "@cf/black-forest-labs/flux-1-schnell"
+    MAX_IMAGE_BYTES = 10_000_000
+
+    def __init__(self, account_id: str, api_token: str, transport=None):
+        account_id = account_id.strip() if isinstance(account_id, str) else ""
+        api_token = api_token.strip() if isinstance(api_token, str) else ""
+        if not re.fullmatch(r"[a-fA-F0-9]{32}", account_id):
+            raise ValueError("Set a valid CLOUDFLARE_ACCOUNT_ID")
+        if not api_token or len(api_token) > 512 or "\n" in api_token or "\r" in api_token:
+            raise ValueError("Set a valid CLOUDFLARE_API_TOKEN")
+        self.account_id, self.api_token, self.transport = account_id, api_token, transport
+
+    @staticmethod
+    def _image_signature(data: bytes) -> str | None:
+        if data.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if data.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            return "image/webp"
+        return None
+
+    async def generate(self, prompt: str) -> tuple[bytes, str]:
+        url = f"https://api.cloudflare.com/client/v4/accounts/{self.account_id}/ai/run/{self.MODEL}"
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(90, connect=10), follow_redirects=False,
+            transport=self.transport,
+        ) as client:
+            async with client.stream(
+                "POST", url,
+                headers={"Authorization": "Bearer " + self.api_token, "Content-Type": "application/json"},
+                json={"prompt": prompt},
+            ) as response:
+                if response.status_code != 200:
+                    # Provider bodies can include prompt/account details; never pass them to the app.
+                    raise RuntimeError("Cloudflare image request failed")
+                chunks, total = [], 0
+                async for chunk in response.aiter_bytes():
+                    total += len(chunk)
+                    if total > self.MAX_IMAGE_BYTES * 2:
+                        raise RuntimeError("Cloudflare image response exceeded the size limit")
+                    chunks.append(chunk)
+                raw = b"".join(chunks)
+                content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        if content_type == "application/json":
+            try:
+                envelope = json.loads(raw)
+                encoded = envelope.get("result", {}).get("image") if isinstance(envelope, dict) else None
+                if not isinstance(encoded, str):
+                    raise ValueError
+                if encoded.startswith("data:"):
+                    header, encoded = encoded.split(",", 1)
+                    mime = header[5:].split(";", 1)[0].lower()
+                else:
+                    mime = "image/png"
+                if mime not in {"image/png", "image/jpeg", "image/webp"}:
+                    raise ValueError
+                image = base64.b64decode(encoded, validate=True)
+            except (ValueError, TypeError, KeyError, binascii.Error, RecursionError):
+                raise RuntimeError("Cloudflare returned an invalid image response") from None
+        else:
+            image = raw
+        detected = self._image_signature(image)
+        if not image or len(image) > self.MAX_IMAGE_BYTES or detected is None:
+            raise RuntimeError("Cloudflare returned an unusable image")
+        if content_type in {"image/png", "image/jpeg", "image/webp"} and content_type != detected:
+            raise RuntimeError("Cloudflare returned an inconsistent image format")
+        return image, detected
 
 class VoiceProvider(Protocol):
     async def synthesize(self, text: str, style: str) -> bytes: ...
@@ -151,21 +299,43 @@ CREATE TABLE IF NOT EXISTS actions(id TEXT PRIMARY KEY, payload TEXT NOT NULL, t
         scored=[(len(words & set(re.findall(r"\w+",r["fact"].casefold()))),r) for r in rows]
         return [r["fact"] for n,r in sorted(scored,key=lambda p:p[0],reverse=True)[:5] if n]
 
-def create_app(path=None, provider=None, token=None, voice_provider=None):
+def create_app(path=None, provider=None, token=None, voice_provider=None, image_provider=None):
     token=token if token is not None else os.environ.get("ASSISTANT_TOKEN", "")
     if len(token)<24: raise ValueError("Set ASSISTANT_TOKEN to at least 24 random characters")
     store=Store(path or os.environ.get("ASSISTANT_DB","assistant.sqlite3"))
     if provider is None:
-        model=os.environ.get("OLLAMA_MODEL")
-        provider=Ollama(model,os.environ.get("OLLAMA_URL","http://127.0.0.1:11434")) if model else Unconfigured()
+        selected_provider = os.environ.get("ASSISTANT_PROVIDER", "ollama").strip().lower()
+        if selected_provider == "ollama":
+            model = os.environ.get("OLLAMA_MODEL")
+            provider = Ollama(model, os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")) if model else Unconfigured()
+        elif selected_provider == "groq":
+            provider = GroqProvider(
+                os.environ.get("GROQ_API_KEY", ""),
+                os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
+            )
+        else:
+            raise ValueError("ASSISTANT_PROVIDER must be 'ollama' or 'groq'; no fallback is used")
     if voice_provider is None:
         key=os.environ.get("ELEVENLABS_API_KEY", "")
         voice_id=os.environ.get("ELEVENLABS_VOICE_ID", "")
         if key and voice_id:
             voice_provider=ElevenLabsVoice(key, voice_id, os.environ.get("ELEVENLABS_MODEL_ID", "eleven_v4"))
+    if image_provider is None:
+        selected_image_provider = os.environ.get("ASSISTANT_IMAGE_PROVIDER", "disabled").strip().lower()
+        if selected_image_provider == "cloudflare":
+            account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+            api_token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+            if account_id and api_token:
+                image_provider = CloudflareFluxImageProvider(account_id, api_token)
+        elif selected_image_provider != "disabled":
+            raise ValueError("ASSISTANT_IMAGE_PROVIDER must be 'disabled' or 'cloudflare'; no fallback is used")
     app=FastAPI(title="Personal assistant private service",docs_url=None,redoc_url=None,openapi_url=None)
     app.state.store=store
+    app.state.provider=provider
+    app.state.provider_configured=not isinstance(provider, Unconfigured)
     app.state.voice_provider=voice_provider
+    app.state.image_provider=image_provider
+    image_calls=deque()
     calls=defaultdict(deque)
     voice_calls=deque()
     active=set()
@@ -176,7 +346,25 @@ def create_app(path=None, provider=None, token=None, voice_provider=None):
         if request.headers.get("origin"): raise HTTPException(403,"Browser origins are not enabled")
     @app.get("/health")
     async def health(_=Depends(auth)):
-        return {"ok":True,"provider_configured":not isinstance(provider,Unconfigured)}
+        return {"ok":True,"provider_configured":not isinstance(provider,Unconfigured),"image_provider_configured":image_provider is not None}
+    @app.post("/images/generate")
+    async def generate_image(body: ImageRequest, _=Depends(auth)):
+        if image_provider is None:
+            raise HTTPException(503, "Image generation is not configured on this private service")
+        now=time.monotonic()
+        while image_calls and image_calls[0] < now-60: image_calls.popleft()
+        if len(image_calls) >= 3:
+            raise HTTPException(429, "Image generation limit reached; wait one minute")
+        image_calls.append(now)
+        try:
+            image, media_type = await asyncio.wait_for(image_provider.generate(body.prompt), timeout=100)
+        except TimeoutError:
+            raise HTTPException(504, "Image generation timed out; nothing was retried")
+        except Exception:
+            raise HTTPException(502, "Image provider did not return a usable image; nothing was retried")
+        if not image or len(image) > CloudflareFluxImageProvider.MAX_IMAGE_BYTES or media_type not in {"image/png", "image/jpeg", "image/webp"}:
+            raise HTTPException(502, "Image provider returned an unusable image")
+        return Response(image, media_type=media_type, headers={"Cache-Control":"no-store", "X-Content-Type-Options":"nosniff"})
     @app.post("/voice/speech")
     async def voice_speech(body: SpeechRequest, _=Depends(auth)):
         if voice_provider is None:

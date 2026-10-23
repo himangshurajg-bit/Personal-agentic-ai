@@ -22,7 +22,25 @@ The Flutter client can reach loopback via USB `adb reverse tcp:8766 tcp:8766` or
 
 Install and run a model in Ollama on the same service computer using that model's own license and hardware requirements. No model is downloaded or paid API called by this project. Set `OLLAMA_MODEL` to the already-installed model's exact name before starting the service. Optional `OLLAMA_URL` defaults to `http://127.0.0.1:11434`; only loopback origins are accepted. Restart the service to apply changes. Models and credentials are not requested through chat.
 
-Without `OLLAMA_MODEL`, `/health` truthfully returns `provider_configured: false` and chat returns 503. This is not a simulated assistant. The test-only provider is injected from tests and cannot be enabled as a production demo responder. The `Provider.stream(messages)` protocol is the replacement boundary. An additional provider must undergo privacy, license, cost and transport review first.
+With the default `ASSISTANT_PROVIDER=ollama`, without `OLLAMA_MODEL`, `/health` truthfully returns `provider_configured: false` and chat returns 503. This is not a simulated assistant. The test-only provider is injected from tests and cannot be enabled as a production demo responder. The `Provider.stream(messages)` protocol is the replacement boundary.
+
+## Optional Groq hosted API (first cloud adapter)
+
+The service also supports Groq's OpenAI-compatible streaming chat endpoint. It is opt-in and server-side: set `ASSISTANT_PROVIDER=groq`, `GROQ_API_KEY` and optionally `GROQ_MODEL` in the private service process environment, then restart the service. The initial model is `openai/gpt-oss-120b`; Groq's current high-level Free Plan table lists 30 requests/minute, 1,000 requests/day, 8,000 tokens/minute and 200,000 tokens/day for that model. Groq says exact account limits may vary. Keep the account on its Free plan if zero-cost use is required; this project never upgrades an account, retries a request or routes to a paid fallback.
+
+The provider key stays on the service computer, never in the Android APK, repository, or chat. The phone still uses the authenticated private service and requires its existing per-message online payload review. An approved online request can include the current prompt and any selected context. Groq says inference inputs and outputs are not retained by default and are not used to train models under its Services Agreement, but it may temporarily log them for reliability or abuse investigations for up to 30 days; its Data Controls offer Zero Data Retention. Third-party model terms also apply. Groq's Services Agreement requires the account user to be at least 18. Do not configure or use a Groq key until that eligibility condition is met.
+
+The API key and model are not checked into this repository. The provider is selected only when `ASSISTANT_PROVIDER=groq`; merely setting a key does not activate it. If the key or model is missing/invalid, startup fails rather than falling back to Ollama. Tests use a mocked HTTPS response only: no live Groq request, key creation, Assamese quality check, JEE evaluation, or billing-tier verification has been performed. Verify English, Assamese and JEE responses yourself before relying on the service; quality is not guaranteed by API compatibility.
+
+## Optional Cloudflare Workers AI image generation
+
+This adds a separate, opt-in prompt-to-image endpoint using Cloudflare Workers AI `@cf/black-forest-labs/flux-1-schnell`. It is disabled unless `ASSISTANT_IMAGE_PROVIDER=cloudflare` and both `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are set in the private FastAPI process environment. Create a Cloudflare API token scoped to Workers AI inference for the account, set its account ID and token directly in the server environment, then restart the service. The token stays server-side; never place it in the APK, repository, or chat. The Flutter screen sends only the exact prompt entered there—no conversation history, saved memory, selected file, or other context—to this service and then Cloudflare.
+
+The free Workers AI allowance is 10,000 neurons per day. Free-plan requests fail after that allowance is exhausted; this code never retries or switches to a paid model. However, the app cannot inspect or enforce your Cloudflare account's plan: Paid accounts can be charged above the free allowance. If zero-cost use matters, verify the account is on Free and monitor its usage/billing settings before enabling this option. This is a free allowance, not an unlimited guarantee.
+
+Cloudflare's stateless inference documentation says customer content is not retained after processing and is not used to train models; operational metadata may still be retained. Avoid entering sensitive prompts. The endpoint accepts one prompt (1–1,000 characters), authenticates with the existing private-service token, allows at most three attempts per minute, has no paid fallback, and returns only a validated PNG/JPEG/WebP image. Tests use mocked HTTP and make no Cloudflare account, key, or live API request.
+
+The image creation page is a separate route under Settings. Generation requires a reachable private FastAPI service plus the server-side Cloudflare configuration; an unconfigured service returns 503 and no image is generated.
 
 ## Optional ElevenLabs expressive speech
 
@@ -43,6 +61,7 @@ The smoke script uses a temporary database, synthetic facts and no personal data
 ## API and safety boundaries
 
 - `POST /chat`: conversation ID and prompt; NDJSON `start`, `delta`, `done`/`error`. One active response per conversation, ten accepted requests/minute, provider connection/read timeouts and a total 120-second response budget. The client must not call a truncated stream complete.
+- `POST /images/generate`: a single, explicit 1–1,000-character prompt; returns an image only with the opt-in Cloudflare adapter configured. Three requests per minute, bounded validated image response, no retries or provider fallback.
 - `GET /conversations`: most recent 100 conversation scopes, title and message count for reopening history.
 - `GET/DELETE /conversations/{id}`: persisted last 100 messages/deletion. Incomplete assistant messages keep an explicit state; the model context uses only complete messages from the latest 20. Deletion refuses while a stream is active.
 - `GET/POST /memories`, `DELETE /memories/{id}`, `GET /memories/export`: explicit, owner-controlled facts. Relevant retrieval selects up to five lexical matches within the conversation only. Memory content is quoted data, not authorization. This is intentionally limited lexical recall, not semantic retrieval or inferred personalization.
@@ -56,6 +75,6 @@ A receipt is a device report and always has `independently_verified: false`. And
 uv run --project service pytest service/tests -q
 ```
 
-The tests cover auth/origins, strict schemas, persisted history, conversation-scoped factual selection and forgetting, unconfigured/provider errors, rate limits, expired/used approvals and device-reported results. The client suite separately exercises weak/disconnected streams, status failures, timeout cancellation and denied-permission flows with mocks. No test-provider response should be described as a real AI conversation or physical-device result.
+The tests cover auth/origins, strict schemas, persisted history, conversation-scoped factual selection and forgetting, unconfigured/provider errors, opt-in Cloudflare selection and mocked image generation, rate limits, expired/used approvals and device-reported results. The client suite separately exercises weak/disconnected streams, status failures, timeout cancellation and denied-permission flows with mocks. No test-provider response should be described as a real AI conversation or physical-device result.
 
 Forgetting a saved memory deletes that record only. It does not erase facts already present in conversation history; delete that conversation separately if needed. Exported JSON files are outside the memory database and must be handled by their owner.

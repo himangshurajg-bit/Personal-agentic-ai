@@ -55,6 +55,13 @@ This candidate has not passed representative English, Assamese, Hindi, Hinglish,
 - Spoken replies use a reported installed, non-network Android TTS voice for the selected locale or remain text-only. No language substitution is permitted. Hindi and Hinglish ASR/TTS, Assamese naturalness/ASR/TTS, and every installed voice must be tested independently; a Hindi voice does not establish Hinglish quality. These voice languages are not yet qualified.
 - Settings → **Check device speech capabilities** reports API and recognizer availability without requesting microphone access. Availability does not prove installed language support.
 
+## Advanced voice and selectable cloud chat
+
+- Chat engine selection includes the existing private FastAPI service, the existing OpenAI-compatible endpoint, OpenAI ChatGPT, Google Gemini, and the explicitly unavailable offline-model boundary. OpenAI and Gemini use separate API keys in Android secure storage and their documented HTTPS chat-completions routes; a model identifier is selected in Settings. Each chat request remains user-started with the app’s existing per-send approval and no automatic fallback. Credentials are not bundled or logged.
+- Deepgram is a speech-to-text provider, not a general chat LLM. Select Deepgram speech recognition, choose English or Hindi, save your own Deepgram API key, and tap the microphone. After the disclosure and Android microphone prompt, recording is foreground-only; tapping Stop sends one short-lived PCM recording to Deepgram Nova-3. It is discarded at 60 seconds, is not sent in the background, and the resulting transcript is inserted into the editable draft rather than sent to chat. Assamese/Hinglish Deepgram recognition is not enabled in this implementation. Network use, processing and any provider charges depend on the account.
+- Text-to-speech reuses the existing on-device Android/Flutter TTS and optional per-reply ElevenLabs route through the private service; it does not introduce a new TTS vendor or background voice. ElevenLabs remains a separate TTS provider, not a chat model.
+- These adapters have mockable request/response and failure paths; no live vendor call is part of tests. Test on a device and with owner-configured provider keys before relying on recognition or provider quality.
+
 ## Privacy and permissions
 
 No broad storage, contacts, calendar, notification-listener, camera, accessibility or overlay access is requested. Microphone and notification permissions are just-in-time and optional for local typing/notes. Document grants are scoped to the selected file and not persisted for background scanning.

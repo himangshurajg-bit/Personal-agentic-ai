@@ -2,8 +2,9 @@ import asyncio
 import json
 import time
 import pytest
+import httpx
 from httpx import ASGITransport, AsyncClient
-from app import create_app, Ollama
+from app import create_app, Ollama, GroqProvider
 TOKEN='x'*32
 class Recorder:
     def __init__(self, fail=False): self.messages=[]; self.fail=fail
@@ -128,6 +129,86 @@ def test_token_and_provider_host(tmp_path):
 def test_provider_rejects_non_origin_and_credential_urls(url):
     with pytest.raises(ValueError): Ollama('model',url)
 
+def test_groq_configuration_is_explicit_and_never_falls_back(monkeypatch, tmp_path):
+    monkeypatch.delenv("ASSISTANT_PROVIDER", raising=False)
+    monkeypatch.delenv("OLLAMA_MODEL", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "server-secret-test-only")
+    # Merely having a Groq key present must not enable a network provider.
+    default_app = create_app(tmp_path / "default", token=TOKEN)
+    assert default_app.state.provider.__class__.__name__ == "Unconfigured"
+    assert default_app.state.provider_configured is False
+
+    monkeypatch.setenv("ASSISTANT_PROVIDER", "groq")
+    app = create_app(tmp_path / "groq", token=TOKEN)
+    assert isinstance(app.state.provider, GroqProvider)
+    assert app.state.provider.model == "openai/gpt-oss-120b"
+    assert app.state.provider_configured is True
+
+    monkeypatch.delenv("GROQ_API_KEY")
+    with pytest.raises(ValueError, match="GROQ_API_KEY"):
+        create_app(tmp_path / "missing-key", token=TOKEN)
+    monkeypatch.setenv("ASSISTANT_PROVIDER", "unknown")
+    with pytest.raises(ValueError, match="ASSISTANT_PROVIDER"):
+        create_app(tmp_path / "unknown", token=TOKEN)
+
+
+def test_groq_provider_validates_key_and_model():
+    with pytest.raises(ValueError, match="GROQ_API_KEY"):
+        GroqProvider("", "openai/gpt-oss-120b")
+    with pytest.raises(ValueError, match="model identifier"):
+        GroqProvider("test-key", "../outside")
+
+
+async def test_groq_adapter_streams_from_fixed_endpoint_without_live_calls(monkeypatch):
+    import httpx
+    original = httpx.AsyncClient
+    seen = []
+    def handler(request):
+        seen.append(request)
+        assert str(request.url) == GroqProvider.URL
+        assert request.headers["authorization"] == "Bearer server-secret-test-only"
+        payload = json.loads(request.content)
+        assert payload == {
+            "model": "openai/gpt-oss-120b",
+            "messages": [{"role": "user", "content": "hello"}],
+            "stream": True,
+            "max_completion_tokens": 2048,
+        }
+        body = (
+            'data: {"choices":[{"delta":{"content":"Hello "},"finish_reason":null}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"world"},"finish_reason":null}]}\n\n'
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+            'data: [DONE]\n\n'
+        )
+        return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs))
+    provider = GroqProvider("server-secret-test-only", "openai/gpt-oss-120b")
+    messages = [{"role": "user", "content": "hello"}]
+    assert [part async for part in provider.stream(messages)] == ["Hello ", "world"]
+    assert len(seen) == 1
+
+
+async def test_groq_adapter_fails_closed_on_http_errors_and_truncated_streams(monkeypatch):
+    import httpx
+    original = httpx.AsyncClient
+    provider = GroqProvider("server-secret-test-only", "openai/gpt-oss-120b")
+    messages = [{"role": "user", "content": "private prompt"}]
+
+    def error_handler(request):
+        return httpx.Response(401, content="secret-bearing error body")
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(error_handler), **kwargs))
+    with pytest.raises(RuntimeError, match="Groq API request failed") as error:
+        _ = [part async for part in provider.stream(messages)]
+    assert "private prompt" not in str(error.value)
+    assert "secret-bearing" not in str(error.value)
+
+    def partial_handler(request):
+        return httpx.Response(200, content='data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}\n', headers={"content-type": "text/event-stream"})
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(partial_handler), **kwargs))
+    with pytest.raises(RuntimeError, match="before completion"):
+        _ = [part async for part in provider.stream(messages)]
+
+
 async def test_local_adapter_requires_completion_and_keeps_memory_input_local(monkeypatch):
     import httpx
     original=httpx.AsyncClient
@@ -184,3 +265,73 @@ async def test_unknown_receipt_is_distinct_and_success_kind_is_validated(client)
     reply=await c.post('/actions/'+draft['id']+'/receipt',json={'result':'unknown','detail':'Device disconnected; no automatic retry'})
     assert reply.json()['result']=='unknown' and reply.json()['independently_verified'] is False
     assert (await c.post('/actions/'+draft['id']+'/receipt',json={'result':'opened','detail':'late duplicate'})).status_code==409
+
+class FakeImage:
+    def __init__(self, image=bytes.fromhex("89504e470d0a1a0a")+b"mock-image"):
+        self.calls=[]; self.image=image
+    async def generate(self, prompt):
+        self.calls.append(prompt)
+        return self.image, "image/png"
+
+async def test_image_route_is_disabled_by_default_and_sends_only_explicit_prompt(tmp_path):
+    app=create_app(tmp_path/"image-off",token=TOKEN)
+    async with AsyncClient(transport=ASGITransport(app=app),base_url="http://test",headers={"Authorization":"Bearer "+TOKEN}) as c:
+        assert (await c.get('/health')).json()['image_provider_configured'] is False
+        assert (await c.post('/images/generate',json={'prompt':'a blue fox'})).status_code==503
+        assert (await c.post('/images/generate',json={'prompt':'x','conversation':'personal'})).status_code==422
+        assert (await c.post('/images/generate',json={'prompt':'x'},headers={'Authorization':'bad'})).status_code==401
+        assert (await c.post('/images/generate',json={'prompt':'x'*1001})).status_code==422
+    image=FakeImage(); app=create_app(tmp_path/"image-on",token=TOKEN,image_provider=image)
+    async with AsyncClient(transport=ASGITransport(app=app),base_url="http://test",headers={"Authorization":"Bearer "+TOKEN}) as c:
+        response=await c.post('/images/generate',json={'prompt':'a blue fox'})
+        assert response.status_code==200
+        assert response.headers['content-type']=='image/png'
+        assert response.headers['cache-control']=='no-store'
+        assert response.content.startswith(bytes.fromhex('89504e47'))
+        assert image.calls==['a blue fox']
+
+async def test_cloudflare_flux_adapter_uses_server_key_and_prompt_only():
+    import base64
+    from app import CloudflareFluxImageProvider
+    png=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jXioAAAAASUVORK5CYII=')
+    observed=[]
+    async def handle(request):
+        observed.append(request)
+        return httpx.Response(200,headers={'content-type':'application/json'},json={'result':{'image':base64.b64encode(png).decode()}})
+    provider=CloudflareFluxImageProvider('0123456789abcdef0123456789abcdef','server-secret',httpx.MockTransport(handle))
+    image,mime=await provider.generate('only the prompt')
+    assert image==png and mime=='image/png'
+    req=observed[0]
+    assert req.url.path.endswith('/@cf/black-forest-labs/flux-1-schnell')
+    assert req.headers['authorization']=='Bearer server-secret'
+    assert req.read().decode()=='{"prompt":"only the prompt"}'
+
+async def test_cloudflare_adapter_rejects_provider_error_and_malformed_image():
+    import base64
+    from app import CloudflareFluxImageProvider
+    async def bad_status(request): return httpx.Response(429,text='private provider body')
+    provider=CloudflareFluxImageProvider('0123456789abcdef0123456789abcdef','server-secret',httpx.MockTransport(bad_status))
+    with pytest.raises(RuntimeError,match='request failed'):
+        await provider.generate('prompt')
+    async def bad_image(request): return httpx.Response(200,headers={'content-type':'application/json'},json={'result':{'image':base64.b64encode(b'not-image').decode()}})
+    provider=CloudflareFluxImageProvider('0123456789abcdef0123456789abcdef','server-secret',httpx.MockTransport(bad_image))
+    with pytest.raises(RuntimeError,match='unusable image'):
+        await provider.generate('prompt')
+
+
+def test_cloudflare_image_provider_is_opt_in_and_validates_server_configuration(monkeypatch, tmp_path):
+    from app import CloudflareFluxImageProvider
+    monkeypatch.setenv("ASSISTANT_IMAGE_PROVIDER", "disabled")
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "0123456789abcdef0123456789abcdef")
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "server-secret-test-only")
+    disabled = create_app(tmp_path / "cloudflare-disabled", token=TOKEN)
+    assert disabled.state.image_provider is None
+    monkeypatch.setenv("ASSISTANT_IMAGE_PROVIDER", "cloudflare")
+    enabled = create_app(tmp_path / "cloudflare-enabled", token=TOKEN)
+    assert isinstance(enabled.state.image_provider, CloudflareFluxImageProvider)
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "bad")
+    with pytest.raises(ValueError, match="CLOUDFLARE_ACCOUNT_ID"):
+        create_app(tmp_path / "cloudflare-invalid", token=TOKEN)
+    monkeypatch.setenv("ASSISTANT_IMAGE_PROVIDER", "unknown")
+    with pytest.raises(ValueError, match="ASSISTANT_IMAGE_PROVIDER"):
+        create_app(tmp_path / "cloudflare-unknown", token=TOKEN)

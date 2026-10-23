@@ -4,16 +4,20 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:record/record.dart';
 import 'package:flutter/services.dart';
 
 import 'assistant_state.dart';
 import 'mcp_servers.dart';
 import 'wajo_oauth.dart';
 import 'offline_model.dart';
+import 'offline_voice.dart';
 import 'phone_screens.dart';
 import 'safe_workflows.dart';
+import 'image_generation_screen.dart';
 import 'ui_motion.dart';
 import 'visual_theme.dart';
+import 'voice_services.dart';
 
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
@@ -103,6 +107,10 @@ class _AssistantAppState extends State<AssistantApp>
         '/automations': (_) => ActionHistory(state: widget.state),
         '/drafts': (_) => const OutboundDraftsScreen(),
         '/skills': (_) => SafeSkillsScreen(state: widget.state),
+        '/images': (_) => ImageGenerationScreen(
+          endpoint: widget.state.endpoint,
+          token: widget.state.token,
+        ),
       },
     ),
   );
@@ -2259,7 +2267,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   static const voiceEvents = MethodChannel('personal_assistant/voice');
   static const audioEvents = MethodChannel('personal_assistant/audio');
   final tts = FlutterTts();
-  bool listening = false, speaking = false;
+  final _deepgramRecorder = AudioRecorder();
+  final _deepgram = DeepgramTranscriber();
+  StreamSubscription<Uint8List>? _deepgramSubscription;
+  final List<Uint8List> _deepgramChunks = [];
+  Timer? _deepgramLimit;
+  int _deepgramBytes = 0;
+  bool _deepgramLimitHit = false;
+  bool listening = false, speaking = false, comparing = false;
   bool _draftApplied = false;
   bool _initialVoiceStarted = false;
   double level = 0;
@@ -2335,6 +2350,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
       AssistantState.device.invokeMethod('voice_cancel');
+      unawaited(_cancelDeepgramRecording());
+      _deepgram.cancel();
       tts.stop();
       if (speaking) unawaited(stopExpressiveAudio());
       widget.state.stop();
@@ -2358,6 +2375,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> stopAll() async {
+    if (listening && widget.state.speechMode == 'deepgram') {
+      await _cancelDeepgramRecording();
+    }
     widget.state.stop();
     await AssistantState.device.invokeMethod('voice_cancel');
     await tts.stop();
@@ -2371,13 +2391,210 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _cancelDeepgramRecording() async {
+    _deepgramLimit?.cancel();
+    _deepgramLimit = null;
+    _deepgram.cancel();
+    try {
+      await _deepgramRecorder.stop();
+    } catch (_) {
+      // No active recording or platform service unavailable.
+    }
+    await _deepgramSubscription?.cancel();
+    _deepgramSubscription = null;
+    _deepgramChunks.clear();
+    _deepgramBytes = 0;
+    _deepgramLimitHit = false;
+    if (mounted) {
+      setState(() {
+        listening = false;
+        level = 0;
+      });
+    }
+  }
+
+  Future<void> _startDeepgramRecording() async {
+    if (widget.state.deepgramApiKey.isEmpty) {
+      notice(
+        context,
+        'Add your Deepgram API key in Settings before using Deepgram voice input.',
+      );
+      return;
+    }
+    var approved = false;
+    approved =
+        await showDialog<bool>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: const Text('Record speech for Deepgram?'),
+            content: const Text(
+              'Recording starts only after you approve and stays on while this screen is open. When you tap Stop, the audio is sent once to Deepgram for transcription; it may be processed under your Deepgram plan. The transcript is placed in the message box and is not sent to the chat until you press Send. No recording is uploaded in the background.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(c, true),
+                child: const Text('Record with Deepgram'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!approved || !mounted) return;
+    try {
+      if (!await _deepgramRecorder.hasPermission()) {
+        if (mounted) {
+          notice(
+            context,
+            'Allow microphone access in Android to record speech.',
+          );
+        }
+        return;
+      }
+      _deepgramChunks.clear();
+      _deepgramBytes = 0;
+      _deepgramLimitHit = false;
+      final stream = await _deepgramRecorder.startStream(
+        const RecordConfig(
+          encoder: AudioEncoder.pcm16bits,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+      );
+      if (!mounted) {
+        await _deepgramRecorder.stop();
+        return;
+      }
+      _deepgramSubscription = stream.listen(
+        (chunk) {
+          if (!mounted || _deepgramLimitHit) return;
+          _deepgramBytes += chunk.length;
+          // 60 seconds of 16 kHz mono PCM16 is about 1.9 MB.
+          if (_deepgramBytes > 16000 * 2 * 60) {
+            _deepgramLimitHit = true;
+            unawaited(_cancelDeepgramRecording());
+            if (mounted) {
+              notice(
+                context,
+                'Recording limit reached; audio was discarded. Tap the microphone to start again.',
+              );
+            }
+            return;
+          }
+          _deepgramChunks.add(chunk);
+        },
+        onError: (_) {
+          unawaited(_cancelDeepgramRecording());
+          if (mounted) {
+            notice(
+              context,
+              'Microphone recording stopped. Nothing was uploaded.',
+            );
+          }
+        },
+      );
+      _deepgramLimit = Timer(const Duration(seconds: 60), () {
+        if (!mounted) return;
+        unawaited(_cancelDeepgramRecording());
+        notice(
+          context,
+          'Recording limit reached; audio was discarded. Tap the microphone to start again.',
+        );
+      });
+      setState(() {
+        listening = true;
+        level = 0;
+      });
+      if (mounted) {
+        notice(
+          context,
+          'Recording on. Tap Stop to send this clip to Deepgram.',
+        );
+      }
+    } on PlatformException catch (e) {
+      if (mounted) {
+        notice(
+          context,
+          e.message ?? 'Microphone unavailable. Nothing was uploaded.',
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        notice(
+          context,
+          'Could not start microphone recording. Nothing was uploaded.',
+        );
+      }
+    }
+  }
+
+  Future<void> _stopDeepgramRecording() async {
+    _deepgramLimit?.cancel();
+    _deepgramLimit = null;
+    try {
+      await _deepgramRecorder.stop();
+      await _deepgramSubscription?.cancel();
+      _deepgramSubscription = null;
+      if (!mounted) return;
+      final size = _deepgramBytes;
+      final audio = Uint8List(size);
+      var offset = 0;
+      for (final chunk in _deepgramChunks) {
+        audio.setRange(offset, offset + chunk.length, chunk);
+        offset += chunk.length;
+      }
+      _deepgramChunks.clear();
+      _deepgramBytes = 0;
+      setState(() {
+        listening = false;
+        level = 0;
+      });
+      notice(
+        context,
+        'Sending this recording once to Deepgram for transcription…',
+      );
+      final transcript = await _deepgram.transcribe(
+        pcm16le: audio,
+        apiKey: widget.state.deepgramApiKey,
+        locale: widget.state.language,
+      );
+      if (mounted) {
+        input.text = [
+          input.text.trim(),
+          transcript,
+        ].where((part) => part.isNotEmpty).join(' ');
+        notice(
+          context,
+          'Transcript added to the message box. Review it before sending.',
+        );
+      }
+    } catch (e) {
+      if (mounted) notice(context, e);
+    } finally {
+      _deepgramChunks.clear();
+      _deepgramBytes = 0;
+      _deepgramLimitHit = false;
+    }
+  }
+
   Future<void> listen() async {
+    if (listening && widget.state.speechMode == 'deepgram') {
+      await _stopDeepgramRecording();
+      return;
+    }
     if (listening) {
       await stopAll();
       return;
     }
     await stopAll();
     if (!mounted) return;
+    if (widget.state.speechMode == 'deepgram') {
+      await _startDeepgramRecording();
+      return;
+    }
     var approved = false;
     if (widget.state.speechMode == 'online') {
       approved =
@@ -2413,6 +2630,52 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (mounted) {
         notice(context, e.message ?? 'Speech unavailable; type instead.');
       }
+    }
+  }
+
+  Future<void> playOfflineVoice(Map<String, dynamic> message) async {
+    if (speaking) {
+      await stopAll();
+      return;
+    }
+    if (widget.state.engine != 'offline' ||
+        !isEligibleForOfflineGemmaSpeech(
+          message,
+          optedIn: widget.state.experimentalOfflineChatEnabled,
+        )) {
+      notice(
+        context,
+        'Offline playback is available only for opted-in Offline · Gemma chat.',
+      );
+      return;
+    }
+    try {
+      if (await tts.isLanguageAvailable(widget.state.language) != true) {
+        throw StateError('Selected speech language is unavailable');
+      }
+      final voices = await tts.getVoices as List;
+      final voice = selectInstalledOfflineVoice(voices, widget.state.language);
+      if (voice == null) {
+        throw StateError(
+          'No installed offline voice for the selected language',
+        );
+      }
+      await tts.setLanguage(widget.state.language);
+      await tts.setVoice({
+        'name': voice['name'].toString(),
+        'locale': voice['locale'].toString(),
+      });
+      await tts.awaitSpeakCompletion(true);
+      await tts.speak(message['text'] as String);
+    } catch (_) {
+      if (mounted) {
+        notice(
+          context,
+          'No installed offline voice for this language, or local playback is unavailable. No network voice was used.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => speaking = false);
     }
   }
 
@@ -2510,6 +2773,139 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> compareAis() async {
+    final prompt = input.text;
+    if (prompt.trim().isEmpty) {
+      notice(context, 'Write the exact prompt you want to compare first.');
+      return;
+    }
+    final configured = widget.state.providerProfiles
+        .where((p) => p.isConfigured)
+        .toList(growable: false);
+    if (configured.length < 2) {
+      notice(
+        context,
+        'Configure at least two provider profiles in Settings > AI & Voice first.',
+      );
+      return;
+    }
+    final selectedIds = await showDialog<List<String>>(
+      context: context,
+      builder: (dialogContext) {
+        final selected = <String>{};
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AlertDialog(
+            title: const Text('Review AI comparison'),
+            scrollable: true,
+            content: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Choose two or more configured providers. This is separate from normal chat, including when Offline · Gemma is selected.',
+                ),
+                const SizedBox(height: 10),
+                for (final profile in widget.state.providerProfiles)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: selected.contains(profile.id),
+                    onChanged: profile.isConfigured
+                        ? (value) => setDialogState(() {
+                            if (value == true) {
+                              selected.add(profile.id);
+                            } else {
+                              selected.remove(profile.id);
+                            }
+                          })
+                        : null,
+                    title: Text(profile.name),
+                    subtitle: Text(
+                      profile.isConfigured
+                          ? '${profile.model} · ${Uri.tryParse(profile.origin)?.host ?? 'endpoint'}'
+                          : 'Not configured',
+                    ),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                const SizedBox(height: 12),
+                const Text('Exact prompt sent to each selected provider:'),
+                const SizedBox(height: 6),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(dialogContext)
+                        .colorScheme
+                        .surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: SelectableText(prompt),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Each selected provider receives this text directly. Their API may retain it and may charge your account. No request is sent until you tap “Send to selected AIs”. No retries or hidden fan-out.',
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: selected.length >= 2
+                    ? () => Navigator.pop(dialogContext, selected.toList())
+                    : null,
+                child: const Text('Send to selected AIs'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (selectedIds == null || !mounted) return;
+    setState(() => comparing = true);
+    try {
+      final results = await widget.state.compareProviders(
+        providerIds: selectedIds,
+        prompt: prompt,
+        approvedThisRun: true,
+      );
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Comparison results'),
+          scrollable: true,
+          content: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final result in results) ...[
+                Text(
+                  result.providerName,
+                  style: Theme.of(dialogContext).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 4),
+                SelectableText(result.answer ?? result.error ?? 'No result.'),
+                const Divider(height: 24),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) notice(context, error);
+    } finally {
+      if (mounted) setState(() => comparing = false);
+    }
+  }
+
   Future<void> send([String? retry]) async {
     final text = retry ?? input.text;
     if (text.trim().isEmpty) {
@@ -2542,15 +2938,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             throw StateError('Selected speech language is unavailable');
           }
           final voices = await tts.getVoices as List;
-          final localVoice = voices
-              .cast<Map>()
-              .where(
-                (v) =>
-                    v['locale'].toString().replaceAll('_', '-').toLowerCase() ==
-                        widget.state.language.toLowerCase() &&
-                    v['network_required'].toString() == '0',
-              )
-              .firstOrNull;
+          final localVoice = selectInstalledOfflineVoice(
+            voices,
+            widget.state.language,
+          );
           if (localVoice == null) {
             throw StateError(
               'No verified offline voice installed for this language',
@@ -2584,6 +2975,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     voiceEvents.setMethodCallHandler(null);
     audioEvents.setMethodCallHandler(null);
     if (speaking) unawaited(stopExpressiveAudio());
+    _deepgramLimit?.cancel();
+    unawaited(_deepgramSubscription?.cancel());
+    unawaited(_deepgramRecorder.dispose());
+    _deepgram.cancel();
     AssistantState.device.invokeMethod('voice_cancel');
     tts.stop();
     widget.state.stop(notify: false);
@@ -2601,7 +2996,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         assistantName: state.assistantName,
         actions: [
           IconButton(
-            tooltip: 'Read replies aloud',
+            tooltip: 'Read replies with an installed on-device voice',
             onPressed: () async {
               try {
                 await state.saveSpeakReplies(!state.speakReplies);
@@ -2791,7 +3186,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                   ),
                                 ),
                                 if (m['state'] == 'complete' &&
-                                    m['role'] == 'assistant')
+                                    m['role'] == 'assistant' &&
+                                    state.engine == 'offline' &&
+                                    isEligibleForOfflineGemmaSpeech(
+                                      m,
+                                      optedIn:
+                                          state.experimentalOfflineChatEnabled,
+                                    ))
+                                  TextButton.icon(
+                                    onPressed: () => playOfflineVoice(m),
+                                    icon: Icon(
+                                      speaking
+                                          ? Icons.stop_circle_outlined
+                                          : Icons.record_voice_over,
+                                    ),
+                                    label: Text(
+                                      speaking
+                                          ? 'Stop voice'
+                                          : 'Play installed offline voice',
+                                    ),
+                                  )
+                                else if (m['state'] == 'complete' &&
+                                    m['role'] == 'assistant' &&
+                                    state.engine != 'offline')
                                   TextButton.icon(
                                     onPressed: () => playExpressiveVoice(
                                       m['text'] as String,
@@ -2804,7 +3221,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                     label: Text(
                                       speaking
                                           ? 'Stop voice'
-                                          : 'Play expressive voice',
+                                          : 'Generate online ElevenLabs voice',
                                     ),
                                   ),
                                 if (m['state'] != 'complete')
@@ -3032,6 +3449,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     ),
                   ],
                 ),
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: comparing || state.busy || speaking
+                    ? null
+                    : compareAis,
+                icon: comparing
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.compare_arrows_rounded),
+                label: Text(comparing ? 'Comparing…' : 'Compare AIs'),
               ),
             ),
           ],
@@ -3464,6 +3897,137 @@ class _AndroidAccessPanelState extends State<AndroidAccessPanel> {
   }
 }
 
+class ProviderProfilesEditor extends StatefulWidget {
+  final AssistantState state;
+  const ProviderProfilesEditor({super.key, required this.state});
+
+  @override
+  State<ProviderProfilesEditor> createState() => _ProviderProfilesEditorState();
+}
+
+class _ProviderProfilesEditorState extends State<ProviderProfilesEditor> {
+  late final Map<String, TextEditingController> _origins = {
+    for (final p in widget.state.providerProfiles)
+      p.id: TextEditingController(text: p.origin),
+  };
+  late final Map<String, TextEditingController> _models = {
+    for (final p in widget.state.providerProfiles)
+      p.id: TextEditingController(text: p.model),
+  };
+  late final Map<String, TextEditingController> _keys = {
+    for (final p in widget.state.providerProfiles)
+      p.id: TextEditingController(),
+  };
+  final Set<String> _clearKeys = {};
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    for (final c in [..._origins.values, ..._models.values, ..._keys.values]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      final profiles = [
+        for (final p in widget.state.providerProfiles)
+          p.copyWith(
+            origin: _origins[p.id]!.text.trim(),
+            model: _models[p.id]!.text.trim(),
+            apiKey: _clearKeys.contains(p.id)
+                ? ''
+                : _keys[p.id]!.text.isEmpty
+                ? p.apiKey
+                : _keys[p.id]!.text.trim(),
+          ),
+      ];
+      await widget.state.saveProviderProfiles(profiles);
+      if (mounted) Navigator.pop(context);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _saving = false);
+        notice(context, error);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Provider profiles'),
+    scrollable: true,
+    content: SizedBox(
+      width: 520,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'These profiles are used only when you explicitly start Compare AIs and approve that run. OpenAI API access is separate from a ChatGPT subscription. ElevenLabs is separate online speech, not a chat provider.',
+          ),
+          const SizedBox(height: 12),
+          for (final p in widget.state.providerProfiles) ...[
+            Text(p.name, style: Theme.of(context).textTheme.titleSmall),
+            TextField(
+              controller: _origins[p.id],
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              decoration: const InputDecoration(labelText: 'HTTPS API base'),
+            ),
+            TextField(
+              controller: _models[p.id],
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: const InputDecoration(labelText: 'Model ID'),
+            ),
+            Text(
+              'API key: ${p.apiKey.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
+            ),
+            TextField(
+              controller: _keys[p.id],
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              autofillHints: const [],
+              decoration: const InputDecoration(
+                labelText: 'New API key (leave blank to keep saved key)',
+              ),
+            ),
+            if (p.apiKey.isNotEmpty)
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _clearKeys.contains(p.id),
+                onChanged: (clear) => setState(() {
+                  if (clear == true) {
+                    _clearKeys.add(p.id);
+                    _keys[p.id]!.clear();
+                  } else {
+                    _clearKeys.remove(p.id);
+                  }
+                }),
+                title: const Text('Clear saved key from this phone'),
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+            const Divider(height: 24),
+          ],
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: _saving ? null : () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: _saving ? null : _save,
+        child: Text(_saving ? 'Saving…' : 'Save profiles'),
+      ),
+    ],
+  );
+}
+
 class Settings extends StatefulWidget {
   final AssistantState state;
   const Settings({super.key, required this.state});
@@ -3472,6 +4036,7 @@ class Settings extends StatefulWidget {
 }
 
 class _SettingsState extends State<Settings> {
+  final deepgramSecret = TextEditingController();
   late String speechMode = widget.state.speechMode;
   late String theme = widget.state.theme;
   late String language = widget.state.language;
@@ -3491,6 +4056,7 @@ class _SettingsState extends State<Settings> {
   @override
   void dispose() {
     widget.state.removeListener(_stateChanged);
+    deepgramSecret.dispose();
     name.dispose();
     super.dispose();
   }
@@ -3692,12 +4258,50 @@ class _SettingsState extends State<Settings> {
                     value: 'online',
                     child: Text('Online · Android recognition provider'),
                   ),
+                  DropdownMenuItem(
+                    value: 'deepgram',
+                    child: Text('Deepgram · online speech-to-text'),
+                  ),
                 ],
                 onChanged: (v) => setState(() => speechMode = v!),
               ),
               const Text(
                 'Offline requires a verified installed language on Android 13+. Unsupported devices/languages stay unavailable. Online asks before microphone use. No silent network fallback.',
               ),
+              if (speechMode == 'deepgram') ...[
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Deepgram speech-to-text · not an LLM'),
+                ),
+                Text(
+                  'API key: ${widget.state.deepgramApiKey.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
+                ),
+                TextField(
+                  controller: deepgramSecret,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  autofillHints: const [],
+                  decoration: const InputDecoration(
+                    labelText: 'Deepgram API key',
+                    hintText:
+                        'Enter a new key or leave blank to keep the saved one',
+                  ),
+                ),
+                const Text(
+                  'Deepgram transcription is user-started, foreground-only, and currently supports English and Hindi. Audio is sent only after you tap Stop; transcript stays in the draft until you press Send.',
+                ),
+                if (widget.state.deepgramApiKey.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () =>
+                          widget.state.clearCloudProviderKey('deepgram'),
+                      icon: const Icon(Icons.key_off),
+                      label: const Text('Clear Deepgram key'),
+                    ),
+                  ),
+              ],
               TextField(
                 controller: name,
                 maxLength: 40,
@@ -3746,6 +4350,12 @@ class _SettingsState extends State<Settings> {
                     await widget.state.saveTheme(theme);
                     await widget.state.setAssistantName(name.text);
                     await widget.state.saveSpeechMode(speechMode);
+                    if (speechMode == 'deepgram') {
+                      await widget.state.saveCloudProviderKey(
+                        'deepgram', deepgramSecret.text,
+                      );
+                    }
+                    deepgramSecret.clear();
                     await widget.state.saveEngine(
                       widget.state.engine,
                       widget.state.model,
@@ -3760,6 +4370,15 @@ class _SettingsState extends State<Settings> {
                 },
                 child: const Text('Save settings'),
               ),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.pushNamed(context, '/images'),
+                icon: const Icon(Icons.image_outlined),
+                label: const Text('Create an image (Cloudflare)'),
+              ),
+              const Text(
+                'This sends only the prompt you type in the image screen—not chat history, saved memories or files. The private service must be explicitly configured.',
+              ),
+              const SizedBox(height: 12),
             ],
           ),
         ),
@@ -3938,8 +4557,11 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
   Future<void> _clearCredential({
     required bool compatible,
     bool gemini = false,
+    String? cloudProvider,
   }) async {
-    final label = gemini
+    final label = cloudProvider != null
+        ? '${cloudProvider == 'openai' ? 'OpenAI' : cloudProvider} API key'
+        : gemini
         ? 'Gemini API key'
         : compatible
         ? 'API key'
@@ -3966,10 +4588,14 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
         ) ??
         false;
     if (!remove || !mounted) return;
-    await widget.state.clearProviderCredential(
-      compatible: compatible,
-      gemini: gemini,
-    );
+    if (cloudProvider != null) {
+      await widget.state.clearCloudProviderKey(cloudProvider);
+    } else {
+      await widget.state.clearProviderCredential(
+        compatible: compatible,
+        gemini: gemini,
+      );
+    }
     if (mounted) {
       setState(() {
         connectionStatus = 'Credential cleared; connection is not configured.';
@@ -3988,6 +4614,11 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
           'gemini',
           AssistantState.geminiModel,
           widget.state.language,
+        );
+      } else if (engine == 'openai') {
+        await widget.state.saveCloudProviderKey('openai', compatibleSecret.text);
+        await widget.state.saveEngine(
+          'openai', model.text, widget.state.language,
         );
       } else {
         await widget.state.saveSettings(
@@ -4036,6 +4667,14 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
       await _save(showNotice: false);
       if (engine == 'gemini') {
         final result = await widget.state.testGeminiApi();
+        if (mounted) {
+          setState(() {
+            connectionStatus = result;
+            connectionSucceeded = true;
+          });
+        }
+      } else if (engine == 'openai') {
+        final result = await widget.state.testOpenAiApi();
         if (mounted) {
           setState(() {
             connectionStatus = result;
@@ -4114,6 +4753,10 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
                     child: Text('Online · Gemini 2.5 Flash (default)'),
                   ),
                   DropdownMenuItem(
+                    value: 'openai',
+                    child: Text('Online · OpenAI ChatGPT'),
+                  ),
+                  DropdownMenuItem(
                     value: 'offline',
                     child: Text('Offline · Gemma (experimental)'),
                   ),
@@ -4128,7 +4771,13 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
                 ],
                 onChanged: saving || testing
                     ? null
-                    : (value) => setState(() => engine = value ?? 'gemini'),
+                    : (value) => setState(() {
+                        engine = value ?? 'gemini';
+                        if (engine == 'openai' &&
+                            widget.state.engine != 'openai') {
+                          model.text = 'gpt-4o-mini';
+                        }
+                      }),
               ),
               const SizedBox(height: 10),
               if (engine == 'gemini') ...[
@@ -4162,6 +4811,46 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
                             ),
                       icon: const Icon(Icons.key_off),
                       label: const Text('Clear Gemini API key'),
+                    ),
+                  ),
+              ] else if (engine == 'openai') ...[
+                Text(
+                  'API key: ${widget.state.openAiApiKey.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
+                ),
+                TextField(
+                  controller: model,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: const InputDecoration(
+                    labelText: 'OpenAI model ID',
+                    hintText: 'gpt-4o-mini',
+                  ),
+                ),
+                TextField(
+                  controller: compatibleSecret,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  autofillHints: const [],
+                  decoration: const InputDecoration(
+                    labelText: 'OpenAI API key',
+                    hintText: 'Leave blank to keep the saved key',
+                  ),
+                ),
+                const Text(
+                  'The key is stored in Android secure storage. Test connection only lists models from OpenAI; chat text is sent only when you submit a prompt. OpenAI account pricing and data handling apply.',
+                ),
+                if (widget.state.openAiApiKey.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: saving || testing
+                          ? null
+                          : () => _clearCredential(
+                              compatible: false, cloudProvider: 'openai',
+                            ),
+                      icon: const Icon(Icons.key_off),
+                      label: const Text('Clear OpenAI API key'),
                     ),
                   ),
               ] else if (engine == 'compatible') ...[
@@ -4328,6 +5017,23 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
           'Online requests require your review before sending. This screen never runs tools automatically.',
         ),
         const SizedBox(height: 16),
+        const SizedBox(height: 12),
+        Glass(
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.compare_arrows_rounded),
+            title: const Text('Configure multi-provider comparison'),
+            subtitle: const Text(
+              'Set up Gemini, OpenAI, Groq, and OpenRouter profiles. Each comparison sends your exact prompt only to the providers you select and review.',
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => showDialog<void>(
+              context: context,
+              builder: (_) => ProviderProfilesEditor(state: widget.state),
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
         const _SettingsSectionLabel('MCP SERVERS'),
         CustomMcpPanel(state: widget.state),
       ],
