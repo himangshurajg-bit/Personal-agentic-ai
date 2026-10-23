@@ -3541,7 +3541,7 @@ class _SettingsState extends State<Settings> {
         builder: (dialogContext) => AlertDialog(
           title: const Text('Try experimental Gemma chat?'),
           content: const Text(
-            'Gemma 4 E4B has not passed answer-quality or Redmi/HyperOS memory, speed and heat testing. It may give wrong answers, run slowly, or make the phone warm. You must download and load the 3.66 GB model yourself. Typed chat prompts will stay on this phone; errors never switch to an online provider. Continue only as an experiment.',
+            'Gemma 4 E2B has not passed answer-quality or Redmi/HyperOS memory, speed and heat testing. It has 2.3B effective parameters (5.1B with embeddings); its 2.59 GB download is not a measure of its full memory use. It may give wrong answers, run slowly, or make the phone warm. You must download and load it yourself. Typed chat prompts stay on this phone; errors never switch to an online provider. Continue only as an experiment.',
           ),
           actions: [
             TextButton(

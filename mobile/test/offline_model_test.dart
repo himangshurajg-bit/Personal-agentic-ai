@@ -3,6 +3,10 @@ import 'package:personal_assistant/offline_model.dart';
 
 void main() {
   group('Gemma 4 local screening download preflight', () {
+    test('uses the pinned E2B artifact byte count, not parameter count', () {
+      expect(gemma4ModelSizeBytes, 2_588_147_712);
+    });
+
     test('a new download reserves the full artifact plus safety space', () {
       expect(
         gemma4DownloadHasSpace(

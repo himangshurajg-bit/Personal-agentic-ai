@@ -37,14 +37,17 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 internal object Gemma4Artifact {
-    const val MODEL_ID = "gemma-4-E4B-it"
-    const val MODEL_FILE = "gemma-4-E4B-it.litertlm"
+    const val MODEL_ID = "gemma-4-E2B-it"
+    const val MODEL_FILE = "gemma-4-E2B-it.litertlm"
     const val PART_FILE = "$MODEL_FILE.part"
-    const val MODEL_BYTES = 3_659_530_240L
-    const val SHA256 = "0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0"
-    const val REVISION = "e6a3892a8c22cf87ff99583996149cf3cb32452b"
-    const val URL = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/$REVISION/$MODEL_FILE"
+    const val PREVIOUS_MODEL_FILE = "gemma-4-E4B-it.litertlm"
+    const val PREVIOUS_PART_FILE = "$PREVIOUS_MODEL_FILE.part"
+    const val MODEL_BYTES = 2_588_147_712L
+    const val SHA256 = "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c"
+    const val REVISION = "6e5c4f1e395deb959c494953478fa5cec4b8008f"
+    const val URL = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/$REVISION/$MODEL_FILE"
     const val LITERT_LM_VERSION = "0.18.1"
+    const val MIN_DEVICE_MEMORY_GB = 8
     const val LICENSE = "Apache-2.0"
     const val SAFETY_RESERVE_BYTES = 512L * 1024L * 1024L
 
@@ -174,6 +177,8 @@ internal class Gemma4OfflineCoordinator(
 
     private val modelFile get() = File(appContext.filesDir, Gemma4Artifact.MODEL_FILE)
     private val partialFile get() = File(appContext.filesDir, Gemma4Artifact.PART_FILE)
+    private val previousModelFile get() = File(appContext.filesDir, Gemma4Artifact.PREVIOUS_MODEL_FILE)
+    private val previousPartialFile get() = File(appContext.filesDir, Gemma4Artifact.PREVIOUS_PART_FILE)
 
     fun status(): Map<String, Any?> {
         val available = try { StatFs(appContext.filesDir.path).availableBytes } catch (_: Exception) { 0L }
@@ -185,6 +190,8 @@ internal class Gemma4OfflineCoordinator(
             "available_bytes" to available,
             "partial_bytes" to partialBytes,
             "model_present" to modelFile.isFile,
+            "previous_model_present" to previousModelFile.isFile,
+            "previous_partial_present" to previousPartialFile.isFile,
             "model_size_matches" to (modelFile.isFile && modelFile.length() == Gemma4Artifact.MODEL_BYTES),
             "download_active" to downloadActive,
             "runtime_loaded" to (engine != null),
@@ -197,6 +204,7 @@ internal class Gemma4OfflineCoordinator(
             "total_memory_bytes" to memory.totalBytes,
             "low_memory" to memory.lowMemory,
             "model_id" to Gemma4Artifact.MODEL_ID,
+            "min_device_memory_gb" to Gemma4Artifact.MIN_DEVICE_MEMORY_GB,
             "license" to Gemma4Artifact.LICENSE,
         )
     }
@@ -378,8 +386,10 @@ internal class Gemma4OfflineCoordinator(
             try {
                 val deletedModel = !modelFile.exists() || modelFile.delete()
                 val deletedPart = !partialFile.exists() || partialFile.delete()
-                if (!deletedModel || !deletedPart) throw IllegalStateException("The app could not remove its model files.")
-                emit("download_state", "state" to "removed", "bytes" to 0L, "total" to Gemma4Artifact.MODEL_BYTES, "message" to "The model and any partial download were removed from app-private storage.")
+                val deletedPreviousModel = !previousModelFile.exists() || previousModelFile.delete()
+                val deletedPreviousPart = !previousPartialFile.exists() || previousPartialFile.delete()
+                if (!deletedModel || !deletedPart || !deletedPreviousModel || !deletedPreviousPart) throw IllegalStateException("The app could not remove all selected model files.")
+                emit("download_state", "state" to "removed", "bytes" to 0L, "total" to Gemma4Artifact.MODEL_BYTES, "message" to "The current model and any previous Gemma 4 model files selected for removal were removed from app-private storage.")
             } catch (error: Exception) {
                 emit("download_state", "state" to "error", "message" to (error.message ?: "The model files could not be removed."))
             }
@@ -409,7 +419,7 @@ internal class Gemma4OfflineCoordinator(
                     if (!Gemma4FileIntegrity.verify(modelFile, Gemma4Artifact.MODEL_BYTES, Gemma4Artifact.SHA256)) {
                         throw IllegalStateException("The installed model failed its size or SHA-256 check. Remove it and download again.")
                     }
-                    emit("runtime_state", "state" to "loading", "message" to "Loading Gemma 4 E4B with the LiteRT-LM CPU backend. This can take a while and may use several GB of RAM.")
+                    emit("runtime_state", "state" to "loading", "message" to "Loading Gemma 4 E2B with the LiteRT-LM CPU backend. The published model card reports 2.3B effective parameters (5.1B including embeddings); this can still use substantial RAM.")
                     val candidate = Engine(
                         EngineConfig(
                             modelPath = modelFile.absolutePath,
