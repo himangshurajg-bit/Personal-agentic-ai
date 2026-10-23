@@ -16,6 +16,7 @@ class EngineConfig {
   String get description => switch (mode) {
     'offline' => 'Offline · Gemma experimental',
     'gemini' => 'Online · Gemini 2.5 Flash',
+    'openai' => 'Online · OpenAI ChatGPT',
     'compatible' => 'Online · OpenAI-compatible',
     _ => 'Online · private FastAPI service',
   };
@@ -34,13 +35,13 @@ class EngineConfig {
     if (mode == 'gemini' && base.scheme != 'https') {
       throw ServiceException('Gemini API requires HTTPS.');
     }
-    if (mode == 'compatible' && base.scheme != 'https') {
+    if (['compatible', 'openai'].contains(mode) && base.scheme != 'https') {
       throw ServiceException('Online providers require HTTPS.');
     }
-    if (mode == 'compatible' && model.trim().isEmpty) {
+    if (['compatible', 'openai'].contains(mode) && model.trim().isEmpty) {
       throw ServiceException('Enter the provider model identifier.');
     }
-    if (!['private_service', 'compatible', 'gemini'].contains(mode)) {
+    if (!['private_service', 'compatible', 'gemini', 'openai'].contains(mode)) {
       throw ServiceException('Unsupported AI engine.');
     }
     if (mode == 'private_service' && prompt.length > 8000) {
@@ -53,7 +54,9 @@ class EngineConfig {
       mode == 'gemini'
           ? Uri.parse('$origin:generateContent')
           : base.resolve(
-              mode == 'compatible' ? '/v1/chat/completions' : '/chat',
+              ['compatible', 'openai'].contains(mode)
+                  ? '/v1/chat/completions'
+                  : '/chat',
             ),
     )..followRedirects = false;
     req.headers['Content-Type'] = 'application/json';
@@ -72,7 +75,7 @@ class EngineConfig {
     } else {
       req.headers['Authorization'] = 'Bearer $token';
       req.body = jsonEncode(
-        mode == 'compatible'
+        ['compatible', 'openai'].contains(mode)
             ? {
                 'model': model,
                 'stream': true,
