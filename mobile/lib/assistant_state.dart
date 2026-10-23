@@ -11,6 +11,7 @@ import 'provider_compare.dart';
 import 'phone_data.dart';
 import 'app_lock.dart';
 import 'engines.dart';
+import 'gemini_models.dart';
 import 'mcp_servers.dart';
 import 'wajo_oauth.dart';
 import 'visual_theme.dart';
@@ -97,7 +98,8 @@ class AssistantState extends ChangeNotifier {
   String speechMode = 'offline';
   String assistantName = 'Personal assistant';
   String engine = 'gemini',
-      model = 'gemini-2.5-flash',
+      model = geminiModel,
+      geminiModelSelection = geminiModel,
       language = 'en-IN',
       specialist = 'general';
   String privateServiceEndpoint = 'http://127.0.0.1:8766';
@@ -107,9 +109,21 @@ class AssistantState extends ChangeNotifier {
   String geminiApiKey = '';
   String openAiApiKey = '';
   String deepgramApiKey = '';
-  static const geminiModel = 'gemini-2.5-flash';
-  static const geminiEndpoint =
-      'https://generativelanguage.googleapis.com/v1beta/models/$geminiModel';
+  static const geminiModel = GeminiModels.defaultModel;
+  static const geminiFlashModel = GeminiModels.flash25;
+  static const geminiFlashLiteModel = GeminiModels.flashLite25;
+  static const geminiModelsEndpoint = GeminiModels.modelsEndpoint;
+  static const geminiModels = GeminiModels.supported;
+  static const geminiModelLabels = GeminiModels.labels;
+  static const geminiEndpoint = geminiModelsEndpoint;
+  static bool supportsGeminiModel(String value) => GeminiModels.supports(value);
+  static Uri geminiModelEndpoint(String value) {
+    if (!supportsGeminiModel(value)) {
+      throw ServiceException('Choose a supported Gemini model.');
+    }
+    return Uri.parse('$geminiModelsEndpoint/$value');
+  }
+
   String get endpoint => switch (engine) {
     'gemini' => geminiEndpoint,
     'openai' => 'https://api.openai.com',
@@ -200,10 +214,16 @@ class AssistantState extends ChangeNotifier {
         }
       }
       model = await storage.read(key: 'model') ?? geminiModel;
+      final savedGeminiModel = await storage.read(key: 'gemini_model');
+      geminiModelSelection = supportsGeminiModel(savedGeminiModel ?? '')
+          ? savedGeminiModel!
+          : geminiModel;
       geminiApiKey = await storage.read(key: 'gemini_api_key') ?? '';
       openAiApiKey = await storage.read(key: 'openai_api_key') ?? '';
       deepgramApiKey = await storage.read(key: 'deepgram_api_key') ?? '';
-      if (engine == 'gemini') model = geminiModel;
+      if (engine == 'gemini') {
+        model = geminiModelSelection;
+      }
       final savedLanguage = await storage.read(key: 'language') ?? 'en-IN';
       language = languageLabels.containsKey(savedLanguage)
           ? savedLanguage
@@ -488,9 +508,15 @@ class AssistantState extends ChangeNotifier {
     if (key.isEmpty) return;
     await storage.write(key: storageKey, value: key);
     switch (provider) {
-      case 'openai': openAiApiKey = key; break;
-      case 'gemini': geminiApiKey = key; break;
-      case 'deepgram': deepgramApiKey = key; break;
+      case 'openai':
+        openAiApiKey = key;
+        break;
+      case 'gemini':
+        geminiApiKey = key;
+        break;
+      case 'deepgram':
+        deepgramApiKey = key;
+        break;
     }
     notifyListeners();
   }
@@ -504,14 +530,26 @@ class AssistantState extends ChangeNotifier {
     };
     await storage.delete(key: storageKey);
     switch (provider) {
-      case 'openai': openAiApiKey = ''; break;
-      case 'gemini': geminiApiKey = ''; break;
-      case 'deepgram': deepgramApiKey = ''; break;
+      case 'openai':
+        openAiApiKey = '';
+        break;
+      case 'gemini':
+        geminiApiKey = '';
+        break;
+      case 'deepgram':
+        deepgramApiKey = '';
+        break;
     }
     notifyListeners();
   }
 
-  Future<String> testGeminiApi() async {
+  Future<String> testGeminiApi({String? modelName}) async {
+    final selectedModel = modelName ?? geminiModelSelection;
+    if (!supportsGeminiModel(selectedModel)) {
+      throw ServiceException(
+        'Choose a supported Gemini model. No request was sent.',
+      );
+    }
     if (geminiApiKey.isEmpty) {
       throw ServiceException(
         'Add your Gemini API key first. No request was sent.',
@@ -522,7 +560,12 @@ class AssistantState extends ChangeNotifier {
       // A deliberate, tiny fixed inference proves this key can actually run the
       // selected model. Never include chat, memory, or other user content here.
       final request =
-          http.Request('POST', Uri.parse('$geminiEndpoint:generateContent'))
+          http.Request(
+              'POST',
+              Uri.parse(
+                '${geminiModelEndpoint(selectedModel)}:generateContent',
+              ),
+            )
             ..followRedirects = false
             ..headers['x-goog-api-key'] = geminiApiKey
             ..headers['content-type'] = 'application/json'
@@ -544,13 +587,13 @@ class AssistantState extends ChangeNotifier {
       if (status == 401 || status == 403) {
         await response.stream.drain<void>();
         throw ServiceException(
-          'Google rejected this key or this project cannot access Gemini 2.5 Flash. Check the key and model access; no other model was selected.',
+          'Google rejected this key or this project cannot access $selectedModel. Check the key, model access and free-tier eligibility; no other model was selected.',
         );
       }
       if (status == 404) {
         await response.stream.drain<void>();
         throw ServiceException(
-          'Google did not find Gemini 2.5 Flash for this key. Access may be restricted; no other model was selected.',
+          'Google did not find $selectedModel for this key. Check the selected model ID and project access; no other model was selected.',
         );
       }
       if (status == 429) {
@@ -593,7 +636,7 @@ class AssistantState extends ChangeNotifier {
           'Gemini accepted the request but returned no test text. Check model access or safety settings; no chat prompt was sent.',
         );
       }
-      return 'Connected · Gemini 2.5 Flash replied to the fixed connection test. No chat content was sent.';
+      return 'Connected · $selectedModel replied to the fixed connection test. No chat content was sent.';
     } on TimeoutException {
       throw ServiceException(
         'Gemini connection test timed out. No chat content was sent.',
@@ -613,7 +656,9 @@ class AssistantState extends ChangeNotifier {
 
   Future<String> testOpenAiApi() async {
     if (openAiApiKey.isEmpty) {
-      throw ServiceException('Add your OpenAI API key first. No request was sent.');
+      throw ServiceException(
+        'Add your OpenAI API key first. No request was sent.',
+      );
     }
     final client = clientFactory();
     try {
@@ -622,36 +667,50 @@ class AssistantState extends ChangeNotifier {
         Uri.parse('https://api.openai.com/v1/models'),
       )..followRedirects = false;
       request.headers['Authorization'] = 'Bearer $openAiApiKey';
-      final response = await client.send(request).timeout(
-        const Duration(seconds: 12),
-      );
+      final response = await client
+          .send(request)
+          .timeout(const Duration(seconds: 12));
       final status = response.statusCode;
       if (status == 401 || status == 403) {
         await response.stream.drain<void>();
-        throw ServiceException('OpenAI rejected this key. Check it and try again; no chat prompt was sent.');
+        throw ServiceException(
+          'OpenAI rejected this key. Check it and try again; no chat prompt was sent.',
+        );
       }
       if (status == 429) {
         await response.stream.drain<void>();
-        throw ServiceException('OpenAI rate-limited the connection test. Nothing was retried.');
+        throw ServiceException(
+          'OpenAI rate-limited the connection test. Nothing was retried.',
+        );
       }
       if (status < 200 || status >= 300) {
         await response.stream.drain<void>();
-        throw ServiceException('OpenAI returned HTTP $status for the connection test. No chat prompt was sent.');
+        throw ServiceException(
+          'OpenAI returned HTTP $status for the connection test. No chat prompt was sent.',
+        );
       }
       final body = await response.stream.bytesToString().timeout(
         const Duration(seconds: 12),
       );
       final decoded = jsonDecode(body);
       if (decoded is! Map || decoded['data'] is! List) {
-        throw ServiceException('OpenAI returned an unexpected model-list response.');
+        throw ServiceException(
+          'OpenAI returned an unexpected model-list response.',
+        );
       }
       return 'Connected · OpenAI accepted the key and returned its model list. No chat prompt was sent.';
     } on TimeoutException {
-      throw ServiceException('OpenAI connection test timed out. No chat prompt was sent.');
+      throw ServiceException(
+        'OpenAI connection test timed out. No chat prompt was sent.',
+      );
     } on http.ClientException {
-      throw ServiceException('Could not reach the OpenAI API. No chat prompt was sent.');
+      throw ServiceException(
+        'Could not reach the OpenAI API. No chat prompt was sent.',
+      );
     } on FormatException {
-      throw ServiceException('OpenAI returned invalid JSON for the connection test. No chat prompt was sent.');
+      throw ServiceException(
+        'OpenAI returned invalid JSON for the connection test. No chat prompt was sent.',
+      );
     } finally {
       client.close();
     }
@@ -789,13 +848,13 @@ class AssistantState extends ChangeNotifier {
   EngineConfig get config => EngineConfig(
     mode: engine,
     origin: engine == 'gemini'
-        ? geminiEndpoint
+        ? geminiModelsEndpoint
         : engine == 'openai'
         ? 'https://api.openai.com'
         : engine == 'compatible'
         ? compatibleApiEndpoint
         : privateServiceEndpoint,
-    model: engine == 'gemini' ? geminiModel : model,
+    model: engine == 'gemini' ? geminiModelSelection : model,
     token: engine == 'gemini'
         ? geminiApiKey
         : engine == 'openai'
@@ -894,14 +953,21 @@ class AssistantState extends ChangeNotifier {
     if (!languageLabels.containsKey(locale)) {
       throw ServiceException('Unsupported conversation language.');
     }
-    stop();
-    await storage.write(key: 'engine', value: selected);
     final effectiveModel = selected == 'gemini'
-        ? geminiModel
+        ? (modelName.trim().isEmpty ? geminiModel : modelName.trim())
         : selected == 'openai' && modelName.trim().isEmpty
         ? 'gpt-4o-mini'
         : modelName.trim();
+    if (selected == 'gemini' && !supportsGeminiModel(effectiveModel)) {
+      throw ServiceException('Choose a supported Gemini model.');
+    }
+    stop();
+    await storage.write(key: 'engine', value: selected);
     await storage.write(key: 'model', value: effectiveModel);
+    if (selected == 'gemini') {
+      await storage.write(key: 'gemini_model', value: effectiveModel);
+      geminiModelSelection = effectiveModel;
+    }
     await storage.write(key: 'language', value: locale);
     engine = selected;
     model = effectiveModel;
@@ -1307,6 +1373,7 @@ class AssistantState extends ChangeNotifier {
     error = '';
     final selectedEngine = engine;
     final selectedConfig = selectedEngine == 'offline' ? null : config;
+    final selectedModel = selectedConfig?.model ?? model;
     final prior = messages
         .where((m) => m['state'] == 'complete')
         .map((m) => {'role': m['role'], 'text': m['text']})
@@ -1362,8 +1429,10 @@ class AssistantState extends ChangeNotifier {
         if (res.statusCode >= 300) {
           if (selectedEngine == 'gemini') {
             final message = switch (res.statusCode) {
-              401 || 403 => 'Google rejected the key or this project cannot access Gemini 2.5 Flash. Check the key and eligibility; no fallback was used.',
-              404 => 'Google did not find Gemini 2.5 Flash for this key. Access may be restricted; no other model was selected.',
+              401 || 403 =>
+                'Google rejected the key or this project cannot access $selectedModel. Check the key and model eligibility; no fallback was used.',
+              404 =>
+                'Google did not find $selectedModel for this key. Check the selected model ID and project access; no other model was selected.',
               429 => 'Google Gemini quota or rate limit reached. Check your available quota; no other model was selected or retried.',
               _ =>
                 'Gemini API request failed (${res.statusCode}). No other model was selected or retried.',

@@ -4352,7 +4352,8 @@ class _SettingsState extends State<Settings> {
                     await widget.state.saveSpeechMode(speechMode);
                     if (speechMode == 'deepgram') {
                       await widget.state.saveCloudProviderKey(
-                        'deepgram', deepgramSecret.text,
+                        'deepgram',
+                        deepgramSecret.text,
                       );
                     }
                     deepgramSecret.clear();
@@ -4612,13 +4613,18 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
         await widget.state.saveGeminiApiKey(compatibleSecret.text);
         await widget.state.saveEngine(
           'gemini',
-          AssistantState.geminiModel,
+          model.text,
           widget.state.language,
         );
       } else if (engine == 'openai') {
-        await widget.state.saveCloudProviderKey('openai', compatibleSecret.text);
+        await widget.state.saveCloudProviderKey(
+          'openai',
+          compatibleSecret.text,
+        );
         await widget.state.saveEngine(
-          'openai', model.text, widget.state.language,
+          'openai',
+          model.text,
+          widget.state.language,
         );
       } else {
         await widget.state.saveSettings(
@@ -4666,7 +4672,9 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
       // Persist first so the probe uses exactly the configuration now shown.
       await _save(showNotice: false);
       if (engine == 'gemini') {
-        final result = await widget.state.testGeminiApi();
+        final result = await widget.state.testGeminiApi(
+          modelName: widget.state.geminiModelSelection,
+        );
         if (mounted) {
           setState(() {
             connectionStatus = result;
@@ -4750,7 +4758,7 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
                 items: const [
                   DropdownMenuItem(
                     value: 'gemini',
-                    child: Text('Online · Gemini 2.5 Flash (default)'),
+                    child: Text('Online · Gemini API'),
                   ),
                   DropdownMenuItem(
                     value: 'openai',
@@ -4777,10 +4785,35 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
                             widget.state.engine != 'openai') {
                           model.text = 'gpt-4o-mini';
                         }
+                        if (engine == 'gemini' &&
+                            !AssistantState.supportsGeminiModel(model.text)) {
+                          model.text = widget.state.geminiModelSelection;
+                        }
                       }),
               ),
               const SizedBox(height: 10),
               if (engine == 'gemini') ...[
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  initialValue: AssistantState.supportsGeminiModel(model.text)
+                      ? model.text
+                      : AssistantState.geminiModel,
+                  decoration: const InputDecoration(labelText: 'Gemini model'),
+                  items: [
+                    for (final entry
+                        in AssistantState.geminiModelLabels.entries)
+                      DropdownMenuItem(
+                        value: entry.key,
+                        child: Text(entry.value),
+                      ),
+                  ],
+                  onChanged: saving || testing
+                      ? null
+                      : (value) => setState(() {
+                          if (value != null) model.text = value;
+                        }),
+                ),
+                const SizedBox(height: 8),
                 Text(
                   'API key: ${widget.state.geminiApiKey.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
                 ),
@@ -4797,7 +4830,7 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'That is the only setup field. The app uses Google’s fixed Gemini 2.5 Flash model; no server URL or model name is needed. Google currently limits 2.5 access to people who have actively used a 2.5 model before and recommends newer models for new projects, so access is not guaranteed. Free-tier input and output are free within limits, but Google says free-tier content may be used to improve its products. Test connection sends only a tiny fixed “Reply with exactly: OK” test to Gemini; it uses quota and does not include your chats. Online chat still waits for your explicit review before anything is sent. No automatic model switch or fallback.',
+                  'Start with Gemini 3.5 Flash-Lite: Google currently lists free input and output for eligible free-tier projects, subject to quotas and model access. Google says free-tier content may be used to improve its products. Gemini 2.5 Flash and Flash-Lite are also selectable, but Google limits 2.5 access to people who have actively used a 2.5 model before. A free-tier listing does not guarantee your project has access or unlimited use, and Google account billing settings still apply. Test connection sends one tiny fixed “Reply with exactly: OK” request using the selected model; it does not include chats. Online chat still waits for your explicit review. No automatic paid-model switch or fallback.',
                 ),
                 if (widget.state.geminiApiKey.isNotEmpty)
                   Align(
@@ -4847,7 +4880,8 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
                       onPressed: saving || testing
                           ? null
                           : () => _clearCredential(
-                              compatible: false, cloudProvider: 'openai',
+                              compatible: false,
+                              cloudProvider: 'openai',
                             ),
                       icon: const Icon(Icons.key_off),
                       label: const Text('Clear OpenAI API key'),
