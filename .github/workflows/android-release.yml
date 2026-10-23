@@ -159,7 +159,7 @@ jobs:
           find "$scan_dir/unpacked" -type f -print0 | while IFS= read -r -d '' file; do
             strings -a -n 4 "$file"
           done > "$scan_dir/apk-strings.txt"
-          go install github.com/gitleaks/gitleaks/v8@v8.28.0
+          go install github.com/zricethezav/gitleaks/v8@v8.28.0
           "$(go env GOPATH)/bin/gitleaks" dir \
             --redact \
             --exit-code 1 \
