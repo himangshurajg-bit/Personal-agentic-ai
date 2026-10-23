@@ -27,6 +27,28 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('idle orb keeps rotating between interactions', (tester) async {
+    await tester.pumpWidget(
+      const MediaQuery(
+        data: MediaQueryData(disableAnimations: false),
+        child: MaterialApp(
+          home: Scaffold(body: Center(child: HolographicAssistantOrb())),
+        ),
+      ),
+    );
+    final orbPaint = find.descendant(
+      of: find.byType(HolographicAssistantOrb),
+      matching: find.byType(CustomPaint),
+    );
+    final before = tester.widget<CustomPaint>(orbPaint.first).painter;
+
+    await tester.pump(const Duration(seconds: 2));
+
+    final after = tester.widget<CustomPaint>(orbPaint.first).painter;
+    expect(after, isNot(same(before)));
+    expect(find.bySemanticsLabel('Assistant is ready'), findsOneWidget);
+  });
+
   testWidgets('orb respects reduced motion and ticker-off modes', (
     tester,
   ) async {

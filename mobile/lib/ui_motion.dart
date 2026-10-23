@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' show PointMode;
 
 import 'package:flutter/material.dart';
 
@@ -396,29 +397,24 @@ class _HolographicAssistantOrbPainter extends CustomPainter {
     HolographicOrbState.speaking => .75,
   };
 
-  Color _spectrum(double latitude, double alpha) {
-    final position = ((latitude / math.pi) + .5).clamp(0.0, 1.0);
-    final scaled = position * (colors.length - 1);
-    final index = scaled.floor().clamp(0, colors.length - 2);
-    return Color.lerp(
-      colors[index],
-      colors[index + 1],
-      scaled - index,
-    )!.withValues(alpha: alpha);
-  }
-
   @override
   void paint(Canvas canvas, Size size) {
     final shortest = size.shortestSide;
     if (shortest <= 1) return;
-    final center = size.center(Offset.zero);
-    final radius = shortest * .345;
-    final activity = _activity;
     final angle = phase * math.pi * 2;
+    final activity = _activity;
     final pulse =
         .5 +
         .5 * math.sin(angle * (state == HolographicOrbState.speaking ? 3 : 1));
-    final breathing = 1 + .018 * activity * pulse;
+    // The whole sphere floats and breathes; its longitude field below rotates too.
+    final center = size
+        .center(Offset.zero)
+        .translate(
+          math.sin(angle * .7) * shortest * .018,
+          math.cos(angle * .9) * shortest * .021,
+        );
+    final radius = shortest * .345;
+    final breathing = 1 + (.026 + .024 * activity) * pulse;
     final orbRadius = radius * breathing;
 
     // A broad, softly colored bloom sits behind the dark glass sphere.
@@ -461,26 +457,28 @@ class _HolographicAssistantOrbPainter extends CustomPainter {
     canvas.save();
     canvas.clipPath(clip);
     // The latitude/longitude point field gives a holographic particle shell.
-    const latitudeCount = 11;
-    const longitudeCount = 25;
+    // Scale mesh density with the rendered size so tiny status orbs stay light.
+    final latitudeCount = shortest >= 130 ? 17 : 11;
+    final longitudeCount = shortest >= 130 ? 40 : 25;
     final points = List.generate(
       latitudeCount,
       (row) => List<({Offset point, double depth, double latitude})>.generate(
         longitudeCount,
         (column) {
           final latitude = -math.pi / 2 + math.pi * (row + .5) / latitudeCount;
-          final longitude = math.pi * 2 * column / longitudeCount + angle;
+          final longitude =
+              math.pi * 2 * column / longitudeCount + angle * 1.18;
           final ripple =
               math.sin(longitude * 3 + angle * 1.5) *
               math.cos(latitude * 4 - angle) *
-              .035 *
-              activity;
+              (.035 + .025 * activity);
           final lat = latitude + ripple;
           final x = math.cos(lat) * math.sin(longitude);
           final y = math.sin(lat);
           final z = math.cos(lat) * math.cos(longitude);
-          final tiltY = y * math.cos(.18) - z * math.sin(.18);
-          final depth = y * math.sin(.18) + z * math.cos(.18);
+          final tilt = .20 + .12 * math.sin(angle * .55);
+          final tiltY = y * math.cos(tilt) - z * math.sin(tilt);
+          final depth = y * math.sin(tilt) + z * math.cos(tilt);
           return (
             point: Offset(
               center.dx + x * orbRadius,
@@ -493,9 +491,7 @@ class _HolographicAssistantOrbPainter extends CustomPainter {
       ),
     );
 
-    final meshPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(.45, shortest * .0045);
+    final meshPath = Path();
     for (var row = 0; row < latitudeCount; row++) {
       for (var column = 0; column < longitudeCount; column++) {
         final current = points[row][column];
@@ -505,52 +501,212 @@ class _HolographicAssistantOrbPainter extends CustomPainter {
           1.0,
         );
         if (frontness > .08) {
-          meshPaint.color = _spectrum(
-            (current.latitude + next.latitude) / 2,
-            (.08 + .32 * frontness) * (.58 + .42 * activity),
-          );
-          canvas.drawLine(current.point, next.point, meshPaint);
+          meshPath
+            ..moveTo(current.point.dx, current.point.dy)
+            ..lineTo(next.point.dx, next.point.dy);
         }
         if (row + 1 < latitudeCount) {
           final below = points[row + 1][column];
           final verticalFrontness = ((current.depth + below.depth) / 2 + .22)
               .clamp(0.0, 1.0);
           if (verticalFrontness > .08) {
-            meshPaint.color = _spectrum(
-              (current.latitude + below.latitude) / 2,
-              (.055 + .27 * verticalFrontness) * (.58 + .42 * activity),
-            );
-            canvas.drawLine(current.point, below.point, meshPaint);
+            meshPath
+              ..moveTo(current.point.dx, current.point.dy)
+              ..lineTo(below.point.dx, below.point.dy);
           }
         }
       }
     }
+    canvas.drawPath(
+      meshPath,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = math.max(.55, shortest * .0038)
+        ..shader = SweepGradient(
+          colors: [colors[0], colors[1], colors[2], colors[3], colors[0]],
+        ).createShader(sphereRect)
+        ..color = Colors.white.withValues(alpha: .48 + .12 * activity),
+    );
 
-    final dotPaint = Paint()..style = PaintingStyle.fill;
-    for (final row in points) {
-      for (var column = 0; column < row.length; column++) {
-        final particle = row[column];
+    // Batch particles by latitude row to keep the detailed shell inexpensive.
+    for (var row = 0; row < latitudeCount; row++) {
+      final visiblePoints = <Offset>[];
+      for (var column = 0; column < longitudeCount; column++) {
+        final particle = points[row][column];
         final visibility = ((particle.depth + .35) / 1.35).clamp(0.0, 1.0);
-        if (visibility <= .03) continue;
-        final radiusJitter =
-            .68 +
-            .32 * (.5 + .5 * math.sin(column * 7 + particle.latitude * 19));
-        final dotRadius = shortest * (.0031 + .0022 * activity) * radiusJitter;
-        dotPaint.color = _spectrum(
-          particle.latitude,
-          (.30 + .62 * visibility) * (.72 + .28 * pulse * activity),
+        if (visibility > .08) visiblePoints.add(particle.point);
+      }
+      if (visiblePoints.isEmpty) continue;
+      final rowFraction = row / math.max(1, latitudeCount - 1);
+      final tint = Color.lerp(colors[0], colors[3], rowFraction)!;
+      canvas.drawPoints(
+        PointMode.points,
+        visiblePoints,
+        Paint()
+          ..color = tint.withValues(alpha: .70 + .24 * pulse)
+          ..strokeWidth = shortest * (shortest >= 130 ? .011 : .012)
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+
+    // Three interwoven neural veils echo the references: a point-cloud globe,
+    // flowing wave contours, and bright branching signal filaments. Their paths
+    // are clipped to the actual sphere, so the core has depth rather than a flat halo.
+    final veilCount = shortest >= 130 ? 13 : 8;
+    for (var veil = 0; veil < veilCount; veil++) {
+      final t = veil / veilCount;
+      final path = Path();
+      for (var step = 0; step <= 32; step++) {
+        final u = step / 32;
+        final theta = u * math.pi * 2 + angle * (veil.isEven ? .42 : -.31);
+        final wave =
+            math.sin(theta * (2.0 + (veil % 3)) + angle * 1.7 + veil) *
+            (.035 + .025 * activity);
+        final latitude = (t * 2 - 1) * 1.05 + wave;
+        final x = math.cos(latitude) * math.sin(theta);
+        final y = math.sin(latitude);
+        final z = math.cos(latitude) * math.cos(theta);
+        final depth = y * .31 + z * .95;
+        final point = Offset(
+          center.dx + x * orbRadius,
+          center.dy + (y * .95 - z * .31) * orbRadius,
         );
-        canvas.drawCircle(particle.point, dotRadius, dotPaint);
-        if (visibility > .84 && dotRadius > 0.5) {
-          dotPaint.color = Colors.white.withValues(alpha: .24 * visibility);
-          canvas.drawCircle(
-            particle.point.translate(-dotRadius * .25, -dotRadius * .25),
-            dotRadius * .28,
-            dotPaint,
+        if (step == 0) {
+          path.moveTo(point.dx, point.dy);
+        } else {
+          path.lineTo(point.dx, point.dy);
+        }
+        // A moving luminous packet runs along selected filaments.
+        final packet =
+            (phase * (state == HolographicOrbState.idle ? .55 : 1.2) + t) % 1;
+        if ((veil % 3 == 0) && (u - packet).abs() < .035 && depth > -.12) {
+          final packetPaint = Paint()
+            ..color = colors[(veil + 1) % colors.length].withValues(
+              alpha: (.42 + .48 * pulse) * ((depth + 1) / 2).clamp(0.0, 1.0),
+            )
+            ..strokeWidth = shortest * .009
+            ..strokeCap = StrokeCap.round
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+          canvas.drawCircle(point, shortest * .008, packetPaint);
+        }
+      }
+      final veilColor = colors[veil % colors.length];
+      canvas.drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = shortest * (veil % 4 == 0 ? .0042 : .0021)
+          ..strokeCap = StrokeCap.round
+          ..color = veilColor.withValues(
+            alpha: (.17 + .20 * activity) * (.68 + .32 * pulse),
+          )
+          ..maskFilter = veil % 4 == 0
+              ? const MaskFilter.blur(BlurStyle.normal, 3)
+              : null,
+      );
+    }
+
+    // Branching lightning nerves travel across the globe; each is a curved,
+    // softly blooming filament with a crisp inner stroke for a sculpted glow.
+    final nerveCount = shortest >= 130 ? 9 : 5;
+    for (var nerve = 0; nerve < nerveCount; nerve++) {
+      final start = nerve / nerveCount * math.pi * 2 + angle * .37;
+      final path = Path();
+      for (var step = 0; step <= 12; step++) {
+        final u = step / 12;
+        final theta = start + u * (1.25 + .35 * math.sin(nerve.toDouble()));
+        final latitude =
+            -.78 + u * 1.56 + .055 * math.sin(u * 19 + nerve + angle * 2);
+        final x = math.cos(latitude) * math.sin(theta);
+        final y = math.sin(latitude);
+        final z = math.cos(latitude) * math.cos(theta);
+        final depth = y * .31 + z * .95;
+        final point = Offset(
+          center.dx + x * orbRadius,
+          center.dy + (y * .95 - z * .31) * orbRadius,
+        );
+        if (step == 0) {
+          path.moveTo(point.dx, point.dy);
+        } else {
+          path.lineTo(point.dx, point.dy);
+        }
+        if (step % 4 == 0 && step > 0 && depth > -.12) {
+          final branch = Path()
+            ..moveTo(point.dx, point.dy)
+            ..quadraticBezierTo(
+              point.dx + math.cos(start + nerve) * shortest * .07,
+              point.dy + math.sin(start + nerve) * shortest * .06,
+              point.dx + math.cos(start + nerve) * shortest * .13,
+              point.dy + math.sin(start + nerve) * shortest * .12,
+            );
+          canvas.drawPath(
+            branch,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = shortest * .0024
+              ..color = colors[(nerve + 2) % colors.length].withValues(
+                alpha: .28 + .28 * pulse,
+              ),
           );
         }
       }
+      final tint = colors[(nerve + 2) % colors.length];
+      final glow = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = shortest * .012
+        ..strokeCap = StrokeCap.round
+        ..color = tint.withValues(alpha: .18 + .16 * activity)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+      canvas.drawPath(path, glow);
+      canvas.drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = shortest * .0027
+          ..strokeCap = StrokeCap.round
+          ..color = Color.lerp(
+            tint,
+            Colors.white,
+            .42,
+          )!.withValues(alpha: .58 + .32 * pulse),
+      );
     }
+
+    // Inner luminous nucleus and volumetric highlights make the particle shell
+    // read as a glassy, dimensional object rather than a wireframe sticker.
+    final nucleus = Rect.fromCircle(
+      center: center.translate(-orbRadius * .10, -orbRadius * .08),
+      radius: orbRadius * .49,
+    );
+    canvas.drawCircle(
+      center.translate(-orbRadius * .10, -orbRadius * .08),
+      orbRadius * .49,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            colors[0].withValues(alpha: .22 + .12 * pulse),
+            colors[1].withValues(alpha: .08),
+            Colors.transparent,
+          ],
+          stops: const [0, .55, 1],
+        ).createShader(nucleus),
+    );
+    final coreSpark = center.translate(
+      math.sin(angle * 1.9) * orbRadius * .12,
+      math.cos(angle * 1.4) * orbRadius * .10,
+    );
+    canvas.drawCircle(
+      coreSpark,
+      shortest * (.012 + .006 * pulse),
+      Paint()
+        ..color = colors[0].withValues(alpha: .42 + .28 * pulse)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
+    );
+    canvas.drawCircle(
+      coreSpark,
+      shortest * .006,
+      Paint()..color = Colors.white.withValues(alpha: .84),
+    );
 
     // Holographic vertical glints and a low warm reflection add depth.
     final glintRect = Rect.fromCircle(
