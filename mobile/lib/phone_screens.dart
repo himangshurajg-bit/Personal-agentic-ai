@@ -44,8 +44,10 @@ Future<bool> reviewOnline(
                     ),
                     const SizedBox(height: 12),
                     SelectableText(text),
-                    const Text(
-                      'The provider/service may retain this prompt and charge your account. The private FastAPI option also retains its prior server-side history. This review does not erase those copies.',
+                    Text(
+                      state.engine == 'gemini'
+                          ? 'Google may retain this prompt. On Gemini’s free tier, Google says submitted content may be used to improve its products; quotas and eligibility apply. This review does not erase provider copies.'
+                          : 'The provider/service may retain this prompt and charge your account. The private FastAPI option also retains its prior server-side history. This review does not erase those copies.',
                     ),
                     CheckboxListTile(
                       contentPadding: EdgeInsets.zero,

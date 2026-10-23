@@ -47,21 +47,24 @@ void main() {
       expect(restored.rows('memories'), hasLength(1));
     },
   );
-  test('spoken-reply preference persists only after the user enables it', () async {
-    final state = AssistantState();
-    await state.initialize();
-    expect(state.speakReplies, isFalse);
+  test(
+    'spoken-reply preference persists only after the user enables it',
+    () async {
+      final state = AssistantState();
+      await state.initialize();
+      expect(state.speakReplies, isFalse);
 
-    await state.saveSpeakReplies(true);
-    final restored = AssistantState();
-    await restored.initialize();
-    expect(restored.speakReplies, isTrue);
+      await state.saveSpeakReplies(true);
+      final restored = AssistantState();
+      await restored.initialize();
+      expect(restored.speakReplies, isTrue);
 
-    await restored.saveSpeakReplies(false);
-    final disabled = AssistantState();
-    await disabled.initialize();
-    expect(disabled.speakReplies, isFalse);
-  });
+      await restored.saveSpeakReplies(false);
+      final disabled = AssistantState();
+      await disabled.initialize();
+      expect(disabled.speakReplies, isFalse);
+    },
+  );
   test(
     'flashcards migrate old local records and schedule only actual reviews',
     () async {
@@ -245,48 +248,58 @@ void main() {
     },
   );
 
-  test('opted-in offline chat routes only through the local native runtime', () async {
-    final calls = <MethodCall>[];
-    var networkCalls = 0;
-    addTearDown(() =>
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-            .setMockMethodCallHandler(AssistantState.offlineModel, null));
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(AssistantState.offlineModel, (call) async {
-          calls.add(call);
-          if (call.method == 'run_chat') return 'A local answer.';
-          return true;
-        });
-    final s = AssistantState(
-      clientFactory: () => MockClient((_) async {
-        networkCalls++;
-        return http.Response('{}', 200);
-      }),
-    );
-    await s.initialize();
-    expect(s.experimentalOfflineChatEnabled, isFalse);
-    await s.saveExperimentalOfflineChat(true);
-    await s.send('Explain Newton’s second law.');
+  test(
+    'opted-in offline chat routes only through the local native runtime',
+    () async {
+      final calls = <MethodCall>[];
+      var networkCalls = 0;
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(AssistantState.offlineModel, null),
+      );
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(AssistantState.offlineModel, (call) async {
+            calls.add(call);
+            if (call.method == 'run_chat') return 'A local answer.';
+            return true;
+          });
+      final s = AssistantState(
+        clientFactory: () => MockClient((_) async {
+          networkCalls++;
+          return http.Response('{}', 200);
+        }),
+      );
+      await s.initialize();
+      await s.saveEngine('offline', '', 'en-IN');
+      expect(s.experimentalOfflineChatEnabled, isFalse);
+      await s.saveExperimentalOfflineChat(true);
+      await s.send('Explain Newton’s second law.');
 
-    expect(networkCalls, 0);
-    expect(calls.map((call) => call.method), contains('set_experimental_chat_enabled'));
-    final chatCall = calls.singleWhere((call) => call.method == 'run_chat');
-    expect((chatCall.arguments as Map)['experimental_opt_in'], isTrue);
-    final prompt = jsonDecode((chatCall.arguments as Map)['prompt'] as String);
-    expect(prompt['user_message'], 'Explain Newton’s second law.');
-    expect(s.messages.last, {
-      'role': 'assistant',
-      'text': 'A local answer.',
-      'state': 'complete',
-    });
-    expect(s.error, isEmpty);
+      expect(networkCalls, 0);
+      expect(
+        calls.map((call) => call.method),
+        contains('set_experimental_chat_enabled'),
+      );
+      final chatCall = calls.singleWhere((call) => call.method == 'run_chat');
+      expect((chatCall.arguments as Map)['experimental_opt_in'], isTrue);
+      final prompt = jsonDecode(
+        (chatCall.arguments as Map)['prompt'] as String,
+      );
+      expect(prompt['user_message'], 'Explain Newton’s second law.');
+      expect(s.messages.last, {
+        'role': 'assistant',
+        'text': 'A local answer.',
+        'state': 'complete',
+      });
+      expect(s.error, isEmpty);
 
-    final restored = AssistantState();
-    await restored.initialize();
-    expect(restored.experimentalOfflineChatEnabled, isTrue);
-    s.dispose();
-    restored.dispose();
-  });
+      final restored = AssistantState();
+      await restored.initialize();
+      expect(restored.experimentalOfflineChatEnabled, isTrue);
+      s.dispose();
+      restored.dispose();
+    },
+  );
 
   for (final entry in const {
     'en-IN': 'English',
@@ -457,7 +470,7 @@ void main() {
     await r.initialize();
     expect(r.assistantName, 'হিৰাকী');
     expect(r.speechMode, 'online');
-    expect(r.engine, 'offline');
+    expect(r.engine, 'gemini');
     await expectLater(s.setAssistantName(''), throwsA(isA<ServiceException>()));
     await expectLater(
       s.saveSpeechMode('silent fallback'),
@@ -487,6 +500,7 @@ void main() {
         (_) async => 1,
       );
       final s = AssistantState()
+        ..engine = 'offline'
         ..ready = true
         ..appLockConfigurationReady = true
         ..onboarded = true;

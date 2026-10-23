@@ -95,6 +95,7 @@ class _AssistantAppState extends State<AssistantApp>
         },
         '/voice': (_) => ChatScreen(state: widget.state, startWithVoice: true),
         '/settings': (_) => Settings(state: widget.state),
+        '/connections': (_) => ApiMcpSettings(state: widget.state),
         '/memory': (_) => Memories(state: widget.state),
         '/library': (_) => PhoneLibrary(state: widget.state),
         '/study': (_) => StudyScreen(state: widget.state),
@@ -1756,8 +1757,8 @@ class Home extends StatelessWidget {
         : 'Good evening';
     final modeLabel = state.engine == 'offline'
         ? state.experimentalOfflineChatEnabled
-            ? 'Experimental Gemma · local only'
-            : 'Gemma opt-in needed'
+              ? 'Experimental Gemma · local only'
+              : 'Gemma opt-in needed'
         : 'Online mode selected';
     return Shell(
       title: state.assistantName,
@@ -3471,19 +3472,12 @@ class Settings extends StatefulWidget {
 }
 
 class _SettingsState extends State<Settings> {
-  late final serviceUrl = TextEditingController(
-    text: widget.state.privateServiceEndpoint,
-  );
-  late final compatibleUrl = TextEditingController(
-    text: widget.state.compatibleApiEndpoint,
-  );
-  final serviceSecret = TextEditingController();
-  final compatibleSecret = TextEditingController();
   late String speechMode = widget.state.speechMode;
   late String theme = widget.state.theme;
-  late String engine = widget.state.engine, language = widget.state.language;
-  late final model = TextEditingController(text: widget.state.model);
-  late final name = TextEditingController(text: widget.state.assistantName);
+  late String language = widget.state.language;
+  late final TextEditingController name = TextEditingController(
+    text: widget.state.assistantName,
+  );
   @override
   void initState() {
     super.initState();
@@ -3497,41 +3491,8 @@ class _SettingsState extends State<Settings> {
   @override
   void dispose() {
     widget.state.removeListener(_stateChanged);
-    serviceUrl.dispose();
-    compatibleUrl.dispose();
-    serviceSecret.dispose();
-    compatibleSecret.dispose();
-    model.dispose();
     name.dispose();
     super.dispose();
-  }
-
-  Future<void> _clearCredential({required bool compatible}) async {
-    final label = compatible ? 'API key' : 'private service token';
-    final remove =
-        await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text('Clear $label?'),
-            content: const Text(
-              'This removes the saved credential from this phone. It does not revoke it at the provider.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Keep'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Clear'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!remove || !mounted) return;
-    await widget.state.clearProviderCredential(compatible: compatible);
-    if (mounted) notice(context, '$label cleared from this phone.');
   }
 
   Future<void> _setExperimentalOfflineChat(bool enabled) async {
@@ -3595,13 +3556,11 @@ class _SettingsState extends State<Settings> {
     );
     if (confirmed != true || !mounted) return;
     try {
-      final result = await AssistantState.device.invokeMapMethod<String, dynamic>(
-        'export',
-        {
-          'text': widget.state.exportLocalData(),
-          'filename': 'personal-ai-backup.json',
-        },
-      );
+      final result = await AssistantState.device
+          .invokeMapMethod<String, dynamic>('export', {
+            'text': widget.state.exportLocalData(),
+            'filename': 'personal-ai-backup.json',
+          });
       if (mounted && result?['saved'] == true) {
         notice(context, 'Local backup saved to the location you chose.');
       }
@@ -3746,21 +3705,6 @@ class _SettingsState extends State<Settings> {
                   labelText: 'Assistant display name',
                 ),
               ),
-              DropdownButtonFormField<String>(
-                isExpanded: true,
-                initialValue: engine,
-                decoration: const InputDecoration(labelText: 'AI engine'),
-                items: [
-                  for (final item in {
-                    'offline': 'Offline · Gemma (experimental)',
-                    'compatible': 'Online · OpenAI-compatible',
-                    'private_service': 'Online · private FastAPI',
-                  }.entries)
-                    DropdownMenuItem(value: item.key, child: Text(item.value)),
-                ],
-                onChanged: (v) => setState(() => engine = v!),
-              ),
-              const SizedBox(height: 12),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 value: widget.state.experimentalOfflineChatEnabled,
@@ -3768,7 +3712,7 @@ class _SettingsState extends State<Settings> {
                 secondary: const _SettingsIconTile(icon: Icons.memory_rounded),
                 title: const Text('Use Gemma in normal chat · experimental'),
                 subtitle: const Text(
-                  'Explicit opt-in. Select Offline · Gemma and save settings to use it. It only runs locally after you download and load the model. Not qualified for Redmi/HyperOS; replies may be inaccurate, slow or heat the phone. There is no online fallback.',
+                  'Explicit opt-in. Select Offline · Gemma in API & MCP connections to use it. It only runs locally after you download and load the model. Not qualified for Redmi/HyperOS; replies may be inaccurate, slow or heat the phone. There is no online fallback.',
                 ),
               ),
               const SizedBox(height: 16),
@@ -3789,164 +3733,47 @@ class _SettingsState extends State<Settings> {
               ),
               const SizedBox(height: 16),
               const Text(
-                'ElevenLabs expressive voice is on-demand per reply. It sends only that reply through your private service; each play asks first and may use your account credits. The ElevenLabs key and voice ID must be configured on the service host and are never stored in this APK. Audio tags guide delivery but do not guarantee an emotion. No provider key is bundled. Offline never falls back online.',
+                'Voice replies and recognition use your selected language where the device/provider supports it. Online providers may retain submitted content and charge your account; offline never falls back online.',
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               const Text(
-                'Online providers may retain submitted content and charge your account. Configure only your own authorized service. Offline never falls back online.',
+                'ElevenLabs expressive voice is on-demand per reply. It sends only that reply through your private service; each play asks first and may use your account credits. The ElevenLabs key and voice ID must be configured on the service host and are never stored in this APK. Audio tags guide delivery but do not guarantee an emotion. No provider key is bundled.',
               ),
-              if (engine == 'compatible') ...[
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('OpenAI-compatible API'),
-                ),
-                TextField(
-                  controller: compatibleUrl,
-                  keyboardType: TextInputType.url,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'HTTPS API origin',
-                    hintText: 'https://api.example.com',
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: model,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  decoration: const InputDecoration(
-                    labelText: 'Model ID',
-                    hintText: 'Use the exact model name from your provider',
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'API key: ${widget.state.compatibleApiKey.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
-                ),
-                TextField(
-                  controller: compatibleSecret,
-                  obscureText: true,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  autofillHints: const [],
-                  decoration: const InputDecoration(
-                    labelText: 'API key',
-                    hintText: 'Enter a new key to replace the saved key',
-                  ),
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Keys are kept in Android secure storage, are not shown again, and are sent only as authentication when you approve an online request. Leave blank to keep the saved key.',
-                ),
-                if (widget.state.compatibleApiKey.isNotEmpty)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: () => _clearCredential(compatible: true),
-                      icon: const Icon(Icons.key_off),
-                      label: const Text('Clear API key'),
-                    ),
-                  ),
-              ] else if (engine == 'private_service') ...[
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('Private FastAPI service'),
-                ),
-                TextField(
-                  controller: serviceUrl,
-                  keyboardType: TextInputType.url,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'Service origin',
-                    hintText: 'https://your-private-service.example',
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Service token: ${widget.state.privateServiceToken.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
-                ),
-                TextField(
-                  controller: serviceSecret,
-                  obscureText: true,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  autofillHints: const [],
-                  decoration: const InputDecoration(
-                    labelText: 'Private service token',
-                    hintText: 'Enter a new token to replace the saved token',
-                  ),
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Leave blank to keep the saved token. The service remains separate from public provider credentials.',
-                ),
-                if (widget.state.privateServiceToken.isNotEmpty)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: () => _clearCredential(compatible: false),
-                      icon: const Icon(Icons.key_off),
-                      label: const Text('Clear service token'),
-                    ),
-                  ),
-              ] else
-                Text(
-                  widget.state.experimentalOfflineChatEnabled
-                      ? 'Experimental local chat is opted in. Download and load Gemma in the model panel below; it will not contact a network service.'
-                      : 'Offline chat needs your explicit experimental opt-in and a downloaded, loaded Gemma model. No online fallback is used.',
-                ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
               FilledButton(
                 onPressed: () async {
                   try {
-                    await widget.state.saveSettings(
-                      serviceUrl.text,
-                      serviceSecret.text,
-                      theme,
-                      compatibleUrl: compatibleUrl.text,
-                      compatibleSecret: compatibleSecret.text,
-                    );
-                    serviceSecret.clear();
-                    compatibleSecret.clear();
+                    await widget.state.saveTheme(theme);
                     await widget.state.setAssistantName(name.text);
                     await widget.state.saveSpeechMode(speechMode);
-                    await widget.state.saveEngine(engine, model.text, language);
+                    await widget.state.saveEngine(
+                      widget.state.engine,
+                      widget.state.model,
+                      language,
+                    );
                     if (context.mounted) {
                       notice(context, 'Settings saved on this device.');
                     }
                   } catch (e) {
-                    if (context.mounted) {
-                      notice(context, e);
-                    }
+                    if (context.mounted) notice(context, e);
                   }
                 },
                 child: const Text('Save settings'),
               ),
-              if (engine == 'private_service')
-                TextButton(
-                  onPressed: () async {
-                    try {
-                      final result = await widget.state.request(
-                        'GET',
-                        '/health',
-                      );
-                      if (context.mounted) {
-                        notice(
-                          context,
-                          result['provider_configured'] == true
-                              ? 'Service reachable; model configured.'
-                              : 'Service reachable; no AI provider configured.',
-                        );
-                      }
-                    } catch (e) {
-                      if (context.mounted) {
-                        notice(context, e);
-                      }
-                    }
-                  },
-                  child: const Text('Test private FastAPI connection'),
-                ),
             ],
+          ),
+        ),
+        const _SettingsSectionLabel('CONNECTIONS'),
+        Glass(
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.hub_outlined),
+            title: const Text('API & MCP connections'),
+            subtitle: Text(
+              '${widget.state.config.description} · ${widget.state.customMcpServers.length} MCP server${widget.state.customMcpServers.length == 1 ? '' : 's'} saved',
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => Navigator.pushNamed(context, '/connections'),
           ),
         ),
         const _SettingsSectionLabel('WORKFLOWS'),
@@ -3956,7 +3783,9 @@ class _SettingsState extends State<Settings> {
               ListTile(
                 leading: const Icon(Icons.edit_note_rounded),
                 title: const Text('Message & social drafts'),
-                subtitle: const Text('Edit text, then use Android’s share sheet; nothing is sent automatically.'),
+                subtitle: const Text(
+                  'Edit text, then use Android’s share sheet; nothing is sent automatically.',
+                ),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.pushNamed(context, '/drafts'),
               ),
@@ -3964,17 +3793,19 @@ class _SettingsState extends State<Settings> {
               ListTile(
                 leading: const Icon(Icons.auto_awesome_outlined),
                 title: const Text('Skills & actions'),
-                subtitle: const Text('Reviewed local app launches and reminders; no background agent.'),
+                subtitle: const Text(
+                  'Reviewed local app launches and reminders; no background agent.',
+                ),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.pushNamed(context, '/skills'),
               ),
             ],
           ),
         ),
-        const _SettingsSectionLabel('CONNECTED TOOLS'),
-        CustomMcpPanel(state: widget.state),
         const _SettingsSectionLabel('OFFLINE MODEL & EXPERIMENTAL CHAT'),
-        const Text('The optional model is downloaded only when you start it. You can run fixed screening prompts or, after opting in above, use it for normal chat. Neither option means the model is qualified for your phone.'),
+        const Text(
+          'The optional model is downloaded only when you start it. You can run fixed screening prompts or, after opting in above, use it for normal chat. Neither option means the model is qualified for your phone.',
+        ),
         const SizedBox(height: 8),
         const OfflineModelPanel(),
         const _SettingsSectionLabel('VOICE CAPABILITIES'),
@@ -4001,9 +3832,14 @@ class _SettingsState extends State<Settings> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Local backup', style: Theme.of(context).textTheme.titleMedium),
+              Text(
+                'Local backup',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               const SizedBox(height: 6),
-              const Text('Export is manual and owner-confirmed. The JSON file is readable and unencrypted; save it somewhere private. Provider keys and service tokens are excluded. Import/restore is not implemented.'),
+              const Text(
+                'Export is manual and owner-confirmed. The JSON file is readable and unencrypted; save it somewhere private. Provider keys and service tokens are excluded. Import/restore is not implemented.',
+              ),
               const SizedBox(height: 10),
               OutlinedButton.icon(
                 onPressed: _exportLocalBackup,
@@ -4058,6 +3894,442 @@ class _SettingsState extends State<Settings> {
           },
           child: const Text('Delete current conversation history'),
         ),
+      ],
+    ),
+  );
+}
+
+class ApiMcpSettings extends StatefulWidget {
+  final AssistantState state;
+  const ApiMcpSettings({super.key, required this.state});
+
+  @override
+  State<ApiMcpSettings> createState() => _ApiMcpSettingsState();
+}
+
+class _ApiMcpSettingsState extends State<ApiMcpSettings> {
+  late final TextEditingController serviceUrl = TextEditingController(
+    text: widget.state.privateServiceEndpoint,
+  );
+  late final TextEditingController compatibleUrl = TextEditingController(
+    text: widget.state.compatibleApiEndpoint,
+  );
+  late final TextEditingController model = TextEditingController(
+    text: widget.state.model,
+  );
+  final serviceSecret = TextEditingController();
+  final compatibleSecret = TextEditingController();
+  late String engine = widget.state.engine;
+  bool saving = false;
+  bool testing = false;
+  String connectionStatus = 'Connection not tested on this device.';
+  bool? connectionSucceeded;
+
+  @override
+  void dispose() {
+    serviceUrl.dispose();
+    compatibleUrl.dispose();
+    model.dispose();
+    serviceSecret.dispose();
+    compatibleSecret.dispose();
+    super.dispose();
+  }
+
+  Future<void> _clearCredential({
+    required bool compatible,
+    bool gemini = false,
+  }) async {
+    final label = gemini
+        ? 'Gemini API key'
+        : compatible
+        ? 'API key'
+        : 'private service token';
+    final remove =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Text('Clear $label?'),
+            content: const Text(
+              'This removes the saved credential from this phone. It does not revoke it at the provider.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Keep'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Clear'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!remove || !mounted) return;
+    await widget.state.clearProviderCredential(
+      compatible: compatible,
+      gemini: gemini,
+    );
+    if (mounted) {
+      setState(() {
+        connectionStatus = 'Credential cleared; connection is not configured.';
+        connectionSucceeded = false;
+      });
+      notice(context, '$label cleared from this phone.');
+    }
+  }
+
+  Future<void> _save({bool showNotice = true}) async {
+    setState(() => saving = true);
+    try {
+      if (engine == 'gemini') {
+        await widget.state.saveGeminiApiKey(compatibleSecret.text);
+        await widget.state.saveEngine(
+          'gemini',
+          AssistantState.geminiModel,
+          widget.state.language,
+        );
+      } else {
+        await widget.state.saveSettings(
+          serviceUrl.text,
+          serviceSecret.text,
+          widget.state.theme,
+          compatibleUrl: compatibleUrl.text,
+          compatibleSecret: compatibleSecret.text,
+        );
+        await widget.state.saveEngine(
+          engine,
+          model.text,
+          widget.state.language,
+        );
+      }
+      serviceSecret.clear();
+      compatibleSecret.clear();
+      if (mounted) {
+        setState(() {
+          connectionStatus = 'Saved on this phone · connection not yet tested.';
+          connectionSucceeded = null;
+        });
+        if (showNotice) notice(context, 'Connection settings saved securely.');
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          connectionStatus = 'Not saved: $error';
+          connectionSucceeded = false;
+        });
+      }
+      rethrow;
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+  }
+
+  Future<void> _testConnection() async {
+    setState(() {
+      testing = true;
+      connectionStatus = 'Testing the selected server…';
+      connectionSucceeded = null;
+    });
+    try {
+      // Persist first so the probe uses exactly the configuration now shown.
+      await _save(showNotice: false);
+      if (engine == 'gemini') {
+        final result = await widget.state.testGeminiApi();
+        if (mounted) {
+          setState(() {
+            connectionStatus = result;
+            connectionSucceeded = true;
+          });
+        }
+      } else if (engine == 'private_service') {
+        final result = await widget.state.request('GET', '/health');
+        final configured =
+            result is Map && result['provider_configured'] == true;
+        if (mounted) {
+          setState(() {
+            connectionStatus = configured
+                ? 'Connected · service reachable and an AI provider is configured.'
+                : 'Connected to the service, but no AI provider is configured there.';
+            connectionSucceeded = true;
+          });
+        }
+      } else if (engine == 'compatible') {
+        final result = await widget.state.testCompatibleApi();
+        if (mounted) {
+          setState(() {
+            connectionStatus = result;
+            connectionSucceeded = true;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            connectionStatus = 'Offline · no server connection is used. Download and load the local model first.';
+            connectionSucceeded = null;
+          });
+        }
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          connectionStatus = '$error';
+          connectionSucceeded = false;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => testing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Shell(
+    title: 'API & MCP connections',
+    assistantName: widget.state.assistantName,
+    primaryNavigation: false,
+    child: ListView(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 36),
+      children: [
+        Text(
+          'Connect an AI provider or inspect MCP servers',
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Saving settings does not connect a server. Use Test connection to verify the selected endpoint. Provider credentials stay in Android secure storage and are never displayed again.',
+        ),
+        const SizedBox(height: 16),
+        const _SettingsSectionLabel('AI PROVIDER'),
+        Glass(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: engine,
+                decoration: const InputDecoration(labelText: 'AI engine'),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'gemini',
+                    child: Text('Online · Gemini 2.5 Flash (default)'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'offline',
+                    child: Text('Offline · Gemma (experimental)'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'compatible',
+                    child: Text('Online · OpenAI-compatible API'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'private_service',
+                    child: Text('Online · private FastAPI service'),
+                  ),
+                ],
+                onChanged: saving || testing
+                    ? null
+                    : (value) => setState(() => engine = value ?? 'gemini'),
+              ),
+              const SizedBox(height: 10),
+              if (engine == 'gemini') ...[
+                Text(
+                  'API key: ${widget.state.geminiApiKey.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
+                ),
+                TextField(
+                  controller: compatibleSecret,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  autofillHints: const [],
+                  decoration: const InputDecoration(
+                    labelText: 'Gemini API key',
+                    hintText: 'Paste your key from Google AI Studio',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'That is the only setup field. The app uses Google’s fixed Gemini 2.5 Flash model; no server URL or model name is needed. Google currently limits 2.5 access to people who have actively used a 2.5 model before and recommends newer models for new projects, so access is not guaranteed. Free-tier input and output are free within limits, but Google says free-tier content may be used to improve its products. Test connection sends only a tiny fixed “Reply with exactly: OK” test to Gemini; it uses quota and does not include your chats. Online chat still waits for your explicit review before anything is sent. No automatic model switch or fallback.',
+                ),
+                if (widget.state.geminiApiKey.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: saving || testing
+                          ? null
+                          : () => _clearCredential(
+                              compatible: false,
+                              gemini: true,
+                            ),
+                      icon: const Icon(Icons.key_off),
+                      label: const Text('Clear Gemini API key'),
+                    ),
+                  ),
+              ] else if (engine == 'compatible') ...[
+                TextField(
+                  controller: compatibleUrl,
+                  keyboardType: TextInputType.url,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'API origin',
+                    hintText: 'https://api.example.com',
+                  ),
+                ),
+                TextField(
+                  controller: model,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Model ID',
+                    hintText: 'Exact model identifier from your provider',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'API key: ${widget.state.compatibleApiKey.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
+                ),
+                TextField(
+                  controller: compatibleSecret,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  autofillHints: const [],
+                  decoration: const InputDecoration(
+                    labelText: 'API key',
+                    hintText: 'Leave blank to keep the saved key',
+                  ),
+                ),
+                const Text(
+                  'Use HTTPS for remote providers; HTTP is accepted only for localhost or Android-emulator host access. Keys are never shown again. Test connection requests only the provider model-list endpoint; it does not send a chat prompt.',
+                ),
+                if (widget.state.compatibleApiKey.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: saving || testing
+                          ? null
+                          : () => _clearCredential(compatible: true),
+                      icon: const Icon(Icons.key_off),
+                      label: const Text('Clear API key'),
+                    ),
+                  ),
+              ] else if (engine == 'private_service') ...[
+                TextField(
+                  controller: serviceUrl,
+                  keyboardType: TextInputType.url,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Private service origin',
+                    hintText: 'https://your-private-service.example',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Service token: ${widget.state.privateServiceToken.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
+                ),
+                TextField(
+                  controller: serviceSecret,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  autofillHints: const [],
+                  decoration: const InputDecoration(
+                    labelText: 'Private service token',
+                    hintText: 'Leave blank to keep the saved token',
+                  ),
+                ),
+                const Text(
+                  'On an Android phone, 127.0.0.1 and localhost point to the phone itself, not your server. Enter the server’s reachable HTTPS address. Android emulator host access uses 10.0.2.2.',
+                ),
+                if (widget.state.privateServiceToken.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: saving || testing
+                          ? null
+                          : () => _clearCredential(compatible: false),
+                      icon: const Icon(Icons.key_off),
+                      label: const Text('Clear service token'),
+                    ),
+                  ),
+              ] else ...[
+                const Text(
+                  'Offline mode does not connect to a server. Enable experimental chat in Settings, then download and load Gemma on this phone. There is no online fallback.',
+                ),
+              ],
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: saving || testing
+                          ? null
+                          : () async {
+                              try {
+                                await _save();
+                              } catch (_) {
+                                // The inline state contains the actionable error.
+                              }
+                            },
+                      child: Text(
+                        saving ? 'Saving…' : 'Save connection settings',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (engine != 'offline') ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: saving || testing ? null : _testConnection,
+                  icon: testing
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.network_check_rounded),
+                  label: Text(
+                    testing
+                        ? 'Testing connection…'
+                        : engine == 'gemini'
+                        ? 'Test connection'
+                        : 'Save & test connection',
+                  ),
+                ),
+              ],
+              const SizedBox(height: 10),
+              Semantics(
+                liveRegion: true,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      connectionSucceeded == true
+                          ? Icons.check_circle_outline
+                          : connectionSucceeded == false
+                          ? Icons.error_outline
+                          : Icons.info_outline,
+                      color: connectionSucceeded == true
+                          ? Theme.of(context).colorScheme.primary
+                          : connectionSucceeded == false
+                          ? Theme.of(context).colorScheme.error
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(connectionStatus)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Online requests require your review before sending. This screen never runs tools automatically.',
+        ),
+        const SizedBox(height: 16),
+        const _SettingsSectionLabel('MCP SERVERS'),
+        CustomMcpPanel(state: widget.state),
       ],
     ),
   );
@@ -4317,6 +4589,7 @@ class CustomMcpPanel extends StatefulWidget {
 
 class _CustomMcpPanelState extends State<CustomMcpPanel> {
   bool busy = false;
+  final Map<String, String> _serverStatus = {};
 
   Future<void> _add() async {
     final name = TextEditingController();
@@ -4479,13 +4752,19 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
     try {
       await widget.state.connectMcpOAuth(server.id);
       if (mounted) {
+        setState(() {
+          _serverStatus[server.id] = 'OAuth authorized on this phone · server reachability still needs Test & discover tools.';
+        });
         notice(
           context,
-          'Wajo OAuth connected on this phone. No tools were run.',
+          'Wajo OAuth authorized on this phone. No tools were run.',
         );
       }
     } catch (e) {
-      if (mounted) notice(context, e);
+      if (mounted) {
+        setState(() => _serverStatus[server.id] = 'OAuth not connected · $e');
+        notice(context, e);
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -4496,6 +4775,10 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
     try {
       final tools = await widget.state.discoverMcpTools(server.id);
       if (!mounted) return;
+      setState(() {
+        _serverStatus[server.id] =
+            'Reachable · server returned ${tools.length} tool${tools.length == 1 ? '' : 's'}. This app can inspect tools but cannot run them.';
+      });
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
@@ -4540,7 +4823,10 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
         ),
       );
     } catch (e) {
-      if (mounted) notice(context, e);
+      if (mounted) {
+        setState(() => _serverStatus[server.id] = 'Not reachable · $e');
+        notice(context, e);
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -4571,6 +4857,7 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
     if (!confirmed || !mounted) return;
     try {
       await widget.state.removeMcpServer(server.id);
+      if (mounted) setState(() => _serverStatus.remove(server.id));
     } catch (e) {
       if (mounted) notice(context, e);
     }
@@ -4617,6 +4904,13 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
+                Text(
+                  _serverStatus[server.id] ??
+                      (server.authMode == McpAuthMode.wajoOAuth
+                          ? 'Saved · OAuth status shown above; server not tested'
+                          : 'Saved on this phone · not tested'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ],
             ),
             trailing: PopupMenuButton<String>(
