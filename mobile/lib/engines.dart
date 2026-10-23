@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'assistant_state.dart' show ServiceException, checkedEndpoint;
+import 'gemini_models.dart';
 
 /// Selectable protocol adapters, not a claim that a model is installed.
 class EngineConfig {
@@ -15,7 +16,7 @@ class EngineConfig {
   });
   String get description => switch (mode) {
     'offline' => 'Offline · Gemma experimental',
-    'gemini' => 'Online · Gemini 2.5 Flash',
+    'gemini' => 'Online · Gemini $model',
     'openai' => 'Online · OpenAI ChatGPT',
     'compatible' => 'Online · OpenAI-compatible',
     _ => 'Online · private FastAPI service',
@@ -35,6 +36,9 @@ class EngineConfig {
     if (mode == 'gemini' && base.scheme != 'https') {
       throw ServiceException('Gemini API requires HTTPS.');
     }
+    if (mode == 'gemini' && !GeminiModels.supports(model)) {
+      throw ServiceException('Choose a supported Gemini model identifier.');
+    }
     if (['compatible', 'openai'].contains(mode) && base.scheme != 'https') {
       throw ServiceException('Online providers require HTTPS.');
     }
@@ -52,7 +56,9 @@ class EngineConfig {
     final req = http.Request(
       'POST',
       mode == 'gemini'
-          ? Uri.parse('$origin:generateContent')
+          ? Uri.parse(
+              '${origin.replaceAll(RegExp(r'/$'), '')}/$model:generateContent',
+            )
           : base.resolve(
               ['compatible', 'openai'].contains(mode)
                   ? '/v1/chat/completions'

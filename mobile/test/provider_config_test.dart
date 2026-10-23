@@ -25,18 +25,37 @@ void main() {
       final gemini = const EngineConfig(
         mode: 'gemini',
         origin: AssistantState.geminiEndpoint,
-        model: 'gemini-2.5-flash',
+        model: AssistantState.geminiModel,
         token: 'gemini-key',
       ).request('local', 'hello');
       expect(
         gemini.url.toString(),
-        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
       );
       expect(gemini.headers['x-goog-api-key'], 'gemini-key');
       expect(
         jsonDecode(gemini.body)['contents'][0]['parts'][0]['text'],
         'hello',
       );
+      final alternate = const EngineConfig(
+        mode: 'gemini',
+        origin: AssistantState.geminiModelsEndpoint,
+        model: AssistantState.geminiFlashLiteModel,
+        token: 'gemini-key',
+      ).request('local', 'hello');
+      expect(
+        alternate.url.path,
+        '/v1beta/models/gemini-2.5-flash-lite:generateContent',
+      );
+      for (final selectedModel in AssistantState.geminiModels) {
+        final selected = EngineConfig(
+          mode: 'gemini',
+          origin: AssistantState.geminiModelsEndpoint,
+          model: selectedModel,
+          token: 'gemini-key',
+        ).request('local', 'hello');
+        expect(selected.url.path, endsWith('/$selectedModel:generateContent'));
+      }
     },
   );
 
@@ -56,7 +75,16 @@ void main() {
         () => const EngineConfig(
           mode: 'gemini',
           origin: 'http://generativelanguage.googleapis.com',
-          model: 'gemini-2.5-flash',
+          model: AssistantState.geminiModel,
+          token: 'key',
+        ).request('local', 'hello'),
+        throwsA(isA<ServiceException>()),
+      );
+      expect(
+        () => const EngineConfig(
+          mode: 'gemini',
+          origin: AssistantState.geminiModelsEndpoint,
+          model: 'unlisted-paid-model',
           token: 'key',
         ).request('local', 'hello'),
         throwsA(isA<ServiceException>()),

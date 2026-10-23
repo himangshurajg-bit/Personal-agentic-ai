@@ -93,36 +93,65 @@ void main() {
   );
 
   test(
-    'Gemini defaults to fixed 2.5 Flash and stores only the key locally',
+    'Gemini defaults to free-tier Flash-Lite and stores only the key locally',
     () async {
       final state = AssistantState();
       expect(state.engine, 'gemini');
-      expect(AssistantState.geminiModel, 'gemini-2.5-flash');
+      expect(AssistantState.geminiModel, 'gemini-3.5-flash-lite');
       await state.saveGeminiApiKey('private-test-key');
       await state.saveEngine('gemini', '', 'en-IN');
-      expect(state.model, 'gemini-2.5-flash');
+      expect(state.model, 'gemini-3.5-flash-lite');
       expect(
         await state.storage.read(key: 'gemini_api_key'),
         'private-test-key',
       );
-      expect(state.config.origin, AssistantState.geminiEndpoint);
+      expect(state.config.origin, AssistantState.geminiModelsEndpoint);
+      expect(state.config.model, AssistantState.geminiModel);
       expect(state.config.token, 'private-test-key');
       state.dispose();
     },
   );
 
-  test('Gemini request uses fixed endpoint and auth header, never an alternate model', () async {
+  test('Gemini model selection is validated and persisted without changing the key', () async {
+    final state = AssistantState();
+    await state.saveGeminiApiKey('only-in-secure-storage');
+    await state.saveEngine(
+      'gemini',
+      AssistantState.geminiFlashLiteModel,
+      'en-IN',
+    );
+    expect(state.model, AssistantState.geminiFlashLiteModel);
+    expect(state.config.model, AssistantState.geminiFlashLiteModel);
+    expect(
+      await state.storage.read(key: 'model'),
+      AssistantState.geminiFlashLiteModel,
+    );
+    expect(
+      await state.storage.read(key: 'gemini_api_key'),
+      'only-in-secure-storage',
+    );
+    await expectLater(
+      state.saveEngine('gemini', 'unsupported-model', 'en-IN'),
+      throwsA(isA<ServiceException>()),
+    );
+    expect(state.model, AssistantState.geminiFlashLiteModel);
+    state.dispose();
+  });
+
+  test('Gemini request uses the selected model endpoint and key header', () async {
     final config = EngineConfig(
       mode: 'gemini',
-      origin: AssistantState.geminiEndpoint,
-      model: 'some-user-supplied-model',
+      origin: AssistantState.geminiModelsEndpoint,
+      model: AssistantState.geminiFlashLiteModel,
       token: 'secret-key',
     );
     final request = config.request('personal', 'question');
     expect(request.method, 'POST');
     expect(
       request.url,
-      Uri.parse('${AssistantState.geminiEndpoint}:generateContent'),
+      Uri.parse(
+        '${AssistantState.geminiModelsEndpoint}/${AssistantState.geminiFlashLiteModel}:generateContent',
+      ),
     );
     expect(request.url.queryParameters, isEmpty);
     expect(request.headers['x-goog-api-key'], 'secret-key');
@@ -175,62 +204,63 @@ void main() {
     },
   );
 
-  test(
-    'Gemini connection test runs one tiny fixed inference without chat data',
-    () async {
-      http.Request? captured;
-      var requestCount = 0;
-      final state = AssistantState(
-        clientFactory: () => MockClient((request) async {
-          requestCount++;
-          captured = request;
-          return http.Response(
-            jsonEncode({
-              'candidates': [
-                {
-                  'content': {
-                    'parts': [
-                      {'text': 'OK'},
-                    ],
-                  },
+  test('Gemini connection test runs one tiny fixed inference without chat data', () async {
+    http.Request? captured;
+    var requestCount = 0;
+    final state = AssistantState(
+      clientFactory: () => MockClient((request) async {
+        requestCount++;
+        captured = request;
+        return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {'text': 'OK'},
+                  ],
                 },
-              ],
-            }),
-            200,
-          );
-        }),
-      );
-      await state.saveGeminiApiKey('not-for-logs');
-      final result = await state.testGeminiApi();
-      expect(requestCount, 1);
-      expect(captured?.method, 'POST');
-      expect(
-        captured?.url,
-        Uri.parse('${AssistantState.geminiEndpoint}:generateContent'),
-      );
-      expect(captured?.url.queryParameters, isEmpty);
-      expect(captured?.headers['x-goog-api-key'], 'not-for-logs');
-      expect(captured?.headers['Authorization'], isNull);
-      final body = jsonDecode(captured!.body) as Map<String, dynamic>;
-      expect(body['contents'], [
-        {
-          'role': 'user',
-          'parts': [
-            {'text': 'Reply with exactly: OK'},
-          ],
-        },
-      ]);
-      expect(body['generationConfig'], {
-        'maxOutputTokens': 8,
-        'temperature': 0,
-      });
-      expect(result, contains('replied to the fixed connection test'));
-      expect(result, contains('No chat content was sent'));
-      expect(result, isNot(contains('not-for-logs')));
-      expect(captured!.body, isNot(contains('personal')));
-      state.dispose();
-    },
-  );
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    await state.saveGeminiApiKey('not-for-logs');
+    await state.saveEngine(
+      'gemini',
+      AssistantState.geminiFlashLiteModel,
+      'en-IN',
+    );
+    final result = await state.testGeminiApi();
+    expect(requestCount, 1);
+    expect(captured?.method, 'POST');
+    expect(
+      captured?.url,
+      Uri.parse(
+        '${AssistantState.geminiModelsEndpoint}/${AssistantState.geminiFlashLiteModel}:generateContent',
+      ),
+    );
+    expect(captured?.url.queryParameters, isEmpty);
+    expect(captured?.headers['x-goog-api-key'], 'not-for-logs');
+    expect(captured?.headers['Authorization'], isNull);
+    final body = jsonDecode(captured!.body) as Map<String, dynamic>;
+    expect(body['contents'], [
+      {
+        'role': 'user',
+        'parts': [
+          {'text': 'Reply with exactly: OK'},
+        ],
+      },
+    ]);
+    expect(body['generationConfig'], {'maxOutputTokens': 8, 'temperature': 0});
+    expect(result, contains('replied to the fixed connection test'));
+    expect(result, contains('No chat content was sent'));
+    expect(result, isNot(contains('not-for-logs')));
+    expect(captured!.body, isNot(contains('personal')));
+    state.dispose();
+  });
 
   test(
     'Gemini connection test reports auth and quota errors without key',
@@ -362,9 +392,14 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: ApiMcpSettings(state: state)));
     await tester.pumpAndSettle();
 
-    expect(find.text('Online · Gemini 2.5 Flash (default)'), findsOneWidget);
+    expect(find.text('Online · Gemini API'), findsOneWidget);
     expect(find.text('Gemini API key'), findsOneWidget);
     expect(find.byType(TextField), findsOneWidget);
+    expect(find.text('Gemini model'), findsOneWidget);
+    expect(
+      find.text('Gemini 3.5 Flash-Lite · free tier available (default)'),
+      findsOneWidget,
+    );
     await tester.scrollUntilVisible(
       find.text('Test connection'),
       250,
@@ -372,7 +407,7 @@ void main() {
     );
     expect(find.text('Test connection'), findsOneWidget);
     expect(
-      find.textContaining('tiny fixed “Reply with exactly: OK” test'),
+      find.textContaining('tiny fixed “Reply with exactly: OK” request'),
       findsOneWidget,
     );
     expect(find.text('API origin'), findsNothing);
@@ -428,7 +463,7 @@ void main() {
     expect(captured?.method, 'POST');
     expect(
       captured?.url.path,
-      contains('models/gemini-2.5-flash:generateContent'),
+      contains('models/gemini-3.5-flash-lite:generateContent'),
     );
     expect(
       find.textContaining('replied to the fixed connection test'),
@@ -436,6 +471,66 @@ void main() {
     );
     expect(find.textContaining('local-test-key'), findsNothing);
 
+    await tester.pumpWidget(const SizedBox.shrink());
+    state.dispose();
+  });
+
+  testWidgets('Gemini connection test follows the model selected in the UI', (
+    tester,
+  ) async {
+    http.Request? captured;
+    final state = AssistantState(
+      clientFactory: () => MockClient((request) async {
+        captured = request;
+        return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {'text': 'OK'},
+                  ],
+                },
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    await tester.pumpWidget(MaterialApp(home: ApiMcpSettings(state: state)));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'local-test-key');
+    await tester.tap(find.byType(DropdownButtonFormField<String>).last);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find
+          .text(
+            AssistantState.geminiModelLabels[AssistantState
+                .geminiFlashLiteModel]!,
+          )
+          .last,
+    );
+    await tester.pumpAndSettle();
+    final testButton = find.text('Test connection');
+    await tester.scrollUntilVisible(
+      testButton,
+      250,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.ensureVisible(testButton);
+    await tester.pumpAndSettle();
+    await tester.tap(testButton);
+    await tester.pumpAndSettle();
+
+    expect(
+      captured?.url.path,
+      contains('models/gemini-2.5-flash-lite:generateContent'),
+    );
+    expect(
+      find.textContaining('gemini-2.5-flash-lite replied'),
+      findsOneWidget,
+    );
     await tester.pumpWidget(const SizedBox.shrink());
     state.dispose();
   });
