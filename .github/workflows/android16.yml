@@ -48,6 +48,9 @@ jobs:
       - name: Flutter checks
         working-directory: mobile
         run: flutter pub get && flutter analyze && flutter test
+      - name: Configure Android Gradle files
+        working-directory: mobile
+        run: flutter build apk --release --config-only
       - name: Release shrinker check for LiteRT-LM JNI callbacks
         working-directory: mobile/android
         run: ./gradlew :app:verifyLiteRtLmJniCallbackNames --no-daemon
