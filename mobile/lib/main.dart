@@ -2934,14 +2934,47 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  bool _qwenReady(AssistantState state) =>
-      state.experimentalOfflineChatEnabled &&
-      _qwenStatus['experimental_chat_enabled'] == true &&
+  bool _qwenCandidateQualified() =>
       _qwenStatus['selected_model_id'] == 'qwen3-0.6b' &&
       _qwenStatus['model_present'] == true &&
       _qwenStatus['model_size_matches'] == true &&
       _qwenStatus['runtime_loaded'] == true &&
       _qwenStatus['chat_qualified'] == true;
+
+  bool _qwenReady(AssistantState state) =>
+      state.experimentalOfflineChatEnabled &&
+      _qwenStatus['experimental_chat_enabled'] == true &&
+      _qwenCandidateQualified();
+
+  String _qwenStatusMessage(AssistantState state) {
+    final status = _qwenStatus;
+    if (_qwenStatusLoading) {
+      return 'Checking the on-device Qwen model and runtime…';
+    }
+    if (status['status_error'] != null) {
+      return 'This build cannot report the local model status. Offline Qwen chat stays disabled.';
+    }
+    if (status['selected_model_id'] != 'qwen3-0.6b') {
+      return status['model_selection_locked'] == true
+          ? 'Another local model is loaded or busy. Close it in Settings before selecting Qwen.'
+          : 'Qwen is not the selected local model. Open Settings to review the pinned Qwen candidate.';
+    }
+    if (status['model_present'] != true ||
+        status['model_size_matches'] != true) {
+      return 'The Qwen weights are not installed and verified on this phone. No model download was started.';
+    }
+    if (status['runtime_loaded'] != true) {
+      return 'Qwen weights are present, but the local runtime is not loaded. Use Offline model screening in Settings first.';
+    }
+    if (status['chat_qualified'] != true) {
+      return 'Qwen is not qualified for this phone yet. Device fit, stability and answer-quality checks must pass before replies can be enabled.';
+    }
+    if (!state.experimentalOfflineChatEnabled ||
+        status['experimental_chat_enabled'] != true) {
+      return 'Qwen is qualified, but experimental local chat opt-in is off in Settings.';
+    }
+    return 'Local Qwen is qualified and ready. Messages stay on this device; there is no network fallback.';
+  }
 
   Future<void> _refreshQwenStatus() async {
     if (!widget.offlineQwen) return;
@@ -2992,7 +3025,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       setState(() => listening = false);
     }
     if (!mounted) return;
-    if (widget.offlineQwen && !_qwenReady(widget.state)) return;
+    if (widget.offlineQwen && !_qwenReady(widget.state)) {
+      widget.state.reportOfflineQwenNotReady(_qwenStatusMessage(widget.state));
+      return;
+    }
     if (!widget.offlineQwen) {
       final payload = await reviewOnline(context, widget.state, text);
       if (!payload) return;
@@ -3009,9 +3045,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ? widget.state.offlineQwenConversation
           : null,
       requireQualifiedOfflineModel: widget.offlineQwen,
-      offlineModelQualified:
-          _qwenStatus['chat_qualified'] == true &&
-          _qwenStatus['selected_model_id'] == 'qwen3-0.6b',
+      offlineModelQualified: _qwenCandidateQualified(),
     );
     if (widget.state.speakReplies &&
         widget.state.error.isEmpty &&
@@ -3074,30 +3108,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _offlineQwenStatusCard(AssistantState state) {
     final colors = Theme.of(context).colorScheme;
-    final status = _qwenStatus;
     final ready = _qwenReady(state);
-    final String message;
-    if (_qwenStatusLoading) {
-      message = 'Checking the on-device Qwen model and runtime…';
-    } else if (status['status_error'] != null) {
-      message = 'This build cannot report the local model status. Offline Qwen chat stays disabled.';
-    } else if (status['selected_model_id'] != 'qwen3-0.6b') {
-      message = status['model_selection_locked'] == true
-          ? 'Another local model is loaded or busy. Close it in Settings before selecting Qwen.'
-          : 'Qwen is not the selected local model. Open Settings to review the pinned Qwen candidate.';
-    } else if (status['model_present'] != true ||
-        status['model_size_matches'] != true) {
-      message = 'The Qwen weights are not installed and verified on this phone. No model download was started.';
-    } else if (status['runtime_loaded'] != true) {
-      message = 'Qwen weights are present, but the local runtime is not loaded. Use Offline model screening in Settings first.';
-    } else if (status['chat_qualified'] != true) {
-      message = 'The local Qwen candidate is connected to the screening path, but chat is not qualified for this device. License, device compatibility and response-quality checks remain outstanding; sending is disabled.';
-    } else if (!state.experimentalOfflineChatEnabled ||
-        status['experimental_chat_enabled'] != true) {
-      message = 'The Qwen runtime is qualified, but experimental local chat opt-in is off in Settings.';
-    } else {
-      message = 'Local Qwen is qualified and ready. Messages stay on this device; there is no network fallback.';
-    }
+    final message = _qwenStatusMessage(state);
     return Card(
       color: colors.surfaceContainerHighest.withValues(alpha: .78),
       child: Padding(
@@ -3451,7 +3463,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(state.error),
-                          if (state.lastPrompt.isNotEmpty && !state.busy)
+                          if (state.lastPrompt.isNotEmpty &&
+                              !state.busy &&
+                              (!widget.offlineQwen || _qwenReady(state)))
                             TextButton(
                               onPressed: () => send(state.lastPrompt),
                               child: const Text('Retry last message'),
@@ -3620,11 +3634,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         tooltip: state.busy || speaking
                             ? 'Stop response'
                             : 'Send message',
-                        onPressed: state.busy || speaking
-                            ? stopAll
-                            : widget.offlineQwen && !_qwenReady(state)
-                            ? null
-                            : send,
+                        onPressed: state.busy || speaking ? stopAll : send,
                         style: IconButton.styleFrom(
                           fixedSize: const Size(48, 48),
                           backgroundColor: Theme.of(context)

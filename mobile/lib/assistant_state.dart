@@ -1440,6 +1440,11 @@ class AssistantState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void reportOfflineQwenNotReady(String reason) {
+    error = '$reason No message was sent and no online fallback was used.';
+    notifyListeners();
+  }
+
   Future<void> send(
     String text, {
     bool approvedOnline = false,

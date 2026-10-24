@@ -302,6 +302,80 @@ void main() {
     },
   );
 
+  testWidgets(
+    'Offline Qwen explains the qualification gate and keeps an unsent draft',
+    (tester) async {
+      final nativeCalls = <MethodCall>[];
+      var networkCalls = 0;
+      const tts = MethodChannel('flutter_tts');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(AssistantState.offlineModel, null);
+        messenger.setMockMethodCallHandler(AssistantState.device, null);
+        messenger.setMockMethodCallHandler(tts, null);
+      });
+      messenger.setMockMethodCallHandler(AssistantState.device, (call) async {
+        return null;
+      });
+      messenger.setMockMethodCallHandler(tts, (call) async => 1);
+      messenger.setMockMethodCallHandler(AssistantState.offlineModel, (
+        call,
+      ) async {
+        nativeCalls.add(call);
+        if (call.method == 'status') {
+          return <String, Object?>{
+            'selected_model_id': 'qwen3-0.6b',
+            'model_present': true,
+            'model_size_matches': true,
+            'runtime_loaded': true,
+            'chat_qualified': false,
+            'experimental_chat_enabled': true,
+            'model_selection_locked': true,
+          };
+        }
+        return true;
+      });
+      final state = AssistantState(
+        clientFactory: () => MockClient((_) async {
+          networkCalls++;
+          return http.Response('{}', 200);
+        }),
+      );
+      await state.initialize();
+      await state.saveExperimentalOfflineChat(true);
+      await tester.pumpWidget(
+        MaterialApp(home: ChatScreen(state: state, offlineQwen: true)),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      final composer = find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField &&
+            widget.decoration?.hintText == 'Message Offline Qwen…',
+      );
+      final sendButton = find.byWidgetPredicate(
+        (widget) => widget is IconButton && widget.tooltip == 'Send message',
+      );
+      expect(composer, findsOneWidget);
+      expect(tester.widget<IconButton>(sendButton).onPressed, isNotNull);
+      await tester.enterText(composer, 'Explain Newton’s second law.');
+      await tester.tap(sendButton);
+      await tester.pump();
+
+      expect(state.error, contains('not qualified for this phone yet'));
+      expect(state.error, contains('No message was sent'));
+      expect(
+        tester.widget<TextField>(composer).controller!.text,
+        'Explain Newton’s second law.',
+      );
+      expect(nativeCalls.where((call) => call.method == 'run_chat'), isEmpty);
+      expect(networkCalls, 0);
+      state.dispose();
+    },
+  );
+
   test('Offline Qwen keeps a separate resumable chat and blocks unqualified inference', () async {
     final nativeCalls = <MethodCall>[];
     var networkCalls = 0;
