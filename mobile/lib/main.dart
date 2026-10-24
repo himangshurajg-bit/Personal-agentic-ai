@@ -316,6 +316,8 @@ class Shell extends StatelessWidget {
             )
           : null,
       drawerScrimColor: theme.colorScheme.scrim.withValues(alpha: .34),
+      drawerEnableOpenDragGesture: primaryNavigation,
+      drawerEdgeDragWidth: primaryNavigation ? 40 : null,
       bottomNavigationBar: primaryNavigation && showBottomNavigation
           ? _AssistantDock(currentRoute: currentRoute)
           : null,

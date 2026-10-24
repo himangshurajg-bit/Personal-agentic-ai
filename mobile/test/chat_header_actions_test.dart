@@ -70,6 +70,37 @@ void main() {
     state.dispose();
   });
 
+  testWidgets('left-edge right swipe opens the navigation drawer', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 760);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = AssistantState();
+    await state.local.load();
+    await state.selectConversation('swipe-menu-chat', load: false);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(disableAnimations: true),
+          child: ChatScreen(state: state),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('YOUR PRIVATE ASSISTANT'), findsNothing);
+    await tester.dragFrom(const Offset(30, 380), const Offset(260, 0));
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.text('YOUR PRIVATE ASSISTANT'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    state.dispose();
+  });
+
   testWidgets('chat header opens history and starts a fresh conversation', (
     tester,
   ) async {
