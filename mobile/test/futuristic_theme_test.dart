@@ -89,6 +89,58 @@ void main() {
     state.dispose();
   });
 
+  testWidgets('glass controls keep clear feedback and honor reduced motion', (
+    tester,
+  ) async {
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+
+    final state = AssistantState();
+    await state.initialize();
+    await tester.pumpWidget(AssistantApp(state: state));
+
+    final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
+    final theme = app.theme!;
+    final emptyStates = const <WidgetState>{};
+    final pressed = const <WidgetState>{WidgetState.pressed};
+    expect(app.themeAnimationDuration, Duration.zero);
+    expect(theme.outlinedButtonTheme.style!.animationDuration, Duration.zero);
+    expect(theme.textButtonTheme.style!.animationDuration, Duration.zero);
+    expect(theme.iconButtonTheme.style!.animationDuration, Duration.zero);
+    expect(
+      theme.outlinedButtonTheme.style!.side!.resolve(emptyStates),
+      isNotNull,
+    );
+    expect(
+      theme.outlinedButtonTheme.style!.overlayColor!.resolve(pressed),
+      isNotNull,
+    );
+    expect(theme.iconButtonTheme.style!.side!.resolve(emptyStates), isNotNull);
+    expect(theme.listTileTheme.shape, isA<RoundedRectangleBorder>());
+    expect(theme.cardTheme.shape, isA<RoundedRectangleBorder>());
+    expect(
+      theme.switchTheme.trackOutlineColor!.resolve(emptyStates),
+      isNotNull,
+    );
+
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures();
+    await tester.pump();
+    final animatedApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
+    expect(
+      animatedApp.themeAnimationDuration,
+      const Duration(milliseconds: 520),
+    );
+    expect(
+      animatedApp.theme!.outlinedButtonTheme.style!.animationDuration,
+      const Duration(milliseconds: 180),
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    state.dispose();
+  });
+
   test('each palette provides a distinct dark surface and orb spectrum', () {
     final palettes = FuturisticPalette.all;
     expect(palettes.map((p) => p.id), ['aurora', 'solar', 'deep_space']);

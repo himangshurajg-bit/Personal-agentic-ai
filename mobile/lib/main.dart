@@ -98,55 +98,78 @@ class _AssistantAppState extends State<AssistantApp>
   }
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.state,
-    builder: (context, _) => MaterialApp(
-      title: widget.state.assistantName,
-      debugShowCheckedModeBanner: false,
-      theme: _assistantTheme(Brightness.light, widget.state.visualTheme),
-      darkTheme: _assistantTheme(Brightness.dark, widget.state.visualTheme),
-      themeAnimationDuration: const Duration(milliseconds: 520),
-      themeAnimationCurve: Curves.easeInOutCubic,
-      themeMode: widget.state.theme == 'dark'
-          ? ThemeMode.dark
-          : widget.state.theme == 'light'
-          ? ThemeMode.light
-          : ThemeMode.system,
-      builder: (context, child) => _AppLockGate(
-        state: widget.state,
-        child: child ?? const SizedBox.shrink(),
-      ),
-      home: !widget.state.ready
-          ? WelcomeSplash(assistantName: widget.state.assistantName)
-          : widget.state.onboarded
-          ? Home(state: widget.state)
-          : Onboarding(state: widget.state),
-      routes: {
-        '/home': (_) => Home(state: widget.state),
-        '/chat': (context) {
-          final draft = ModalRoute.of(context)?.settings.arguments;
-          return ChatScreen(
-            state: widget.state,
-            initialDraft: draft is String ? draft : null,
-          );
-        },
-        '/voice': (_) => ChatScreen(state: widget.state, startWithVoice: true),
-        '/settings': (_) => Settings(state: widget.state),
-        '/connections': (_) => ApiMcpSettings(state: widget.state),
-        '/memory': (_) => Memories(state: widget.state),
-        '/library': (_) => PhoneLibrary(state: widget.state),
-        '/study': (_) => StudyScreen(state: widget.state),
-        '/files': (_) => SelectedFiles(state: widget.state),
-        '/automations': (_) => ActionHistory(state: widget.state),
-        '/drafts': (_) => const OutboundDraftsScreen(),
-        '/skills': (_) => SafeSkillsScreen(state: widget.state),
-        '/images': (_) => ImageGenerationScreen(
-          endpoint: widget.state.endpoint,
-          token: widget.state.token,
+  void didChangeAccessibilityFeatures() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reduceMotion = WidgetsBinding
+        .instance
+        .platformDispatcher
+        .accessibilityFeatures
+        .disableAnimations;
+    return ListenableBuilder(
+      listenable: widget.state,
+      builder: (context, _) => MaterialApp(
+        title: widget.state.assistantName,
+        debugShowCheckedModeBanner: false,
+        theme: _assistantTheme(
+          Brightness.light,
+          widget.state.visualTheme,
+          reduceMotion: reduceMotion,
         ),
-      },
-    ),
-  );
+        darkTheme: _assistantTheme(
+          Brightness.dark,
+          widget.state.visualTheme,
+          reduceMotion: reduceMotion,
+        ),
+        themeAnimationDuration: reduceMotion
+            ? Duration.zero
+            : const Duration(milliseconds: 520),
+        themeAnimationCurve: Curves.easeInOutCubic,
+        themeMode: widget.state.theme == 'dark'
+            ? ThemeMode.dark
+            : widget.state.theme == 'light'
+            ? ThemeMode.light
+            : ThemeMode.system,
+        builder: (context, child) => _AppLockGate(
+          state: widget.state,
+          child: child ?? const SizedBox.shrink(),
+        ),
+        home: !widget.state.ready
+            ? WelcomeSplash(assistantName: widget.state.assistantName)
+            : widget.state.onboarded
+            ? Home(state: widget.state)
+            : Onboarding(state: widget.state),
+        routes: {
+          '/home': (_) => Home(state: widget.state),
+          '/chat': (context) {
+            final draft = ModalRoute.of(context)?.settings.arguments;
+            return ChatScreen(
+              state: widget.state,
+              initialDraft: draft is String ? draft : null,
+            );
+          },
+          '/voice': (_) =>
+              ChatScreen(state: widget.state, startWithVoice: true),
+          '/settings': (_) => Settings(state: widget.state),
+          '/connections': (_) => ApiMcpSettings(state: widget.state),
+          '/memory': (_) => Memories(state: widget.state),
+          '/library': (_) => PhoneLibrary(state: widget.state),
+          '/study': (_) => StudyScreen(state: widget.state),
+          '/files': (_) => SelectedFiles(state: widget.state),
+          '/automations': (_) => ActionHistory(state: widget.state),
+          '/drafts': (_) => const OutboundDraftsScreen(),
+          '/skills': (_) => SafeSkillsScreen(state: widget.state),
+          '/images': (_) => ImageGenerationScreen(
+            endpoint: widget.state.endpoint,
+            token: widget.state.token,
+          ),
+        },
+      ),
+    );
+  }
 }
 
 class _AppLockGate extends StatelessWidget {
@@ -773,55 +796,79 @@ class _DrawerRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final dark = theme.brightness == Brightness.dark;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: onTap,
-          child: AnimatedContainer(
-            duration: MediaQuery.disableAnimationsOf(context)
-                ? Duration.zero
-                : const Duration(milliseconds: 240),
-            curve: Curves.easeOutCubic,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              gradient: selected
-                  ? LinearGradient(
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
-                      colors: [
-                        colors.primary.withValues(alpha: .18),
-                        colors.secondary.withValues(alpha: .10),
-                      ],
-                    )
-                  : null,
-              border: selected
-                  ? Border.all(color: colors.primary.withValues(alpha: .22))
-                  : null,
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  icon,
-                  size: 21,
-                  color: selected ? colors.primary : colors.onSurfaceVariant,
+      child: TapMotion(
+        depth: .28,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: onTap,
+            child: AnimatedContainer(
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 240),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                color: selected
+                    ? null
+                    : colors.surface.withValues(alpha: dark ? .12 : .18),
+                gradient: selected
+                    ? LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          colors.primary.withValues(alpha: .20),
+                          colors.secondary.withValues(alpha: .10),
+                        ],
+                      )
+                    : null,
+                border: Border.all(
+                  color: selected
+                      ? colors.primary.withValues(alpha: .48)
+                      : colors.outlineVariant.withValues(
+                          alpha: dark ? .34 : .48,
+                        ),
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: selected ? colors.primary : colors.onSurface,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                boxShadow: selected
+                    ? [
+                        BoxShadow(
+                          color: colors.primary.withValues(
+                            alpha: dark ? .16 : .09,
+                          ),
+                          blurRadius: 16,
+                          offset: const Offset(0, 5),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    icon,
+                    size: 21,
+                    color: selected ? colors.primary : colors.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: selected ? colors.primary : colors.onSurface,
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
                     ),
                   ),
-                ),
-                if (selected)
-                  Icon(Icons.chevron_right_rounded, color: colors.primary),
-              ],
+                  if (selected)
+                    Icon(Icons.chevron_right_rounded, color: colors.primary),
+                ],
+              ),
             ),
           ),
         ),
@@ -998,44 +1045,68 @@ class _DockItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final dark = theme.brightness == Brightness.dark;
     return Expanded(
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: onTap,
-          child: AnimatedContainer(
-            duration: MediaQuery.disableAnimationsOf(context)
-                ? Duration.zero
-                : const Duration(milliseconds: 200),
-            curve: Curves.easeOutCubic,
-            margin: const EdgeInsets.symmetric(horizontal: 1),
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              color: selected ? colors.primary.withValues(alpha: .09) : null,
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  selected ? selectedIcon : icon,
-                  size: 21,
-                  color: selected ? colors.primary : colors.onSurfaceVariant,
+      child: TapMotion(
+        depth: .24,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: onTap,
+            child: AnimatedContainer(
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              margin: const EdgeInsets.symmetric(horizontal: 1),
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                color: selected
+                    ? colors.primary.withValues(alpha: .12)
+                    : colors.surface.withValues(alpha: .04),
+                border: Border.all(
+                  color: selected
+                      ? colors.primary.withValues(alpha: .42)
+                      : colors.outlineVariant.withValues(
+                          alpha: dark ? .42 : .58,
+                        ),
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.fade,
-                  softWrap: false,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    fontSize: 9,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                boxShadow: selected
+                    ? [
+                        BoxShadow(
+                          color: colors.primary.withValues(alpha: .14),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    selected ? selectedIcon : icon,
+                    size: 21,
                     color: selected ? colors.primary : colors.onSurfaceVariant,
                   ),
-                ),
-              ],
+                  const SizedBox(height: 3),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.fade,
+                    softWrap: false,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontSize: 9,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: selected
+                          ? colors.primary
+                          : colors.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -1082,7 +1153,11 @@ class _SettingsIconTile extends StatelessWidget {
   }
 }
 
-ThemeData _assistantTheme(Brightness brightness, String paletteId) {
+ThemeData _assistantTheme(
+  Brightness brightness,
+  String paletteId, {
+  bool reduceMotion = false,
+}) {
   final dark = brightness == Brightness.dark;
   final palette = FuturisticPalette.fromId(paletteId);
   final scheme =
@@ -1095,11 +1170,90 @@ ThemeData _assistantTheme(Brightness brightness, String paletteId) {
         tertiary: palette.tertiaryFor(brightness),
       );
   final fieldRadius = BorderRadius.circular(18);
+  final buttonRadius = BorderRadius.circular(22);
+  final motionDuration = reduceMotion
+      ? Duration.zero
+      : const Duration(milliseconds: 180);
+  final normalBorder = BorderSide(
+    color: scheme.outlineVariant.withValues(alpha: dark ? .50 : .58),
+    width: .9,
+  );
+  final glassBorder = WidgetStateProperty.resolveWith<BorderSide?>((states) {
+    if (states.contains(WidgetState.disabled)) {
+      return BorderSide(
+        color: scheme.outlineVariant.withValues(alpha: .24),
+        width: .8,
+      );
+    }
+    if (states.contains(WidgetState.pressed) ||
+        states.contains(WidgetState.focused)) {
+      return BorderSide(
+        color: scheme.primary.withValues(alpha: .82),
+        width: 1.2,
+      );
+    }
+    if (states.contains(WidgetState.hovered)) {
+      return BorderSide(
+        color: scheme.primary.withValues(alpha: .62),
+        width: 1.1,
+      );
+    }
+    return normalBorder;
+  });
+  final glassOverlay = WidgetStateProperty.resolveWith<Color?>((states) {
+    if (states.contains(WidgetState.pressed)) {
+      return scheme.primary.withValues(alpha: dark ? .16 : .12);
+    }
+    if (states.contains(WidgetState.focused)) {
+      return scheme.primary.withValues(alpha: dark ? .12 : .09);
+    }
+    if (states.contains(WidgetState.hovered)) {
+      return scheme.primary.withValues(alpha: dark ? .09 : .07);
+    }
+    return null;
+  });
+  final glassBackground = WidgetStateProperty.resolveWith<Color?>((states) {
+    if (states.contains(WidgetState.disabled)) {
+      return scheme.surfaceContainerHighest.withValues(alpha: .16);
+    }
+    if (states.contains(WidgetState.pressed)) {
+      return scheme.primary.withValues(alpha: dark ? .20 : .14);
+    }
+    if (states.contains(WidgetState.focused) ||
+        states.contains(WidgetState.hovered)) {
+      return scheme.primary.withValues(alpha: dark ? .14 : .10);
+    }
+    return scheme.surfaceContainerHighest.withValues(alpha: dark ? .30 : .40);
+  });
+  final textButtonBackground = WidgetStateProperty.resolveWith<Color?>((
+    states,
+  ) {
+    if (states.contains(WidgetState.disabled)) return Colors.transparent;
+    if (states.contains(WidgetState.pressed)) {
+      return scheme.primary.withValues(alpha: dark ? .16 : .12);
+    }
+    if (states.contains(WidgetState.focused) ||
+        states.contains(WidgetState.hovered)) {
+      return scheme.primary.withValues(alpha: dark ? .10 : .07);
+    }
+    return scheme.surfaceContainerHighest.withValues(alpha: dark ? .09 : .08);
+  });
+  final elevation = WidgetStateProperty.resolveWith<double>((states) {
+    if (states.contains(WidgetState.disabled)) return 0;
+    if (states.contains(WidgetState.pressed)) return 1;
+    if (states.contains(WidgetState.hovered) ||
+        states.contains(WidgetState.focused)) {
+      return 3;
+    }
+    return 1;
+  });
   final outline = OutlineInputBorder(
     borderRadius: fieldRadius,
-    borderSide: BorderSide(
-      color: scheme.outlineVariant.withValues(alpha: dark ? .48 : .54),
-    ),
+    borderSide: normalBorder,
+  );
+  final outlineHighlight = BorderSide(
+    color: scheme.primary.withValues(alpha: .96),
+    width: 1.6,
   );
   return ThemeData(
     colorScheme: scheme,
@@ -1164,14 +1318,20 @@ ThemeData _assistantTheme(Brightness brightness, String paletteId) {
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: scheme.surfaceContainerHighest.withValues(
-        alpha: dark ? .42 : .52,
+        alpha: dark ? .36 : .46,
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
       border: outline,
       enabledBorder: outline,
+      disabledBorder: OutlineInputBorder(
+        borderRadius: fieldRadius,
+        borderSide: BorderSide(
+          color: scheme.outlineVariant.withValues(alpha: .28),
+        ),
+      ),
       focusedBorder: OutlineInputBorder(
         borderRadius: fieldRadius,
-        borderSide: BorderSide(color: scheme.primary, width: 1.5),
+        borderSide: outlineHighlight,
       ),
       hintStyle: TextStyle(
         color: scheme.onSurfaceVariant.withValues(alpha: .78),
@@ -1182,12 +1342,35 @@ ThemeData _assistantTheme(Brightness brightness, String paletteId) {
           FilledButton.styleFrom(
             minimumSize: const Size(0, 48),
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-            ),
+            shape: RoundedRectangleBorder(borderRadius: buttonRadius),
             textStyle: const TextStyle(fontWeight: FontWeight.w600),
           ).copyWith(
-            animationDuration: const Duration(milliseconds: 220),
+            side: WidgetStateProperty.resolveWith<BorderSide?>((states) {
+              if (states.contains(WidgetState.disabled)) {
+                return BorderSide(
+                  color: scheme.onSurface.withValues(alpha: .12),
+                );
+              }
+              return BorderSide(
+                color: scheme.onPrimary.withValues(alpha: dark ? .32 : .46),
+                width: .9,
+              );
+            }),
+            elevation: elevation,
+            shadowColor: WidgetStatePropertyAll(
+              scheme.primary.withValues(alpha: dark ? .26 : .19),
+            ),
+            overlayColor: WidgetStateProperty.resolveWith<Color?>((states) {
+              if (states.contains(WidgetState.pressed)) {
+                return scheme.onPrimary.withValues(alpha: .16);
+              }
+              if (states.contains(WidgetState.focused) ||
+                  states.contains(WidgetState.hovered)) {
+                return scheme.onPrimary.withValues(alpha: .10);
+              }
+              return null;
+            }),
+            animationDuration: motionDuration,
             splashFactory: InkSparkle.splashFactory,
           ),
     ),
@@ -1195,11 +1378,17 @@ ThemeData _assistantTheme(Brightness brightness, String paletteId) {
       style:
           OutlinedButton.styleFrom(
             minimumSize: const Size(0, 48),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-            ),
+            foregroundColor: scheme.primary,
+            shape: RoundedRectangleBorder(borderRadius: buttonRadius),
           ).copyWith(
-            animationDuration: const Duration(milliseconds: 220),
+            backgroundColor: glassBackground,
+            side: glassBorder,
+            overlayColor: glassOverlay,
+            elevation: elevation,
+            shadowColor: WidgetStatePropertyAll(
+              scheme.primary.withValues(alpha: dark ? .18 : .10),
+            ),
+            animationDuration: motionDuration,
             splashFactory: InkSparkle.splashFactory,
           ),
     ),
@@ -1208,11 +1397,13 @@ ThemeData _assistantTheme(Brightness brightness, String paletteId) {
           TextButton.styleFrom(
             minimumSize: const Size(40, 44),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(22),
-            ),
+            foregroundColor: scheme.primary,
+            shape: RoundedRectangleBorder(borderRadius: buttonRadius),
           ).copyWith(
-            animationDuration: const Duration(milliseconds: 220),
+            backgroundColor: textButtonBackground,
+            side: glassBorder,
+            overlayColor: glassOverlay,
+            animationDuration: motionDuration,
             splashFactory: InkSparkle.splashFactory,
           ),
     ),
@@ -1222,20 +1413,149 @@ ThemeData _assistantTheme(Brightness brightness, String paletteId) {
             foregroundColor: scheme.onSurfaceVariant,
             shape: const CircleBorder(),
           ).copyWith(
-            animationDuration: const Duration(milliseconds: 200),
+            backgroundColor: WidgetStateProperty.resolveWith<Color?>((states) {
+              if (states.contains(WidgetState.disabled)) {
+                return Colors.transparent;
+              }
+              if (states.contains(WidgetState.pressed)) {
+                return scheme.primary.withValues(alpha: dark ? .20 : .13);
+              }
+              if (states.contains(WidgetState.focused) ||
+                  states.contains(WidgetState.hovered)) {
+                return scheme.primary.withValues(alpha: dark ? .14 : .09);
+              }
+              return scheme.surfaceContainerHighest.withValues(
+                alpha: dark ? .12 : .10,
+              );
+            }),
+            side: glassBorder,
+            overlayColor: glassOverlay,
+            animationDuration: motionDuration,
             splashFactory: InkSparkle.splashFactory,
           ),
     ),
     listTileTheme: ListTileThemeData(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+      tileColor: scheme.surfaceContainerHighest.withValues(
+        alpha: dark ? .12 : .10,
+      ),
+      selectedTileColor: scheme.primary.withValues(alpha: dark ? .18 : .12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(
+          color: scheme.outlineVariant.withValues(alpha: dark ? .34 : .46),
+        ),
+      ),
       minVerticalPadding: 10,
       horizontalTitleGap: 12,
       enableFeedback: true,
     ),
+    expansionTileTheme: ExpansionTileThemeData(
+      backgroundColor: Colors.transparent,
+      collapsedBackgroundColor: Colors.transparent,
+      textColor: scheme.primary,
+      iconColor: scheme.primary,
+      collapsedShape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(
+          color: scheme.outlineVariant.withValues(alpha: dark ? .34 : .46),
+        ),
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(color: scheme.primary.withValues(alpha: .42)),
+      ),
+    ),
     cardTheme: CardThemeData(
-      elevation: 0,
+      color: scheme.surface.withValues(alpha: dark ? .70 : .76),
+      elevation: 1,
+      shadowColor: scheme.primary.withValues(alpha: dark ? .14 : .09),
       surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(26),
+        side: BorderSide(
+          color: scheme.outlineVariant.withValues(alpha: dark ? .36 : .48),
+        ),
+      ),
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: scheme.surface.withValues(alpha: dark ? .96 : .98),
+      elevation: 10,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color: scheme.outlineVariant.withValues(alpha: dark ? .46 : .56),
+        ),
+      ),
+    ),
+    switchTheme: SwitchThemeData(
+      thumbColor: WidgetStateProperty.resolveWith<Color?>((states) {
+        if (states.contains(WidgetState.disabled)) {
+          return scheme.onSurface.withValues(alpha: .38);
+        }
+        return states.contains(WidgetState.selected)
+            ? scheme.onPrimary
+            : scheme.onSurfaceVariant;
+      }),
+      trackColor: WidgetStateProperty.resolveWith<Color?>((states) {
+        return states.contains(WidgetState.selected)
+            ? scheme.primary.withValues(alpha: dark ? .56 : .42)
+            : scheme.surfaceContainerHighest.withValues(alpha: .78);
+      }),
+      trackOutlineColor: WidgetStateProperty.resolveWith<Color?>((states) {
+        return states.contains(WidgetState.selected)
+            ? scheme.primary.withValues(alpha: .76)
+            : scheme.outlineVariant.withValues(alpha: .68);
+      }),
+      overlayColor: glassOverlay,
+    ),
+    checkboxTheme: CheckboxThemeData(
+      fillColor: WidgetStateProperty.resolveWith<Color?>((states) {
+        if (states.contains(WidgetState.disabled)) {
+          return scheme.onSurface.withValues(alpha: .24);
+        }
+        return states.contains(WidgetState.selected)
+            ? scheme.primary
+            : Colors.transparent;
+      }),
+      checkColor: WidgetStatePropertyAll(scheme.onPrimary),
+      overlayColor: glassOverlay,
+      side: normalBorder,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
+    ),
+    radioTheme: RadioThemeData(
+      fillColor: WidgetStateProperty.resolveWith<Color?>((states) {
+        if (states.contains(WidgetState.disabled)) {
+          return scheme.onSurface.withValues(alpha: .30);
+        }
+        return states.contains(WidgetState.selected)
+            ? scheme.primary
+            : scheme.onSurfaceVariant;
+      }),
+      overlayColor: glassOverlay,
+    ),
+    segmentedButtonTheme: SegmentedButtonThemeData(
+      style: ButtonStyle(
+        animationDuration: motionDuration,
+        padding: const WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        ),
+        backgroundColor: WidgetStateProperty.resolveWith<Color?>((states) {
+          return states.contains(WidgetState.selected)
+              ? scheme.primary.withValues(alpha: dark ? .24 : .15)
+              : scheme.surfaceContainerHighest.withValues(alpha: .30);
+        }),
+        foregroundColor: WidgetStateProperty.resolveWith<Color?>((states) {
+          return states.contains(WidgetState.selected)
+              ? scheme.primary
+              : scheme.onSurfaceVariant;
+        }),
+        side: glassBorder,
+        overlayColor: glassOverlay,
+        shape: WidgetStatePropertyAll<OutlinedBorder>(
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        ),
+        splashFactory: InkSparkle.splashFactory,
+      ),
     ),
     dividerTheme: DividerThemeData(
       color: scheme.outlineVariant.withValues(alpha: dark ? .36 : .48),
@@ -5470,17 +5790,16 @@ class _SettingsGroup extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 10),
-    child: Card(
-      clipBehavior: Clip.antiAlias,
-      child: ExpansionTile(
-        leading: Icon(icon),
-        title: Text(title),
-        subtitle: Text(subtitle),
-        childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-        children: children,
-      ),
+  Widget build(BuildContext context) => Glass(
+    padding: EdgeInsets.zero,
+    bottomSpacing: 10,
+    borderRadius: BorderRadius.circular(26),
+    child: ExpansionTile(
+      leading: Icon(icon),
+      title: Text(title),
+      subtitle: Text(subtitle),
+      childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      children: children,
     ),
   );
 }
