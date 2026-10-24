@@ -18,6 +18,7 @@ import 'phone_screens.dart';
 import 'safe_workflows.dart';
 import 'image_generation_screen.dart';
 import 'ui_motion.dart';
+import 'typing_indicator.dart';
 import 'visual_theme.dart';
 import 'voice_services.dart';
 
@@ -3643,21 +3644,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ),
                       ),
                     ),
-                  if (state.busy)
-                    Glass(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const LinearProgressIndicator(),
-                          const SizedBox(height: 12),
-                          SelectableText(
-                            state.partial.isEmpty
-                                ? 'Waiting for your service…'
-                                : state.partial,
+                  if (state.busy) ...[
+                    if (state.partial.trim().isNotEmpty)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 1180),
+                          child: Glass(
+                            padding: const EdgeInsets.all(12),
+                            bottomSpacing: 8,
+                            child: SelectableText(state.partial),
                           ),
-                        ],
+                        ),
+                      ),
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Padding(
+                        padding: EdgeInsets.only(bottom: 14),
+                        child: GlassTypingIndicator(),
                       ),
                     ),
+                  ],
                   if (state.error.isNotEmpty)
                     Glass(
                       child: Column(

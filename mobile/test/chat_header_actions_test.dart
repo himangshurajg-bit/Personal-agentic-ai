@@ -32,6 +32,44 @@ void main() {
     messenger.setMockMethodCallHandler(AssistantState.device, null);
   });
 
+  testWidgets('busy chat uses typing dots instead of service waiting copy', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 760);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = AssistantState();
+    await state.local.load();
+    await state.selectConversation('typing-chat', load: false);
+    state.busy = true;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(disableAnimations: true),
+          child: ChatScreen(state: state),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('typing-dot-0')), findsOneWidget);
+    expect(find.byKey(const ValueKey('typing-dot-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('typing-dot-2')), findsOneWidget);
+    expect(find.text('Waiting for your service…'), findsNothing);
+
+    state.partial = 'A partial reply';
+    state.notifyListeners();
+    await tester.pump();
+    expect(find.text('A partial reply'), findsOneWidget);
+    expect(find.byKey(const ValueKey('typing-dot-0')), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    state.dispose();
+  });
+
   testWidgets('chat header opens history and starts a fresh conversation', (
     tester,
   ) async {
