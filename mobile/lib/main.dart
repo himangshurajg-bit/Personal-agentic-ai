@@ -4380,6 +4380,7 @@ class _SettingsState extends State<Settings> {
   late String theme = widget.state.theme;
   late String language = widget.state.language;
   late String responseStyle = widget.state.responseStyle;
+  late String aiMode = widget.state.aiMode;
   late String? selectedVoiceName = widget.state.speechVoiceName;
   late String? selectedVoiceLocale = widget.state.speechVoiceLocale;
   List<Map<String, dynamic>> _offlineVoices = [];
@@ -4837,6 +4838,15 @@ class _SettingsState extends State<Settings> {
     } catch (error) {
       if (!mounted) return;
       notice(context, error);
+    }
+  }
+
+  Future<void> _saveAiMode(String mode) async {
+    try {
+      await widget.state.saveAiMode(mode);
+      if (mounted) setState(() => aiMode = mode);
+    } catch (error) {
+      if (mounted) notice(context, error);
     }
   }
 
@@ -5489,6 +5499,36 @@ class _SettingsState extends State<Settings> {
               'Provider selection, approved memory and offline experiments',
           icon: Icons.psychology_alt_outlined,
           children: [
+            Glass(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DropdownButtonFormField<String>(
+                    key: const Key('ai-response-mode-setting'),
+                    isExpanded: true,
+                    initialValue: aiMode,
+                    decoration: const InputDecoration(
+                      labelText: 'AI response mode',
+                    ),
+                    items: [
+                      for (final entry in AssistantState.aiModeLabels.entries)
+                        DropdownMenuItem(
+                          value: entry.key,
+                          child: Text(entry.value),
+                        ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) unawaited(_saveAiMode(value));
+                    },
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Changes how replies are presented, not what actions are allowed. Existing confirmations and reviews still apply.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
             Glass(
               child: ListTile(
                 contentPadding: EdgeInsets.zero,

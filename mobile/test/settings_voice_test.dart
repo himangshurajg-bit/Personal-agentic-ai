@@ -212,4 +212,59 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     state.dispose();
   });
+
+  testWidgets('AI mode picker offers all five modes and saves selection', (
+    tester,
+  ) async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(AssistantState.device, (call) async {
+          if (call.method == 'device_status') {
+            return <String, dynamic>{
+              'sdk': 36,
+              'microphone_granted': false,
+              'notifications_granted': false,
+              'on_device_recognizer': false,
+              'system_recognizer': false,
+            };
+          }
+          return <String, dynamic>{};
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(AssistantState.device, null);
+    });
+
+    final state = AssistantState();
+    await state.initialize();
+    await tester.pumpWidget(MaterialApp(home: Settings(state: state)));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('AI, memory & models'),
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('AI, memory & models'));
+    await tester.pumpAndSettle();
+
+    final modePicker = find.byKey(const Key('ai-response-mode-setting'));
+    expect(modePicker, findsOneWidget);
+    await tester.tap(modePicker);
+    await tester.pumpAndSettle();
+    for (final label in const [
+      'Professional',
+      'Advanced',
+      'Study',
+      'Flurty',
+      'Real Human',
+    ]) {
+      expect(find.text(label), findsWidgets);
+    }
+    await tester.tap(find.text('Flurty').last);
+    await tester.pumpAndSettle();
+    expect(state.aiMode, 'flurty');
+    expect(await state.storage.read(key: 'ai_mode'), 'flurty');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    state.dispose();
+  });
 }
