@@ -2248,6 +2248,71 @@ class _AppPickerSheetState extends State<AppPickerSheet> {
   }
 }
 
+class VoiceTranscriptReviewDialog extends StatefulWidget {
+  final String transcript;
+
+  const VoiceTranscriptReviewDialog({super.key, required this.transcript});
+
+  @override
+  State<VoiceTranscriptReviewDialog> createState() =>
+      _VoiceTranscriptReviewDialogState();
+}
+
+class _VoiceTranscriptReviewDialogState
+    extends State<VoiceTranscriptReviewDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.transcript);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Review voice transcript'),
+    scrollable: true,
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Correct anything recognition got wrong. Using this transcript only places it in the message box; it does not send or execute anything.',
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          key: const Key('voice-transcript-editor'),
+          controller: _controller,
+          onChanged: (_) => setState(() {}),
+          minLines: 2,
+          maxLines: 6,
+          maxLength: 8000,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(labelText: 'Recognized words'),
+        ),
+      ],
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: _controller.text.trim().isEmpty
+            ? null
+            : () => Navigator.pop(context, _controller.text),
+        child: const Text('Use transcript'),
+      ),
+    ],
+  );
+}
+
 class ChatScreen extends StatefulWidget {
   final AssistantState state;
   final String? initialDraft;
@@ -2276,6 +2341,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _deepgramLimitHit = false;
   bool listening = false, speaking = false, comparing = false;
   bool _draftApplied = false;
+  bool _reviewingTranscript = false;
+  bool _speakNextReply = false;
   bool _initialVoiceStarted = false;
   double level = 0;
 
@@ -2316,20 +2383,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     voiceEvents.setMethodCallHandler((call) async {
       if (!mounted || call.method != 'voice_event') return;
       final event = Map<String, dynamic>.from(call.arguments);
-      if (event['kind'] == 'text' || event['kind'] == 'partial') {
-        input.text = event['value'] as String;
-      }
+      final kind = event['kind'];
       setState(() {
-        if (event['kind'] == 'listening') listening = true;
-        if (event['kind'] == 'level') {
+        if (kind == 'listening') listening = true;
+        if (kind == 'level') {
           level = (event['value'] as num).toDouble();
         }
-        if (event['kind'] == 'stopped' || event['kind'] == 'error') {
+        if (kind == 'stopped' || kind == 'error' || kind == 'text') {
           listening = false;
           level = 0;
         }
       });
-      if (event['kind'] == 'error') notice(context, event['value'].toString());
+      if (kind == 'text') {
+        final transcript = (event['value'] as String? ?? '').trim();
+        if (transcript.isEmpty) {
+          notice(context, 'No speech was recognized. Your draft is unchanged.');
+        } else {
+          unawaited(_reviewVoiceTranscript(transcript));
+        }
+      }
+      if (kind == 'error') notice(context, event['value'].toString());
     });
     audioEvents.setMethodCallHandler((call) async {
       if (!mounted || call.method != 'audio_event') return;
@@ -2562,14 +2635,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         locale: widget.state.language,
       );
       if (mounted) {
-        input.text = [
-          input.text.trim(),
-          transcript,
-        ].where((part) => part.isNotEmpty).join(' ');
-        notice(
-          context,
-          'Transcript added to the message box. Review it before sending.',
-        );
+        await _reviewVoiceTranscript(transcript);
       }
     } catch (e) {
       if (mounted) notice(context, e);
@@ -2630,6 +2696,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (mounted) {
         notice(context, e.message ?? 'Speech unavailable; type instead.');
       }
+    }
+  }
+
+  Future<void> _reviewVoiceTranscript(String transcript) async {
+    if (_reviewingTranscript || !mounted) return;
+    _reviewingTranscript = true;
+    try {
+      final corrected = await showDialog<String>(
+        context: context,
+        builder: (_) => VoiceTranscriptReviewDialog(transcript: transcript),
+      );
+      if (corrected == null || !mounted || corrected.trim().isEmpty) return;
+      final existing = input.text.trim();
+      final reviewed = corrected.trim();
+      final combined = [
+        existing,
+        reviewed,
+      ].where((part) => part.isNotEmpty).join(' ');
+      input.value = TextEditingValue(
+        text: combined,
+        selection: TextSelection.collapsed(offset: combined.length),
+      );
+      _speakNextReply = true;
+    } finally {
+      _reviewingTranscript = false;
     }
   }
 
@@ -2920,6 +3011,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (!mounted) return;
     final payload = await reviewOnline(context, widget.state, text);
     if (!payload) return;
+    final speakThisReply = widget.state.speakReplies || _speakNextReply;
+    _speakNextReply = false;
     input.clear();
     await widget.state.send(
       text,
@@ -2928,7 +3021,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       shareHistory: widget.state.shareHistory,
       retryLastMessage: retry != null,
     );
-    if (widget.state.speakReplies &&
+    if (speakThisReply &&
         widget.state.error.isEmpty &&
         widget.state.messages.isNotEmpty &&
         mounted) {

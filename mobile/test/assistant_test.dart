@@ -652,4 +652,58 @@ void main() {
       state.dispose();
     },
   );
+  testWidgets('canceling device action review never executes the action', (
+    tester,
+  ) async {
+    var nativeCalls = 0;
+    final paths = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      AssistantState.device,
+      (call) async {
+        nativeCalls++;
+        return {'result': 'scheduled', 'detail': 'Scheduled.'};
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        AssistantState.device,
+        null,
+      ),
+    );
+    final state =
+        stateWith(
+            MockClient((req) async {
+              paths.add(req.url.path);
+              if (req.url.path.endsWith('/prepare')) {
+                return http.Response(
+                  jsonEncode({'id': 'cancelled', 'approval_token': 'b' * 32}),
+                  200,
+                );
+              }
+              return http.Response('{}', 200);
+            }),
+          )
+          ..ready = true
+          ..appLockConfigurationReady = true
+          ..onboarded = true;
+    await tester.pumpWidget(AssistantApp(state: state));
+    final home = tester.widget<Home>(find.byType(Home));
+    final future = home.action(tester.element(find.byType(Home)), {
+      'kind': 'reminder',
+      'title': 'Study',
+      'at_ms': DateTime.now()
+          .add(const Duration(hours: 1))
+          .millisecondsSinceEpoch,
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('Review device action'), findsOneWidget);
+    expect(nativeCalls, 0);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    await future;
+    expect(nativeCalls, 0);
+    expect(paths, isNot(contains('/actions/cancelled/approve')));
+    await tester.pumpWidget(const SizedBox.shrink());
+    state.dispose();
+  });
 }
