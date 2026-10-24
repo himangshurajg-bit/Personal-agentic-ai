@@ -2440,6 +2440,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final input = TextEditingController();
   static const voiceEvents = MethodChannel('personal_assistant/voice');
   static const audioEvents = MethodChannel('personal_assistant/audio');
+  late final AzureSpeechSynthesizer _azureSpeech = AzureSpeechSynthesizer(
+    clientFactory: widget.state.clientFactory,
+  );
   final tts = FlutterTts();
   final _deepgramRecorder = AudioRecorder();
   final _deepgram = DeepgramTranscriber();
@@ -2833,6 +2836,82 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> playReplyVoice(String text) async {
+    if (speaking) {
+      await stopAll();
+      return;
+    }
+    String? onlineFailure;
+    if (widget.state.azureSpeechEnabled && widget.state.engine != 'offline') {
+      if (widget.state.azureSpeechApiKey.isEmpty ||
+          widget.state.azureSpeechRegion.isEmpty) {
+        onlineFailure = 'Azure key or region is missing.';
+      } else if (!AzureSpeechSynthesizer.supportedLocales.contains(
+        widget.state.language,
+      )) {
+        onlineFailure = 'Azure online voice supports English and Hindi only.';
+      } else {
+        try {
+          final audio = await _azureSpeech.synthesize(
+            text: text,
+            apiKey: widget.state.azureSpeechApiKey,
+            region: widget.state.azureSpeechRegion,
+            locale: widget.state.language,
+            rate: widget.state.speechRate,
+          );
+          if (!mounted) return;
+          setState(() => speaking = true);
+          await audioEvents.invokeMethod('play_audio', {'bytes': audio});
+          return; // Native completion event resets speaking after the audio ends.
+        } catch (error) {
+          onlineFailure = error.toString();
+        }
+      }
+    }
+
+    try {
+      if (await tts.isLanguageAvailable(widget.state.language) != true) {
+        throw StateError('Selected speech language is unavailable');
+      }
+      final voices = await tts.getVoices as List;
+      final localVoice = selectInstalledOfflineVoice(
+        voices,
+        widget.state.language,
+        preferredName: widget.state.speechVoiceName,
+        preferredLocale: widget.state.speechVoiceLocale,
+      );
+      if (localVoice == null) {
+        throw StateError('No installed Android voice is available');
+      }
+      await tts.setLanguage(widget.state.language);
+      await tts.setVoice({
+        'name': localVoice['name'].toString(),
+        'locale': localVoice['locale'].toString(),
+      });
+      await tts.setSpeechRate(widget.state.speechRate);
+      await tts.awaitSpeakCompletion(true);
+      if (!mounted) return;
+      setState(() => speaking = true);
+      await tts.speak(text);
+      if (onlineFailure != null && mounted) {
+        notice(
+          context,
+          '$onlineFailure Using the installed Android voice instead.',
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        final reason = onlineFailure == null ? '' : '$onlineFailure ';
+        notice(
+          context,
+          '${reason}No installed Android voice could play this reply. It remains readable; no other online provider was used.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => speaking = false);
+    }
+  }
+
   Future<void> playOfflineVoice(Map<String, dynamic> message) async {
     if (speaking) {
       await stopAll();
@@ -3142,41 +3221,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         mounted) {
       final last = widget.state.messages.last;
       if (last['role'] == 'assistant' && last['state'] == 'complete') {
-        try {
-          if (await tts.isLanguageAvailable(widget.state.language) != true) {
-            throw StateError('Selected speech language is unavailable');
-          }
-          final voices = await tts.getVoices as List;
-          final localVoice = selectInstalledOfflineVoice(
-            voices,
-            widget.state.language,
-            preferredName: widget.state.speechVoiceName,
-            preferredLocale: widget.state.speechVoiceLocale,
-          );
-          if (localVoice == null) {
-            throw StateError(
-              'No verified offline voice installed for this language',
-            );
-          }
-          await tts.setLanguage(widget.state.language);
-          await tts.setVoice({
-            'name': localVoice['name'].toString(),
-            'locale': localVoice['locale'].toString(),
-          });
-          await tts.setSpeechRate(widget.state.speechRate);
-          await tts.awaitSpeakCompletion(true);
-          await tts.speak(last['text']);
-        } catch (_) {
-          if (mounted) {
-            notice(
-              context,
-              'No installed offline voice for the selected language, or playback unavailable. The reply remains readable; no network voice was substituted.',
-            );
-          }
-        }
-        if (mounted) {
-          setState(() => speaking = false);
-        }
+        await playReplyVoice(last['text'] as String);
       }
     }
   }
@@ -3422,9 +3467,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                     m['role'] == 'assistant' &&
                                     state.engine != 'offline')
                                   TextButton.icon(
-                                    onPressed: () => playExpressiveVoice(
-                                      m['text'] as String,
-                                    ),
+                                    onPressed: () => state.azureSpeechEnabled
+                                        ? playReplyVoice(m['text'] as String)
+                                        : playExpressiveVoice(
+                                            m['text'] as String,
+                                          ),
                                     icon: Icon(
                                       speaking
                                           ? Icons.stop_circle_outlined
@@ -3433,6 +3480,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                     label: Text(
                                       speaking
                                           ? 'Stop voice'
+                                          : state.azureSpeechEnabled
+                                          ? 'Play Azure online voice'
                                           : 'Generate online ElevenLabs voice',
                                     ),
                                   ),
@@ -4250,6 +4299,10 @@ class Settings extends StatefulWidget {
 class _SettingsState extends State<Settings> {
   static const _automaticVoiceKey = '__automatic_offline_voice__';
   final deepgramSecret = TextEditingController();
+  final azureSpeechSecret = TextEditingController();
+  late final TextEditingController azureSpeechRegion = TextEditingController(
+    text: widget.state.azureSpeechRegion,
+  );
   final FlutterTts _voicePreview = FlutterTts();
   late String speechMode = widget.state.speechMode;
   late double speechRate = widget.state.speechRate;
@@ -4357,6 +4410,8 @@ class _SettingsState extends State<Settings> {
     widget.state.removeListener(_stateChanged);
     unawaited(_voicePreview.stop().catchError((Object _) {}));
     deepgramSecret.dispose();
+    azureSpeechSecret.dispose();
+    azureSpeechRegion.dispose();
     name.dispose();
     super.dispose();
   }
@@ -4560,14 +4615,104 @@ class _SettingsState extends State<Settings> {
                     secondary: const Icon(Icons.volume_up_rounded),
                     title: const Text('Read replies aloud'),
                     subtitle: const Text(
-                      'Off by default. Uses an installed on-device voice; it does not upload replies for speech.',
+                      'Off by default. Uses an installed Android voice unless Azure online speech is explicitly enabled; then spoken reply text is sent to Azure.',
                     ),
                   ),
+                  SwitchListTile(
+                    key: const Key('azure-speech-opt-in'),
+                    contentPadding: EdgeInsets.zero,
+                    value: widget.state.azureSpeechEnabled,
+                    onChanged: (enabled) async {
+                      if (enabled) {
+                        final approved = await showDialog<bool>(
+                          context: context,
+                          builder: (dialogContext) => AlertDialog(
+                            title: const Text('Use Azure online speech?'),
+                            content: const Text(
+                              'When enabled, spoken assistant replies are sent to Microsoft Azure Speech for English or Hindi audio. Use only a Speech F0 resource: this app cannot verify your Azure tier or remaining quota. A paid-tier resource may incur charges; F0 requests may be rejected after its monthly free quota. There is no paid-provider fallback. Your key is stored in Android secure storage.',
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.pop(dialogContext, false),
+                                child: const Text('Cancel'),
+                              ),
+                              FilledButton(
+                                onPressed: () =>
+                                    Navigator.pop(dialogContext, true),
+                                child: const Text('Enable Azure speech'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (approved != true) return;
+                      }
+                      try {
+                        await widget.state.saveAzureSpeechEnabled(enabled);
+                      } catch (error) {
+                        if (context.mounted) notice(context, error);
+                      }
+                    },
+                    secondary: const Icon(Icons.cloud_outlined),
+                    title: const Text('Azure online natural voice'),
+                    subtitle: Text(
+                      widget.state.azureSpeechEnabled
+                          ? 'On · spoken reply text is sent to Azure; English/Hindi only.'
+                          : 'Off · uses installed Android voices unless you turn this on.',
+                    ),
+                  ),
+                  Text(
+                    'Azure key: ${widget.state.azureSpeechApiKey.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
+                  ),
+                  TextField(
+                    controller: azureSpeechSecret,
+                    obscureText: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    autofillHints: const [],
+                    decoration: const InputDecoration(
+                      labelText: 'Azure Speech resource key',
+                      hintText: 'Enter a new key or leave blank to keep the saved one',
+                    ),
+                  ),
+                  TextField(
+                    controller: azureSpeechRegion,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Azure Speech resource region',
+                      hintText: 'For example, centralindia',
+                    ),
+                  ),
+                  const Text(
+                    'Create an Azure Speech F0 resource and enter its key and region. The free tier has a monthly neural-speech quota; check Azure for current limits. This app cannot verify your resource tier or remaining quota. F0 quota errors stop online synthesis; there is no paid or other-provider fallback. If credentials are missing or the selected language is not English/Hindi, the app uses an installed Android voice and makes no Azure request.',
+                  ),
+                  if (widget.state.azureSpeechApiKey.isNotEmpty)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: () async {
+                          try {
+                            await widget.state.clearCloudProviderKey(
+                              'azure_speech',
+                            );
+                            azureSpeechSecret.clear();
+                            if (context.mounted) {
+                              notice(context, 'Azure Speech key cleared.');
+                            }
+                          } catch (error) {
+                            if (context.mounted) notice(context, error);
+                          }
+                        },
+                        icon: const Icon(Icons.key_off),
+                        label: const Text('Clear Azure Speech key'),
+                      ),
+                    ),
                   const SizedBox(height: 8),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('On-device voice speed'),
+                      const Text('Speech speed'),
                       Text(_speechRateLabel(speechRate)),
                     ],
                   ),
@@ -4693,6 +4838,16 @@ class _SettingsState extends State<Settings> {
                           name: selectedVoiceName,
                           locale: selectedVoiceLocale,
                         );
+                        await widget.state.saveAzureSpeechRegion(
+                          azureSpeechRegion.text,
+                        );
+                        if (azureSpeechSecret.text.trim().isNotEmpty) {
+                          await widget.state.saveCloudProviderKey(
+                            'azure_speech',
+                            azureSpeechSecret.text,
+                          );
+                        }
+                        azureSpeechSecret.clear();
                         if (speechMode == 'deepgram') {
                           await widget.state.saveCloudProviderKey(
                             'deepgram',

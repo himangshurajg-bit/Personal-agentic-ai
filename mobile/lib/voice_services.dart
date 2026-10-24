@@ -38,23 +38,24 @@ class DeepgramTranscriber {
     final client = _clientFactory();
     _activeClient = client;
     final language = locale == 'hi-IN' ? 'hi' : 'en';
-    final request = http.Request(
-      'POST',
-      Uri.https('api.deepgram.com', '/v1/listen', {
-        'model': 'nova-3',
-        'language': language,
-        'smart_format': 'true',
-        'encoding': 'linear16',
-        'sample_rate': '16000',
-        'channels': '1',
-      }),
-    )
-      ..followRedirects = false
-      ..headers.addAll({
-        'Authorization': 'Token $key',
-        'Content-Type': 'audio/raw',
-      })
-      ..bodyBytes = pcm16le;
+    final request =
+        http.Request(
+            'POST',
+            Uri.https('api.deepgram.com', '/v1/listen', {
+              'model': 'nova-3',
+              'language': language,
+              'smart_format': 'true',
+              'encoding': 'linear16',
+              'sample_rate': '16000',
+              'channels': '1',
+            }),
+          )
+          ..followRedirects = false
+          ..headers.addAll({
+            'Authorization': 'Token $key',
+            'Content-Type': 'audio/raw',
+          })
+          ..bodyBytes = pcm16le;
 
     try {
       final streamed = await client.send(request);
@@ -105,4 +106,105 @@ class DeepgramTranscriber {
     _activeClient?.close();
     _activeClient = null;
   }
+}
+
+/// Direct, opt-in Azure Speech text-to-speech. The API key is supplied by the
+/// caller from secure storage and is never included in errors or response text.
+class AzureSpeechSynthesizer {
+  AzureSpeechSynthesizer({http.Client Function()? clientFactory})
+    : _clientFactory = clientFactory ?? http.Client.new;
+
+  final http.Client Function() _clientFactory;
+  static const supportedLocales = {'en-IN', 'hi-IN'};
+  static const voices = {
+    'en-IN': 'en-IN-NeerjaNeural',
+    'hi-IN': 'hi-IN-SwaraNeural',
+  };
+  static final _regionPattern = RegExp(r'^[a-z0-9-]{2,50}$');
+
+  Future<Uint8List> synthesize({
+    required String text,
+    required String apiKey,
+    required String region,
+    required String locale,
+    required double rate,
+  }) async {
+    final key = apiKey.trim();
+    final normalizedRegion = region.trim().toLowerCase();
+    if (key.isEmpty) {
+      throw ServiceException('Add an Azure Speech key in Settings first.');
+    }
+    if (!_regionPattern.hasMatch(normalizedRegion)) {
+      throw ServiceException(
+        'Enter the Azure Speech resource region from Azure.',
+      );
+    }
+    if (!supportedLocales.contains(locale)) {
+      throw ServiceException(
+        'Azure online voice is available only for English (India) and Hindi. No online request was made.',
+      );
+    }
+    if (text.trim().isEmpty || text.runes.length > 5000) {
+      throw ServiceException('Voice text must contain 1–5,000 characters.');
+    }
+    if (!rate.isFinite || rate < 0.25 || rate > 0.75) {
+      throw ServiceException('Speech rate must be between 0.25 and 0.75.');
+    }
+    final voice = voices[locale]!;
+    final ratePercent = (50 + rate * 100).round();
+    final ssml =
+        '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="$locale">'
+        '<voice name="$voice"><prosody rate="$ratePercent%">${_escapeXml(text)}</prosody></voice>'
+        '</speak>';
+    final uri = Uri.https(
+      '$normalizedRegion.tts.speech.microsoft.com',
+      '/cognitiveservices/v1',
+    );
+    final client = _clientFactory();
+    try {
+      final request = http.Request('POST', uri)
+        ..followRedirects = false
+        ..headers.addAll({
+          'Ocp-Apim-Subscription-Key': key,
+          'Content-Type': 'application/ssml+xml',
+          'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3',
+          'User-Agent': 'PersonalAgenticAI',
+        })
+        ..body = ssml;
+      final response = await http.Response.fromStream(
+        await client.send(request).timeout(const Duration(seconds: 30)),
+      ).timeout(const Duration(seconds: 30));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw ServiceException(
+          response.statusCode == 401 || response.statusCode == 403
+              ? 'Azure Speech rejected the key or resource access. Check the saved key and region.'
+              : response.statusCode == 429
+              ? 'Azure Speech rejected the request; its quota or rate limit may have been reached. No paid provider fallback was used.'
+              : 'Azure Speech failed (HTTP ${response.statusCode}). No paid provider fallback was used.',
+        );
+      }
+      if (response.bodyBytes.isEmpty ||
+          response.bodyBytes.length > 12_000_000) {
+        throw ServiceException(
+          'Azure Speech returned empty or oversized audio.',
+        );
+      }
+      return Uint8List.fromList(response.bodyBytes);
+    } on ServiceException {
+      rethrow;
+    } catch (_) {
+      throw ServiceException(
+        'Could not reach Azure Speech. Check the connection and resource region; no other online provider was used.',
+      );
+    } finally {
+      client.close();
+    }
+  }
+
+  static String _escapeXml(String text) => text
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&apos;');
 }

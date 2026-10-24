@@ -112,6 +112,9 @@ class AssistantState extends ChangeNotifier {
   String geminiApiKey = '';
   String openAiApiKey = '';
   String deepgramApiKey = '';
+  String azureSpeechApiKey = '';
+  String azureSpeechRegion = '';
+  bool azureSpeechEnabled = false;
   static const geminiModel = GeminiModels.defaultModel;
   static const geminiFlashModel = GeminiModels.flash25;
   static const geminiFlashLiteModel = GeminiModels.flashLite25;
@@ -243,6 +246,10 @@ class AssistantState extends ChangeNotifier {
       geminiApiKey = await storage.read(key: 'gemini_api_key') ?? '';
       openAiApiKey = await storage.read(key: 'openai_api_key') ?? '';
       deepgramApiKey = await storage.read(key: 'deepgram_api_key') ?? '';
+      azureSpeechApiKey = await storage.read(key: 'azure_speech_api_key') ?? '';
+      azureSpeechRegion = await storage.read(key: 'azure_speech_region') ?? '';
+      azureSpeechEnabled =
+          await storage.read(key: 'azure_speech_enabled') == 'yes';
       if (engine == 'gemini') {
         model = geminiModelSelection;
       }
@@ -524,6 +531,7 @@ class AssistantState extends ChangeNotifier {
       'openai' => 'openai_api_key',
       'gemini' => 'gemini_api_key',
       'deepgram' => 'deepgram_api_key',
+      'azure_speech' => 'azure_speech_api_key',
       _ => throw ServiceException('Unsupported provider credential.'),
     };
     final key = value.trim();
@@ -539,6 +547,9 @@ class AssistantState extends ChangeNotifier {
       case 'deepgram':
         deepgramApiKey = key;
         break;
+      case 'azure_speech':
+        azureSpeechApiKey = key;
+        break;
     }
     notifyListeners();
   }
@@ -548,6 +559,7 @@ class AssistantState extends ChangeNotifier {
       'openai' => 'openai_api_key',
       'gemini' => 'gemini_api_key',
       'deepgram' => 'deepgram_api_key',
+      'azure_speech' => 'azure_speech_api_key',
       _ => throw ServiceException('Unsupported provider credential.'),
     };
     await storage.delete(key: storageKey);
@@ -560,6 +572,9 @@ class AssistantState extends ChangeNotifier {
         break;
       case 'deepgram':
         deepgramApiKey = '';
+        break;
+      case 'azure_speech':
+        azureSpeechApiKey = '';
         break;
     }
     notifyListeners();
@@ -855,6 +870,31 @@ class AssistantState extends ChangeNotifier {
   Future<void> saveSpeakReplies(bool enabled) async {
     await storage.write(key: 'speak_replies', value: enabled ? 'yes' : 'no');
     speakReplies = enabled;
+    notifyListeners();
+  }
+
+  Future<void> saveAzureSpeechRegion(String region) async {
+    final value = region.trim().toLowerCase();
+    if (value.isNotEmpty && !RegExp(r'^[a-z0-9-]{2,50}$').hasMatch(value)) {
+      throw ServiceException(
+        'Enter the Azure Speech resource region, such as eastus or centralindia.',
+      );
+    }
+    if (value.isEmpty) {
+      await storage.delete(key: 'azure_speech_region');
+    } else {
+      await storage.write(key: 'azure_speech_region', value: value);
+    }
+    azureSpeechRegion = value;
+    notifyListeners();
+  }
+
+  Future<void> saveAzureSpeechEnabled(bool enabled) async {
+    await storage.write(
+      key: 'azure_speech_enabled',
+      value: enabled ? 'yes' : 'no',
+    );
+    azureSpeechEnabled = enabled;
     notifyListeners();
   }
 

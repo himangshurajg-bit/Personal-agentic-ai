@@ -144,4 +144,64 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     state.dispose();
   });
+
+  testWidgets('Azure speech stays off until its disclosure is accepted', (
+    tester,
+  ) async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(AssistantState.device, (call) async {
+          if (call.method == 'device_status') {
+            return <String, dynamic>{
+              'sdk': 36,
+              'microphone_granted': false,
+              'notifications_granted': false,
+              'on_device_recognizer': false,
+              'system_recognizer': false,
+            };
+          }
+          return <String, dynamic>{};
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(AssistantState.device, null);
+    });
+
+    final state = AssistantState();
+    await state.initialize();
+    expect(state.azureSpeechEnabled, isFalse);
+    await tester.pumpWidget(MaterialApp(home: Settings(state: state)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Voice & conversation'));
+    await tester.pumpAndSettle();
+    final toggle = find.byKey(const Key('azure-speech-opt-in'));
+    await tester.scrollUntilVisible(
+      toggle,
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(find.text('Use Azure online speech?'), findsOneWidget);
+    expect(
+      find.textContaining('spoken assistant replies are sent'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(state.azureSpeechEnabled, isFalse);
+
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Enable Azure speech'));
+    await tester.pumpAndSettle();
+    expect(state.azureSpeechEnabled, isTrue);
+    expect(
+      find.textContaining('text is sent to Azure; English/Hindi only'),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    state.dispose();
+  });
 }

@@ -24,6 +24,109 @@ void main() {
   });
 
   test(
+    'Azure TTS sends escaped English or Hindi SSML to the selected region',
+    () async {
+      late http.Request observed;
+      final service = AzureSpeechSynthesizer(
+        clientFactory: () => MockClient((request) async {
+          observed = request;
+          return http.Response.bytes([0x49, 0x44, 0x33, 1], 200);
+        }),
+      );
+      final audio = await service.synthesize(
+        text: 'Hello <friend> & welcome',
+        apiKey: 'azure-key-not-for-logs',
+        region: 'centralindia',
+        locale: 'en-IN',
+        rate: 0.5,
+      );
+      expect(audio, [0x49, 0x44, 0x33, 1]);
+      expect(
+        observed.url.origin,
+        'https://centralindia.tts.speech.microsoft.com',
+      );
+      expect(observed.url.path, '/cognitiveservices/v1');
+      expect(observed.url.query, isEmpty);
+      expect(
+        observed.headers['Ocp-Apim-Subscription-Key'],
+        'azure-key-not-for-logs',
+      );
+      expect(
+        observed.headers['Content-Type']!.startsWith('application/ssml+xml'),
+        isTrue,
+      );
+      expect(
+        observed.headers['X-Microsoft-OutputFormat'],
+        'audio-24khz-48kbitrate-mono-mp3',
+      );
+      expect(observed.body, contains('en-IN-NeerjaNeural'));
+      expect(observed.body, contains('Hello &lt;friend&gt; &amp; welcome'));
+      expect(observed.body, contains('rate="100%"'));
+    },
+  );
+
+  test('Azure TTS rejects missing credentials, bad region and non-English/Hindi before networking', () async {
+    var calls = 0;
+    final service = AzureSpeechSynthesizer(
+      clientFactory: () => MockClient((_) async {
+        calls++;
+        return http.Response.bytes([1], 200);
+      }),
+    );
+    Future<Uint8List> run({
+      String key = 'key',
+      String region = 'eastus',
+      String locale = 'en-IN',
+    }) => service.synthesize(
+      text: 'Hello',
+      apiKey: key,
+      region: region,
+      locale: locale,
+      rate: .5,
+    );
+    await expectLater(run(key: ''), throwsA(isA<ServiceException>()));
+    await expectLater(
+      run(region: 'eastus.attacker.example'),
+      throwsA(isA<ServiceException>()),
+    );
+    await expectLater(run(locale: 'as-IN'), throwsA(isA<ServiceException>()));
+    await expectLater(
+      run(locale: 'hi-Latn-IN'),
+      throwsA(isA<ServiceException>()),
+    );
+    expect(calls, 0);
+  });
+
+  test('Azure quota/provider failure is surfaced without response content or retry', () async {
+    var calls = 0;
+    final service = AzureSpeechSynthesizer(
+      clientFactory: () => MockClient((_) async {
+        calls++;
+        return http.Response('private provider response', 429);
+      }),
+    );
+    await expectLater(
+      service.synthesize(
+        text: 'Hello',
+        apiKey: 'private-key',
+        region: 'eastus',
+        locale: 'hi-IN',
+        rate: .5,
+      ),
+      throwsA(
+        predicate(
+          (error) =>
+              error is ServiceException &&
+              error.toString().contains('quota') &&
+              !error.toString().contains('private provider response') &&
+              !error.toString().contains('private-key'),
+        ),
+      ),
+    );
+    expect(calls, 1);
+  });
+
+  test(
     'refuses a missing key and unsupported locale before networking',
     () async {
       var calls = 0;
