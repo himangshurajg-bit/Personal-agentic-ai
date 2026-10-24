@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_assistant/assistant_state.dart';
@@ -7,7 +8,16 @@ import 'package:personal_assistant/visual_theme.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  setUp(() => FlutterSecureStorage.setMockInitialValues({}));
+  setUp(() {
+    FlutterSecureStorage.setMockInitialValues({});
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(AssistantState.device, (call) async {
+          if (call.method == 'get_launcher_icon') return null;
+          throw MissingPluginException(
+            'Unexpected device call: ${call.method}',
+          );
+        });
+  });
 
   test('Aurora is the default and selected palette persists', () async {
     final first = AssistantState();
