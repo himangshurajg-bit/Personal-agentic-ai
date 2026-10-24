@@ -24,6 +24,33 @@ void main() {
       );
     });
 
+    test('invalid partial sizes require space for a full download', () {
+      expect(
+        offlineModelDownloadHasSpace(
+          availableBytes: gemma4StorageReserveBytes + 99,
+          partialBytes: 101,
+          modelSizeBytes: 100,
+        ),
+        isFalse,
+      );
+      expect(
+        offlineModelDownloadHasSpace(
+          availableBytes: gemma4StorageReserveBytes + 100,
+          partialBytes: 101,
+          modelSizeBytes: 100,
+        ),
+        isTrue,
+      );
+      expect(
+        offlineModelDownloadHasSpace(
+          availableBytes: gemma4StorageReserveBytes + 100,
+          partialBytes: -1,
+          modelSizeBytes: 100,
+        ),
+        isTrue,
+      );
+    });
+
     test('the lighter artifact has its own exact download-size preflight', () {
       expect(qwen3ModelSizeBytes, 613722264);
       expect(

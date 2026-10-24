@@ -126,8 +126,10 @@ internal object Gemma4TransferPolicy {
         if (partialBytes in 1 until expectedBytes) partialBytes else null
 
     fun hasEnoughSpace(availableBytes: Long, partialBytes: Long, expectedBytes: Long): Boolean {
-        val remaining = (expectedBytes - partialBytes.coerceIn(0, expectedBytes)).coerceAtLeast(0)
-        return availableBytes >= remaining + Gemma4Artifact.SAFETY_RESERVE_BYTES
+        if (availableBytes < 0L || expectedBytes < 0L) return false
+        val validPartialBytes = partialBytes.takeIf { it in 0L..expectedBytes } ?: 0L
+        val remaining = expectedBytes - validPartialBytes
+        return remaining <= availableBytes - Gemma4Artifact.SAFETY_RESERVE_BYTES
     }
 }
 
