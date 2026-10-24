@@ -572,15 +572,17 @@ void main() {
     },
   );
   testWidgets(
-    'denied device action is reviewed, attempted once, and reported denied not scheduled',
+    'denied device action can be edited, explicitly approved, and attempted once',
     (tester) async {
       var nativeCalls = 0;
+      Map<dynamic, dynamic>? executedAction;
       final paths = <String>[];
       String? reportedResult;
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         AssistantState.device,
         (call) async {
           nativeCalls++;
+          executedAction = Map<dynamic, dynamic>.from(call.arguments as Map);
           return {
             'result': 'denied',
             'detail':
@@ -636,11 +638,18 @@ void main() {
       });
       await tester.pumpAndSettle();
       expect(nativeCalls, 0);
+      await tester.enterText(
+        find.byKey(const Key('device-action-title-editor')),
+        'Study physics at 8',
+      );
+      await tester.pump();
+      expect(nativeCalls, 0);
       await tester.tap(find.text('Approve this action'));
       await tester.pump();
       await future;
       await tester.pump(const Duration(milliseconds: 300));
       expect(nativeCalls, 1);
+      expect(executedAction?['title'], 'Study physics at 8');
       expect(reportedResult, isNull);
       expect(state.local.rows('actions').single['status'], 'denied');
       expect(paths, isEmpty);

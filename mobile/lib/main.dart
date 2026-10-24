@@ -1562,6 +1562,137 @@ class Onboarding extends StatelessWidget {
   );
 }
 
+class DeviceActionReviewDialog extends StatefulWidget {
+  final Map<String, dynamic> action;
+  final String? appLabel;
+  final String? packageName;
+
+  const DeviceActionReviewDialog({
+    super.key,
+    required this.action,
+    this.appLabel,
+    this.packageName,
+  });
+
+  @override
+  State<DeviceActionReviewDialog> createState() =>
+      _DeviceActionReviewDialogState();
+}
+
+class _DeviceActionReviewDialogState extends State<DeviceActionReviewDialog> {
+  late final TextEditingController _title;
+  late DateTime _when;
+
+  bool get _isReminder => widget.action['kind'] == 'reminder';
+
+  @override
+  void initState() {
+    super.initState();
+    _title = TextEditingController(
+      text: (widget.action['title'] as String?) ?? '',
+    );
+    _when = DateTime.fromMillisecondsSinceEpoch(
+      widget.action['at_ms'] as int? ?? DateTime.now().millisecondsSinceEpoch,
+    );
+  }
+
+  @override
+  void dispose() {
+    _title.dispose();
+    super.dispose();
+  }
+
+  Future<void> _editDate() async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final lastDate = today.add(const Duration(days: 366));
+    final selectedDay = await showDatePicker(
+      context: context,
+      firstDate: today,
+      lastDate: lastDate,
+      initialDate: _when.isBefore(today)
+          ? today
+          : _when.isAfter(lastDate)
+          ? lastDate
+          : _when,
+    );
+    if (selectedDay == null || !mounted) return;
+    final selectedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_when),
+    );
+    if (selectedTime == null || !mounted) return;
+    setState(() {
+      _when = DateTime(
+        selectedDay.year,
+        selectedDay.month,
+        selectedDay.day,
+        selectedTime.hour,
+        selectedTime.minute,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final description = _isReminder
+        ? 'Review or edit the reminder. Nothing is scheduled until you approve it. Android delivery is approximate; battery restrictions may delay it.'
+        : 'Open ${widget.appLabel} (${widget.packageName}) on this device. Cancel and choose another app if this is not the one you intended.';
+    return AlertDialog(
+      title: const Text('Review device action'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(description),
+          if (_isReminder) ...[
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('device-action-title-editor'),
+              controller: _title,
+              maxLength: 120,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(labelText: 'Reminder'),
+            ),
+            OutlinedButton.icon(
+              key: const Key('device-action-time-editor'),
+              onPressed: _editDate,
+              icon: const Icon(Icons.schedule),
+              label: Text(
+                '${MaterialLocalizations.of(context).formatMediumDate(_when)} at ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(_when))}',
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 8),
+            Text(widget.appLabel ?? 'Selected app'),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _isReminder && _title.text.trim().isEmpty
+              ? null
+              : () => Navigator.pop(
+                  context,
+                  _isReminder
+                      ? <String, dynamic>{
+                          ...widget.action,
+                          'title': _title.text.trim(),
+                          'at_ms': _when.millisecondsSinceEpoch,
+                        }
+                      : Map<String, dynamic>.from(widget.action),
+                ),
+          child: const Text('Approve this action'),
+        ),
+      ],
+    );
+  }
+}
+
 class Home extends StatelessWidget {
   final AssistantState state;
   const Home({super.key, required this.state});
@@ -1571,49 +1702,27 @@ class Home extends StatelessWidget {
     LaunchableApp? selectedApp,
   }) async {
     try {
-      final draft = action['kind'] == 'open_app'
-          ? await state.prepareSelectedAppLaunch(
-              selectedApp ??
-                  (throw ServiceException(
-                    'Choose an app from the installed-app list.',
-                  )),
-            )
-          : await state.prepareAction(action);
-      if (!context.mounted) {
-        return;
+      if (action['kind'] == 'open_app' && selectedApp == null) {
+        throw ServiceException('Choose an app from the installed-app list.');
       }
-      final description = action['kind'] == 'reminder'
-          ? 'Schedule “${action['title']}” for ${DateTime.fromMillisecondsSinceEpoch(action['at_ms'])}. Android delivery is approximate; battery restrictions may delay it.'
-          : 'Open ${selectedApp!.label} (${selectedApp.packageName}) on this device.';
-      final approved = await showDialog<bool>(
+      if (!context.mounted) return;
+      final reviewedAction = await showDialog<Map<String, dynamic>>(
         context: context,
-        builder: (c) => AlertDialog(
-          title: const Text('Review device action'),
-          content: Text(description),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Approve this action'),
-            ),
-          ],
+        builder: (_) => DeviceActionReviewDialog(
+          action: action,
+          appLabel: selectedApp?.label,
+          packageName: selectedApp?.packageName,
         ),
       );
-      if (approved != true) {
-        return;
-      }
+      if (reviewedAction == null || !context.mounted) return;
+      final draft = reviewedAction['kind'] == 'open_app'
+          ? await state.prepareSelectedAppLaunch(selectedApp!)
+          : await state.prepareAction(reviewedAction);
       final result = await state.executeApproved(draft['id']);
       final report = result['detail'].toString();
-      if (context.mounted) {
-        notice(context, report);
-      }
+      if (context.mounted) notice(context, report);
     } catch (e) {
-      if (context.mounted) {
-        notice(context, e);
-      }
+      if (context.mounted) notice(context, e);
     }
   }
 
