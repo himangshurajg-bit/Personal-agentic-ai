@@ -66,6 +66,32 @@ void main() {
     },
   );
   test(
+    'on-device speech rate persists and rejects unsupported values',
+    () async {
+      final state = AssistantState();
+      await state.initialize();
+      expect(state.speechRate, 0.5);
+
+      await state.saveSpeechRate(0.65);
+      final restored = AssistantState();
+      await restored.initialize();
+      expect(restored.speechRate, 0.65);
+
+      await expectLater(
+        restored.saveSpeechRate(1.0),
+        throwsA(isA<ServiceException>()),
+      );
+      await expectLater(
+        restored.saveSpeechRate(double.nan),
+        throwsA(isA<ServiceException>()),
+      );
+      final unchanged = AssistantState();
+      await unchanged.initialize();
+      expect(unchanged.speechRate, 0.65);
+    },
+  );
+
+  test(
     'flashcards migrate old local records and schedule only actual reviews',
     () async {
       const secure = FlutterSecureStorage();

@@ -96,6 +96,7 @@ class AssistantState extends ChangeNotifier {
   List<McpServer> customMcpServers = [];
   String mcpLoadError = '';
   String speechMode = 'offline';
+  double speechRate = 0.5;
   String assistantName = 'Personal assistant';
   String engine = 'gemini',
       model = geminiModel,
@@ -198,6 +199,16 @@ class AssistantState extends ChangeNotifier {
         speechMode = 'offline';
       }
       speakReplies = await storage.read(key: 'speak_replies') == 'yes';
+      final savedSpeechRate = double.tryParse(
+        await storage.read(key: 'speech_rate') ?? '',
+      );
+      speechRate =
+          savedSpeechRate != null &&
+              savedSpeechRate.isFinite &&
+              savedSpeechRate >= 0.25 &&
+              savedSpeechRate <= 0.75
+          ? savedSpeechRate
+          : 0.5;
       engine = await storage.read(key: 'engine') ?? 'gemini';
       experimentalOfflineChatEnabled =
           await storage.read(key: 'experimental_offline_chat') == 'yes';
@@ -833,6 +844,15 @@ class AssistantState extends ChangeNotifier {
   Future<void> saveSpeakReplies(bool enabled) async {
     await storage.write(key: 'speak_replies', value: enabled ? 'yes' : 'no');
     speakReplies = enabled;
+    notifyListeners();
+  }
+
+  Future<void> saveSpeechRate(double rate) async {
+    if (!rate.isFinite || rate < 0.25 || rate > 0.75) {
+      throw ServiceException('Speech rate must be between 0.25 and 0.75.');
+    }
+    await storage.write(key: 'speech_rate', value: rate.toString());
+    speechRate = rate;
     notifyListeners();
   }
 

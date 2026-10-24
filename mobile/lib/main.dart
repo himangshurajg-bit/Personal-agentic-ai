@@ -2865,6 +2865,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         'name': voice['name'].toString(),
         'locale': voice['locale'].toString(),
       });
+      await tts.setSpeechRate(widget.state.speechRate);
       await tts.awaitSpeakCompletion(true);
       await tts.speak(message['text'] as String);
     } catch (_) {
@@ -3155,6 +3156,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             'name': localVoice['name'].toString(),
             'locale': localVoice['locale'].toString(),
           });
+          await tts.setSpeechRate(widget.state.speechRate);
           await tts.awaitSpeakCompletion(true);
           await tts.speak(last['text']);
         } catch (_) {
@@ -4241,6 +4243,7 @@ class Settings extends StatefulWidget {
 class _SettingsState extends State<Settings> {
   final deepgramSecret = TextEditingController();
   late String speechMode = widget.state.speechMode;
+  late double speechRate = widget.state.speechRate;
   late String theme = widget.state.theme;
   late String language = widget.state.language;
   late final TextEditingController name = TextEditingController(
@@ -4369,7 +4372,7 @@ class _SettingsState extends State<Settings> {
               ),
               const SizedBox(height: 4),
               Text(
-                'Choose how your assistant looks, speaks and connects.',
+                'Choose how your assistant looks, speaks, connects and handles your data.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -4377,142 +4380,279 @@ class _SettingsState extends State<Settings> {
             ],
           ),
         ),
-        const _SettingsSectionLabel('PRIVACY & ACCESS'),
-        const Glass(
-          child: Text(
-            'Your chats, approved memories, notes, tasks and study records stay on this phone. Gemma is an experimental offline option that requires your opt-in, a manual download and load; it is not qualified for this phone. Online requests require explicit payload review. The private FastAPI adapter remains optional.',
-          ),
-        ),
-        Glass(
-          child: SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: widget.state.appLockEnabled,
-            onChanged: widget.state.appLockBusy
-                ? null
-                : (enabled) async {
-                    final saved = await widget.state.setAppLockEnabled(enabled);
-                    if (!context.mounted) return;
-                    if (saved) {
-                      notice(
-                        context,
-                        enabled ? 'App lock enabled.' : 'App lock disabled.',
-                      );
-                    } else {
-                      notice(
-                        context,
-                        'Device authentication did not succeed. App lock was not changed.',
-                      );
-                    }
-                  },
-            secondary: const _SettingsIconTile(icon: Icons.lock_outline),
-            title: const Text('App lock'),
-            subtitle: const Text(
-              'Require your phone’s biometric or screen lock when opening or returning to the app.',
-            ),
-          ),
-        ),
-        const _SettingsSectionLabel('DEVICE ACCESS'),
-        const AndroidAccessPanel(),
-        const _SettingsSectionLabel('APPEARANCE'),
-        Glass(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              FuturisticThemePicker(state: widget.state),
-              const SizedBox(height: 18),
-              DropdownButtonFormField<String>(
-                isExpanded: true,
-                initialValue: theme,
-                decoration: const InputDecoration(
-                  labelText: 'Light or dark mode',
-                ),
-                items: [
-                  for (final mode in ['system', 'light', 'dark'])
-                    DropdownMenuItem(
-                      value: mode,
-                      child: Text(switch (mode) {
-                        'system' => 'Follow device',
-                        'light' => 'Light',
-                        _ => 'Dark',
-                      }),
+        _SettingsGroup(
+          title: 'Voice & conversation',
+          subtitle: 'Speech input, language and spoken replies',
+          icon: Icons.graphic_eq_rounded,
+          children: [
+            Glass(
+              child: Column(
+                children: [
+                  DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    initialValue: speechMode,
+                    decoration: const InputDecoration(
+                      labelText: 'Speech recognition — independent of AI',
                     ),
-                ],
-                onChanged: (value) => setState(() => theme = value ?? 'system'),
-              ),
-            ],
-          ),
-        ),
-        const _SettingsSectionLabel('AI & VOICE'),
-        Glass(
-          child: Column(
-            children: [
-              DropdownButtonFormField<String>(
-                isExpanded: true,
-                initialValue: speechMode,
-                decoration: const InputDecoration(
-                  labelText: 'Speech recognition — independent of AI',
-                ),
-                items: const [
-                  DropdownMenuItem(
-                    value: 'offline',
-                    child: Text('Offline · installed on-device service'),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'offline',
+                        child: Text('Offline · installed on-device service'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'online',
+                        child: Text('Online · Android recognition provider'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'deepgram',
+                        child: Text('Deepgram · online speech-to-text'),
+                      ),
+                    ],
+                    onChanged: (v) => setState(() => speechMode = v!),
                   ),
-                  DropdownMenuItem(
-                    value: 'online',
-                    child: Text('Online · Android recognition provider'),
+                  const Text(
+                    'Offline requires a verified installed language on Android 13+. Unsupported devices/languages stay unavailable. Online asks before microphone use. No silent network fallback.',
                   ),
-                  DropdownMenuItem(
-                    value: 'deepgram',
-                    child: Text('Deepgram · online speech-to-text'),
+                  if (speechMode == 'deepgram') ...[
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('Deepgram speech-to-text · not an LLM'),
+                    ),
+                    Text(
+                      'API key: ${widget.state.deepgramApiKey.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
+                    ),
+                    TextField(
+                      controller: deepgramSecret,
+                      obscureText: true,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      autofillHints: const [],
+                      decoration: const InputDecoration(
+                        labelText: 'Deepgram API key',
+                        hintText: 'Enter a new key or leave blank to keep the saved one',
+                      ),
+                    ),
+                    const Text(
+                      'Deepgram transcription is user-started, foreground-only, and currently supports English and Hindi. Audio is sent only after you tap Stop; transcript stays in the draft until you press Send.',
+                    ),
+                    if (widget.state.deepgramApiKey.isNotEmpty)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () =>
+                              widget.state.clearCloudProviderKey('deepgram'),
+                          icon: const Icon(Icons.key_off),
+                          label: const Text('Clear Deepgram key'),
+                        ),
+                      ),
+                  ],
+                  TextField(
+                    controller: name,
+                    maxLength: 40,
+                    decoration: const InputDecoration(
+                      labelText: 'Assistant display name',
+                    ),
                   ),
-                ],
-                onChanged: (v) => setState(() => speechMode = v!),
-              ),
-              const Text(
-                'Offline requires a verified installed language on Android 13+. Unsupported devices/languages stay unavailable. Online asks before microphone use. No silent network fallback.',
-              ),
-              if (speechMode == 'deepgram') ...[
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('Deepgram speech-to-text · not an LLM'),
-                ),
-                Text(
-                  'API key: ${widget.state.deepgramApiKey.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
-                ),
-                TextField(
-                  controller: deepgramSecret,
-                  obscureText: true,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  autofillHints: const [],
-                  decoration: const InputDecoration(
-                    labelText: 'Deepgram API key',
-                    hintText:
-                        'Enter a new key or leave blank to keep the saved one',
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: widget.state.speakReplies,
+                    onChanged: (enabled) async {
+                      try {
+                        await widget.state.saveSpeakReplies(enabled);
+                      } catch (error) {
+                        if (context.mounted) notice(context, error);
+                      }
+                    },
+                    secondary: const Icon(Icons.volume_up_rounded),
+                    title: const Text('Read replies aloud'),
+                    subtitle: const Text(
+                      'Off by default. Uses an installed on-device voice; it does not upload replies for speech.',
+                    ),
                   ),
-                ),
-                const Text(
-                  'Deepgram transcription is user-started, foreground-only, and currently supports English and Hindi. Audio is sent only after you tap Stop; transcript stays in the draft until you press Send.',
-                ),
-                if (widget.state.deepgramApiKey.isNotEmpty)
-                  Align(
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('On-device voice speed'),
+                      Text(_speechRateLabel(speechRate)),
+                    ],
+                  ),
+                  Slider(
+                    key: const Key('on-device-speech-rate'),
+                    value: speechRate,
+                    min: 0.25,
+                    max: 0.75,
+                    divisions: 10,
+                    label: _speechRateLabel(speechRate),
+                    onChanged: (value) => setState(() => speechRate = value),
+                  ),
+                  const Align(
                     alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: () =>
-                          widget.state.clearCloudProviderKey('deepgram'),
-                      icon: const Icon(Icons.key_off),
-                      label: const Text('Clear Deepgram key'),
+                    child: Text(
+                      'Adjusts installed Android text-to-speech only. Expressive service audio has separate pacing.',
                     ),
                   ),
-              ],
-              TextField(
-                controller: name,
-                maxLength: 40,
-                decoration: const InputDecoration(
-                  labelText: 'Assistant display name',
-                ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    initialValue: language,
+                    decoration: const InputDecoration(
+                      labelText: 'Conversation / voice language',
+                    ),
+                    items: [
+                      for (final entry in AssistantState.languageLabels.entries)
+                        DropdownMenuItem(
+                          value: entry.key,
+                          child: Text(entry.value),
+                        ),
+                    ],
+                    onChanged: (v) => setState(() => language = v!),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Voice replies and recognition use your selected language where the device/provider supports it. English, Assamese, Hindi and Hinglish can be selected; this is not automatic language detection. Online providers may retain submitted content and charge your account; offline never falls back online.',
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'ElevenLabs expressive voice is on-demand per reply. It sends only that reply through your private service; each play asks first and may use your account credits. The ElevenLabs key and voice ID must be configured on the service host and are never stored in this APK. Audio tags guide delivery but do not guarantee an emotion. No provider key is bundled.',
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: () async {
+                      try {
+                        await widget.state.saveTheme(theme);
+                        await widget.state.setAssistantName(name.text);
+                        await widget.state.saveSpeechMode(speechMode);
+                        await widget.state.saveSpeechRate(speechRate);
+                        if (speechMode == 'deepgram') {
+                          await widget.state.saveCloudProviderKey(
+                            'deepgram',
+                            deepgramSecret.text,
+                          );
+                        }
+                        deepgramSecret.clear();
+                        await widget.state.saveEngine(
+                          widget.state.engine,
+                          widget.state.model,
+                          language,
+                        );
+                        if (context.mounted) {
+                          notice(context, 'Settings saved on this device.');
+                        }
+                      } catch (e) {
+                        if (context.mounted) notice(context, e);
+                      }
+                    },
+                    child: const Text('Save settings'),
+                  ),
+                ],
               ),
-              SwitchListTile(
+            ),
+            Glass(
+              child: Column(
+                children: [
+                  const Text(
+                    'The voice interaction is push-to-talk: review or correct the transcript before it enters the composer. It does not listen continuously or execute commands from raw speech.',
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      try {
+                        final info = await AssistantState.device
+                            .invokeMapMethod('device_status');
+                        if (context.mounted) {
+                          notice(
+                            context,
+                            'Android API ${info?['sdk']} · installed on-device recognizer: ${info?['on_device_recognizer']} · system recognizer: ${info?['system_recognizer']}. These flags do not verify speech quality or installed support for any selected language.',
+                          );
+                        }
+                      } catch (e) {
+                        if (context.mounted) notice(context, e);
+                      }
+                    },
+                    child: const Text('Check device speech capabilities'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        _SettingsGroup(
+          title: 'Appearance',
+          subtitle: 'Themes and light or dark mode',
+          icon: Icons.palette_outlined,
+          children: [
+            Glass(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  FuturisticThemePicker(state: widget.state),
+                  const SizedBox(height: 18),
+                  DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    initialValue: theme,
+                    decoration: const InputDecoration(
+                      labelText: 'Light or dark mode',
+                    ),
+                    items: [
+                      for (final mode in ['system', 'light', 'dark'])
+                        DropdownMenuItem(
+                          value: mode,
+                          child: Text(switch (mode) {
+                            'system' => 'Follow device',
+                            'light' => 'Light',
+                            'dark' => 'Dark',
+                            _ => 'Dark',
+                          }),
+                        ),
+                    ],
+                    onChanged: (value) =>
+                        setState(() => theme = value ?? 'system'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.pushNamed(context, '/images'),
+                    icon: const Icon(Icons.image_outlined),
+                    label: const Text('Create an image (Cloudflare)'),
+                  ),
+                  const Text(
+                    'This sends only the prompt you type in the image screen—not chat history, saved memories or files. The private service must be explicitly configured.',
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        _SettingsGroup(
+          title: 'AI, memory & models',
+          subtitle:
+              'Provider selection, approved memory and offline experiments',
+          icon: Icons.psychology_alt_outlined,
+          children: [
+            Glass(
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.hub_outlined),
+                title: const Text('API & MCP connections'),
+                subtitle: Text(
+                  '${widget.state.config.description} · ${widget.state.customMcpServers.length} MCP server${widget.state.customMcpServers.length == 1 ? '' : 's'} saved',
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.pushNamed(context, '/connections'),
+              ),
+            ),
+            Glass(
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.lock_person_outlined),
+                title: const Text('Approved memories'),
+                subtitle: const Text(
+                  'Review, edit or delete facts saved on this device; chat history is not silently turned into memory.',
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.pushNamed(context, '/memory'),
+              ),
+            ),
+            Glass(
+              child: SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 value: widget.state.experimentalOfflineChatEnabled,
                 onChanged: (enabled) => _setExperimentalOfflineChat(enabled),
@@ -4522,88 +4662,29 @@ class _SettingsState extends State<Settings> {
                   'Explicit opt-in. Select Offline · Gemma in API & MCP connections to use it. It only runs locally after you download and load the model. Not qualified for Redmi/HyperOS; replies may be inaccurate, slow or heat the phone. There is no online fallback.',
                 ),
               ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                isExpanded: true,
-                initialValue: language,
-                decoration: const InputDecoration(
-                  labelText: 'Conversation / voice language',
-                ),
-                items: [
-                  for (final entry in AssistantState.languageLabels.entries)
-                    DropdownMenuItem(
-                      value: entry.key,
-                      child: Text(entry.value),
-                    ),
-                ],
-                onChanged: (v) => setState(() => language = v!),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Voice replies and recognition use your selected language where the device/provider supports it. Online providers may retain submitted content and charge your account; offline never falls back online.',
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'ElevenLabs expressive voice is on-demand per reply. It sends only that reply through your private service; each play asks first and may use your account credits. The ElevenLabs key and voice ID must be configured on the service host and are never stored in this APK. Audio tags guide delivery but do not guarantee an emotion. No provider key is bundled.',
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () async {
-                  try {
-                    await widget.state.saveTheme(theme);
-                    await widget.state.setAssistantName(name.text);
-                    await widget.state.saveSpeechMode(speechMode);
-                    if (speechMode == 'deepgram') {
-                      await widget.state.saveCloudProviderKey(
-                        'deepgram',
-                        deepgramSecret.text,
-                      );
-                    }
-                    deepgramSecret.clear();
-                    await widget.state.saveEngine(
-                      widget.state.engine,
-                      widget.state.model,
-                      language,
-                    );
-                    if (context.mounted) {
-                      notice(context, 'Settings saved on this device.');
-                    }
-                  } catch (e) {
-                    if (context.mounted) notice(context, e);
-                  }
-                },
-                child: const Text('Save settings'),
-              ),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.pushNamed(context, '/images'),
-                icon: const Icon(Icons.image_outlined),
-                label: const Text('Create an image (Cloudflare)'),
-              ),
-              const Text(
-                'This sends only the prompt you type in the image screen—not chat history, saved memories or files. The private service must be explicitly configured.',
-              ),
-              const SizedBox(height: 12),
-            ],
-          ),
-        ),
-        const _SettingsSectionLabel('CONNECTIONS'),
-        Glass(
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.hub_outlined),
-            title: const Text('API & MCP connections'),
-            subtitle: Text(
-              '${widget.state.config.description} · ${widget.state.customMcpServers.length} MCP server${widget.state.customMcpServers.length == 1 ? '' : 's'} saved',
             ),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => Navigator.pushNamed(context, '/connections'),
-          ),
+            Glass(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'The optional model is downloaded only when you start it. You can run fixed screening prompts or, after opting in above, use it for normal chat. Neither option means the model is qualified for your phone.',
+                  ),
+                  const SizedBox(height: 8),
+                  const OfflineModelPanel(),
+                ],
+              ),
+            ),
+          ],
         ),
-        const _SettingsSectionLabel('WORKFLOWS'),
-        Glass(
-          child: Column(
-            children: [
-              ListTile(
+        _SettingsGroup(
+          title: 'Connections & workflows',
+          subtitle:
+              'Connected services, drafts, reviewed actions and reminders',
+          icon: Icons.hub_outlined,
+          children: [
+            Glass(
+              child: ListTile(
                 leading: const Icon(Icons.edit_note_rounded),
                 title: const Text('Message & social drafts'),
                 subtitle: const Text(
@@ -4612,8 +4693,9 @@ class _SettingsState extends State<Settings> {
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.pushNamed(context, '/drafts'),
               ),
-              const Divider(),
-              ListTile(
+            ),
+            Glass(
+              child: ListTile(
                 leading: const Icon(Icons.auto_awesome_outlined),
                 title: const Text('Skills & actions'),
                 subtitle: const Text(
@@ -4622,102 +4704,170 @@ class _SettingsState extends State<Settings> {
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.pushNamed(context, '/skills'),
               ),
-            ],
-          ),
-        ),
-        const _SettingsSectionLabel('OFFLINE MODEL & EXPERIMENTAL CHAT'),
-        const Text(
-          'The optional model is downloaded only when you start it. You can run fixed screening prompts or, after opting in above, use it for normal chat. Neither option means the model is qualified for your phone.',
-        ),
-        const SizedBox(height: 8),
-        const OfflineModelPanel(),
-        const _SettingsSectionLabel('VOICE CAPABILITIES'),
-        TextButton(
-          onPressed: () async {
-            try {
-              final info = await AssistantState.device.invokeMapMethod(
-                'device_status',
-              );
-              if (context.mounted) {
-                notice(
-                  context,
-                  'Android API ${info?['sdk']} · installed on-device recognizer: ${info?['on_device_recognizer']} · system recognizer: ${info?['system_recognizer']}. These flags do not verify speech quality or installed support for any selected language.',
-                );
-              }
-            } catch (e) {
-              if (context.mounted) notice(context, e);
-            }
-          },
-          child: const Text('Check device speech capabilities'),
-        ),
-        const _SettingsSectionLabel('DATA & PRIVACY'),
-        Glass(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Local backup',
-                style: Theme.of(context).textTheme.titleMedium,
+            ),
+            Glass(
+              child: TextButton.icon(
+                onPressed: () => Navigator.pushNamed(context, '/automations'),
+                icon: const Icon(Icons.notifications_none_rounded),
+                label: const Text('Reminder activity'),
               ),
-              const SizedBox(height: 6),
-              const Text(
-                'Export is manual and owner-confirmed. The JSON file is readable and unencrypted; save it somewhere private. Provider keys and service tokens are excluded. Import/restore is not implemented.',
-              ),
-              const SizedBox(height: 10),
-              OutlinedButton.icon(
-                onPressed: _exportLocalBackup,
-                icon: const Icon(Icons.download_outlined),
-                label: const Text('Export local data'),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
-        const Glass(
-          child: Text(
-            'Privacy & permissions\n\nOptional app lock uses Android device authentication (biometrics or screen lock where supported). No PIN or authentication secret is created or stored. The lock is checked when enabled and gates the app on launch and return from the background.\n\nMicrophone access is requested only when starting voice input. Notification permission is requested when scheduling your first reminder. Neither is needed for typed chat. Android speech providers may send audio to their service. There is no background microphone or wake phrase.\n\nReminders use approximate alarms and are lost if this private test app is removed. Battery settings can delay them.',
-          ),
-        ),
-        TextButton(
-          onPressed: () async {
-            final yes = await showDialog<bool>(
-              context: context,
-              builder: (c) => AlertDialog(
-                title: const Text('Delete current chat history?'),
-                content: Text(
-                  'Delete on-phone history for ${widget.state.conversation}. Saved memories and any provider/service copies remain separate.',
+        _SettingsGroup(
+          title: 'Privacy & access',
+          subtitle: 'App lock, Android permissions and device access',
+          icon: Icons.shield_outlined,
+          children: [
+            const Glass(
+              child: Text(
+                'Your chats, approved memories, notes, tasks and study records stay on this phone. Gemma is an experimental offline option that requires your opt-in, a manual download and load; it is not qualified for this phone. Online requests require explicit payload review. The private FastAPI adapter remains optional.',
+              ),
+            ),
+            Glass(
+              child: SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: widget.state.appLockEnabled,
+                onChanged: widget.state.appLockBusy
+                    ? null
+                    : (enabled) async {
+                        final saved = await widget.state.setAppLockEnabled(
+                          enabled,
+                        );
+                        if (!context.mounted) return;
+                        if (saved) {
+                          notice(
+                            context,
+                            enabled
+                                ? 'App lock enabled.'
+                                : 'App lock disabled.',
+                          );
+                        } else {
+                          notice(
+                            context,
+                            'Device authentication did not succeed. App lock was not changed.',
+                          );
+                        }
+                      },
+                secondary: const _SettingsIconTile(icon: Icons.lock_outline),
+                title: const Text('App lock'),
+                subtitle: const Text(
+                  'Require your phone’s biometric or screen lock when opening or returning to the app.',
                 ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(c, false),
-                    child: const Text('Keep'),
+              ),
+            ),
+            const AndroidAccessPanel(),
+            const Glass(
+              child: Text(
+                'Microphone access is requested only when starting voice input. Notification permission is requested when scheduling your first reminder. Neither is needed for typed chat. Android speech providers may send audio to their service. There is no background microphone or wake phrase.',
+              ),
+            ),
+          ],
+        ),
+        _SettingsGroup(
+          title: 'Data & conversation history',
+          subtitle: 'Export local data or delete the current chat',
+          icon: Icons.storage_outlined,
+          children: [
+            Glass(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Local backup',
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  TextButton(
-                    onPressed: () => Navigator.pop(c, true),
-                    child: const Text('Delete history'),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Export is manual and owner-confirmed. The JSON file is readable and unencrypted; save it somewhere private. Provider keys and service tokens are excluded. Import/restore is not implemented.',
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: _exportLocalBackup,
+                    icon: const Icon(Icons.download_outlined),
+                    label: const Text('Export local data'),
                   ),
                 ],
               ),
-            );
-            if (yes == true) {
-              try {
-                await widget.state.deleteHistory();
-                widget.state.messages = [];
-                if (context.mounted) {
-                  notice(
-                    context,
-                    'Current on-phone history deleted. Provider/service copies were not deleted.',
+            ),
+            Glass(
+              child: TextButton(
+                onPressed: () async {
+                  final yes = await showDialog<bool>(
+                    context: context,
+                    builder: (c) => AlertDialog(
+                      title: const Text('Delete current chat history?'),
+                      content: Text(
+                        'Delete on-phone history for ${widget.state.conversation}. Saved memories and any provider/service copies remain separate.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(c, false),
+                          child: const Text('Keep'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(c, true),
+                          child: const Text('Delete history'),
+                        ),
+                      ],
+                    ),
                   );
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  notice(context, e);
-                }
-              }
-            }
-          },
-          child: const Text('Delete current conversation history'),
+                  if (yes == true) {
+                    try {
+                      await widget.state.deleteHistory();
+                      widget.state.messages = [];
+                      if (context.mounted) {
+                        notice(
+                          context,
+                          'Current on-phone history deleted. Provider/service copies were not deleted.',
+                        );
+                      }
+                    } catch (e) {
+                      if (context.mounted) notice(context, e);
+                    }
+                  }
+                },
+                child: const Text('Delete current conversation history'),
+              ),
+            ),
+          ],
         ),
       ],
+    ),
+  );
+}
+
+String _speechRateLabel(double value) => value < 0.45
+    ? 'Slower'
+    : value > 0.55
+    ? 'Faster'
+    : 'Standard';
+
+class _SettingsGroup extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final List<Widget> children;
+
+  const _SettingsGroup({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.children,
+  });
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Card(
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        leading: Icon(icon),
+        title: Text(title),
+        subtitle: Text(subtitle),
+        childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        children: children,
+      ),
     ),
   );
 }

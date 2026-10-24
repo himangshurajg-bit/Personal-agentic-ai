@@ -353,6 +353,13 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
+        find.text('AI, memory & models'),
+        250,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.text('AI, memory & models'));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
         find.text('API & MCP connections'),
         250,
         scrollable: find.byType(Scrollable).first,
