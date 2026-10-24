@@ -7,6 +7,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:record/record.dart';
 import 'package:flutter/services.dart';
 
+import 'app_update.dart';
 import 'assistant_state.dart';
 import 'mcp_servers.dart';
 import 'wajo_oauth.dart';
@@ -4927,6 +4928,12 @@ class _SettingsState extends State<Settings> {
               ),
             ),
           ],
+        ),
+        _SettingsGroup(
+          title: 'App updates',
+          subtitle: 'Check the official GitHub release',
+          icon: Icons.system_update_alt_rounded,
+          children: [Glass(child: const AppUpdatePanel())],
         ),
         _SettingsGroup(
           title: 'Appearance',

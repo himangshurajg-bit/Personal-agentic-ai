@@ -13,6 +13,7 @@ import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.media.MediaPlayer
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
@@ -234,6 +235,42 @@ class MainActivity : FlutterFragmentActivity() {
             when (call.method) {
                 "play_audio" -> playAudio(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "stop_audio" -> { stopAudio(); result.success(true) }
+                else -> result.notImplemented()
+            }
+        }
+        MethodChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/app_update").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "get_installed_version" -> {
+                    try {
+                        val info = packageManager.getPackageInfo(packageName, 0)
+                        result.success(mapOf(
+                            "packageName" to packageName,
+                            "versionName" to (info.versionName ?: ""),
+                            "versionCode" to if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong(),
+                        ))
+                    } catch (_: Exception) {
+                        result.error("version_unavailable", "Installed app version is unavailable", null)
+                    }
+                }
+                "open_official_release_download" -> {
+                    val rawUrl = call.argument<String>("url")
+                    val uri = try { Uri.parse(rawUrl ?: "") } catch (_: Exception) { null }
+                    val allowedPath = uri?.encodedPath?.matches(
+                        Regex("^/himangshurajg-bit/Personal-agentic-ai/releases/download/v[0-9]+(?:\\.[0-9]+){2,4}-build[1-9][0-9]*/app-release\\.apk$")
+                    ) == true
+                    if (uri == null || uri.scheme != "https" || uri.encodedAuthority != "github.com" ||
+                        uri.query != null ||
+                        uri.fragment != null || !allowedPath) {
+                        result.error("invalid_release_url", "Only the pinned official APK release can be opened", null)
+                    } else {
+                        try {
+                            startActivity(Intent(Intent.ACTION_VIEW, uri))
+                            result.success(true)
+                        } catch (_: Exception) {
+                            result.error("release_unavailable", "No browser can open the official release download", null)
+                        }
+                    }
+                }
                 else -> result.notImplemented()
             }
         }

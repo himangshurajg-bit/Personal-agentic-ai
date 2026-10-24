@@ -12,6 +12,12 @@ This is the stable, direct-install ARM64 release; its Android `versionName` is e
 
 Navigation is Home, Chat, Automations, Memory & Library, Settings. Study and selected files are within those destinations, not separate primary tabs. Automations currently contains individual reviewed actions and receipts, **not** a workflow engine.
 
+### Check for app updates
+
+Settings → **App updates** checks only when you tap, using the public GitHub latest-release API for `himangshurajg-bit/Personal-agentic-ai`. The checker accepts only a published stable release with the expected versioned tag and one uploaded `app-release.apk` asset at the exact HTTPS URL for this repository. This validates release metadata and the pinned download location, not the APK bytes or signature before download. It compares numeric Android version components and build number to the installed package; an equal/older release is never offered. It shows the release notes before a separate **Get update from GitHub** tap opens that official APK download. The app sends no account token, chat, memory or device data; GitHub receives the usual request metadata/IP.
+
+This is a manual release-page handoff, not an in-app APK installer: the APK is downloaded by the browser, not into this app's private storage, and this app does not inspect the downloaded APK's package/signature. Open the downloaded APK yourself; Android checks package compatibility and signing identity, then requires your confirmation. Android may ask you to allow installs from the specific browser/file app. Do not accept a signer mismatch or install a file from another source. The app does not request `REQUEST_INSTALL_PACKAGES` or bypass Android's unknown-source control: Android requires that permission for `ACTION_INSTALL_PACKAGE` on modern targets, and current Google Play policy prohibits using it for self-updates. This project is a direct GitHub APK release, not a Play Store listing; this updater does not establish Play eligibility.
+
 ### Working local features
 
 - Device-owned conversation retention/reopening and ranked multilingual lexical search. Android uses the Rust native module to tokenize Unicode text and rank exact words/phrases locally; there are no embeddings, model calls, or uploads. Other Flutter test/host targets retain a small Dart fallback.
