@@ -4083,6 +4083,73 @@ class _SettingsState extends State<Settings> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _chooseLauncherIcon() async {
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Home-screen app icon'),
+        content: SizedBox(
+          width: 360,
+          child: GridView.count(
+            shrinkWrap: true,
+            crossAxisCount: 3,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            children: [
+              for (final entry in AssistantState.launcherIconAssets.entries)
+                InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => Navigator.pop(dialogContext, entry.key),
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              width: widget.state.launcherIconId == entry.key
+                                  ? 3
+                                  : 1,
+                              color: widget.state.launcherIconId == entry.key
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Theme.of(context).dividerColor,
+                            ),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(13),
+                            child: Image.asset(entry.value, fit: BoxFit.cover),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text('NEXA ${entry.key.substring(5)}'),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, 'nexa_1'),
+            child: const Text('Restore default'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+    if (choice == null || !mounted) return;
+    try {
+      await widget.state.saveLauncherIcon(choice);
+    } catch (error) {
+      if (mounted) notice(context, error);
+    }
+  }
+
   void _expressiveAudioChanged() {
     if (mounted && _playingExpressiveVoice != _assistantAudioPlaying.value) {
       setState(() => _playingExpressiveVoice = _assistantAudioPlaying.value);
@@ -5034,6 +5101,28 @@ class _SettingsState extends State<Settings> {
           subtitle: 'Themes and light or dark mode',
           icon: Icons.palette_outlined,
           children: [
+            Glass(
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.asset(
+                    AssistantState.launcherIconAssets[widget
+                        .state
+                        .launcherIconId]!,
+                    width: 48,
+                    height: 48,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                title: const Text('Home-screen app icon'),
+                subtitle: const Text(
+                  'Choose one of nine built-in NEXA icons for the Android launcher.',
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: _chooseLauncherIcon,
+              ),
+            ),
             Glass(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
