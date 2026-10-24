@@ -4482,6 +4482,7 @@ class _SettingsState extends State<Settings> {
         title: const Text('Home-screen app icon'),
         content: SizedBox(
           width: 360,
+          height: MediaQuery.sizeOf(context).height * .6,
           child: GridView.count(
             shrinkWrap: true,
             crossAxisCount: 3,
@@ -4515,7 +4516,10 @@ class _SettingsState extends State<Settings> {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text('NEXA ${entry.key.substring(5)}'),
+                      Text(
+                        AssistantState.launcherIconLabels[entry.key]!,
+                        textAlign: TextAlign.center,
+                      ),
                     ],
                   ),
                 ),
@@ -5527,7 +5531,7 @@ class _SettingsState extends State<Settings> {
                 ),
                 title: const Text('Home-screen app icon'),
                 subtitle: const Text(
-                  'Choose one of nine built-in NEXA icons for the Android launcher.',
+                  'Choose from 26 bundled designs for the Android launcher.',
                 ),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: _chooseLauncherIcon,

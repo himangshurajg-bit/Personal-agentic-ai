@@ -38,8 +38,19 @@ class MainActivity : FlutterFragmentActivity() {
     // Activity context is not attached during construction. Defer packageName and
     // ComponentName lookups until the first MethodChannel request after attachment.
     private val launcherIconAliases: Map<String, ComponentName> by lazy {
-        (1..9).associate { index ->
-            "nexa_$index" to ComponentName(this, "$packageName.LauncherNexa$index")
+        buildMap {
+            (1..9).forEach { index ->
+                put("nexa_$index", ComponentName(this@MainActivity, "$packageName.LauncherNexa$index"))
+            }
+            val addedIcons = listOf(
+                "hrg_1", "novyra", "auralis", "orvexa", "zyntra", "veyra_ai",
+                "parag_1", "paul_1", "adrit_1", "hemanga_1", "kaushik_1",
+                "hrg_2", "parag_2", "paul_2", "adrit_2", "hemanga_2", "kaushik_2",
+            )
+            addedIcons.forEachIndexed { offset, iconId ->
+                val aliasNumber = offset + 10
+                put(iconId, ComponentName(this@MainActivity, "$packageName.LauncherNexa$aliasNumber"))
+            }
         }
     }
 

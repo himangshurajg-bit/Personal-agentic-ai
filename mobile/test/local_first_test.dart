@@ -579,7 +579,7 @@ void main() {
     },
   );
   test(
-    'nine home-screen icon choices bundle locally, persist, and reset',
+    '26 home-screen icon choices bundle locally, persist, and reset',
     () async {
       var selectedNativeIcon = 'nexa_1';
       final messenger =
@@ -604,7 +604,7 @@ void main() {
         fail('Unexpected device method: ${call.method}');
       });
 
-      expect(AssistantState.launcherIconAssets, hasLength(9));
+      expect(AssistantState.launcherIconAssets, hasLength(26));
       for (final entry in AssistantState.launcherIconAssets.entries) {
         final bytes = await rootBundle.load(entry.value);
         expect(bytes.lengthInBytes, greaterThan(1000));
@@ -620,7 +620,7 @@ void main() {
       }
       final restored = AssistantState();
       await restored.initialize();
-      expect(restored.launcherIconId, 'nexa_9');
+      expect(restored.launcherIconId, 'kaushik_2');
       await restored.resetLauncherIcon();
       expect(restored.launcherIconId, 'nexa_1');
       expect(selectedNativeIcon, 'nexa_1');

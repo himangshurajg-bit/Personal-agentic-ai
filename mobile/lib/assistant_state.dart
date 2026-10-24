@@ -233,6 +233,51 @@ class AssistantState extends ChangeNotifier {
     'nexa_7': 'assets/launcher_icons/nexa_7.png',
     'nexa_8': 'assets/launcher_icons/nexa_8.png',
     'nexa_9': 'assets/launcher_icons/nexa_9.png',
+    'hrg_1': 'assets/launcher_icons/hrg_1.png',
+    'novyra': 'assets/launcher_icons/novyra.png',
+    'auralis': 'assets/launcher_icons/auralis.png',
+    'orvexa': 'assets/launcher_icons/orvexa.png',
+    'zyntra': 'assets/launcher_icons/zyntra.png',
+    'veyra_ai': 'assets/launcher_icons/veyra_ai.png',
+    'parag_1': 'assets/launcher_icons/parag_1.png',
+    'paul_1': 'assets/launcher_icons/paul_1.png',
+    'adrit_1': 'assets/launcher_icons/adrit_1.png',
+    'hemanga_1': 'assets/launcher_icons/hemanga_1.png',
+    'kaushik_1': 'assets/launcher_icons/kaushik_1.png',
+    'hrg_2': 'assets/launcher_icons/hrg_2.png',
+    'parag_2': 'assets/launcher_icons/parag_2.png',
+    'paul_2': 'assets/launcher_icons/paul_2.png',
+    'adrit_2': 'assets/launcher_icons/adrit_2.png',
+    'hemanga_2': 'assets/launcher_icons/hemanga_2.png',
+    'kaushik_2': 'assets/launcher_icons/kaushik_2.png',
+  };
+  static const Map<String, String> launcherIconLabels = {
+    'nexa_1': 'NEXA 1',
+    'nexa_2': 'NEXA 2',
+    'nexa_3': 'NEXA 3',
+    'nexa_4': 'NEXA 4',
+    'nexa_5': 'NEXA 5',
+    'nexa_6': 'NEXA 6',
+    'nexa_7': 'NEXA 7',
+    'nexa_8': 'NEXA 8',
+    'nexa_9': 'NEXA 9',
+    'hrg_1': 'Himangshu · original',
+    'novyra': 'Novyra',
+    'auralis': 'Auralis',
+    'orvexa': 'Orvexa',
+    'zyntra': 'Zyntra',
+    'veyra_ai': 'Veyra AI',
+    'parag_1': 'Parag · original',
+    'paul_1': 'Paul · original',
+    'adrit_1': 'Adrit · original',
+    'hemanga_1': 'Hemanga · original',
+    'kaushik_1': 'Kaushik · original',
+    'hrg_2': 'Himangshu · variant 2',
+    'parag_2': 'Parag · variant 2',
+    'paul_2': 'Paul · variant 2',
+    'adrit_2': 'Adrit · variant 2',
+    'hemanga_2': 'Hemanga · variant 2',
+    'kaushik_2': 'Kaushik · variant 2',
   };
   String launcherIconId = 'nexa_1';
   http.Client? _stream;
@@ -423,7 +468,7 @@ class AssistantState extends ChangeNotifier {
 
   Future<void> saveLauncherIcon(String iconId) async {
     if (!launcherIconAssets.containsKey(iconId)) {
-      throw ServiceException('Choose one of the nine included app icons.');
+      throw ServiceException('Choose one of the bundled app icons.');
     }
     try {
       await device.invokeMethod<String>('set_launcher_icon', {

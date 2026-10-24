@@ -151,6 +151,210 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa10"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_10"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa11"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_11"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa12"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_12"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa13"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_13"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa14"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_14"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa15"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_15"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa16"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_16"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa17"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_17"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa18"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_18"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa19"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_19"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa20"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_20"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa21"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_21"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa22"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_22"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa23"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_23"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa24"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_24"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa25"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_25"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNexa26"
+            android:targetActivity=".MainActivity"
+            android:label="Personal AI"
+            android:icon="@mipmap/ic_launcher_nexa_26"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
