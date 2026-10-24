@@ -35,8 +35,12 @@ internal fun isValidTextSharePayload(title: String?, text: String?): Boolean =
     !title.isNullOrBlank() && title.length <= 80 && !text.isNullOrBlank() && text.length <= 10000
 
 class MainActivity : FlutterFragmentActivity() {
-    private val launcherIconAliases = (1..9).associate { index ->
-        "nexa_$index" to ComponentName(this, "$packageName.LauncherNexa$index")
+    // Activity context is not attached during construction. Defer packageName and
+    // ComponentName lookups until the first MethodChannel request after attachment.
+    private val launcherIconAliases: Map<String, ComponentName> by lazy {
+        (1..9).associate { index ->
+            "nexa_$index" to ComponentName(this, "$packageName.LauncherNexa$index")
+        }
     }
 
     private fun currentLauncherIcon(): String = launcherIconAliases.entries
