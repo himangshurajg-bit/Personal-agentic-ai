@@ -2854,7 +2854,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         throw StateError('Selected speech language is unavailable');
       }
       final voices = await tts.getVoices as List;
-      final voice = selectInstalledOfflineVoice(voices, widget.state.language);
+      final voice = selectInstalledOfflineVoice(
+        voices,
+        widget.state.language,
+        preferredName: widget.state.speechVoiceName,
+        preferredLocale: widget.state.speechVoiceLocale,
+      );
       if (voice == null) {
         throw StateError(
           'No installed offline voice for the selected language',
@@ -3145,6 +3150,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           final localVoice = selectInstalledOfflineVoice(
             voices,
             widget.state.language,
+            preferredName: widget.state.speechVoiceName,
+            preferredLocale: widget.state.speechVoiceLocale,
           );
           if (localVoice == null) {
             throw StateError(
@@ -4241,11 +4248,18 @@ class Settings extends StatefulWidget {
 }
 
 class _SettingsState extends State<Settings> {
+  static const _automaticVoiceKey = '__automatic_offline_voice__';
   final deepgramSecret = TextEditingController();
+  final FlutterTts _voicePreview = FlutterTts();
   late String speechMode = widget.state.speechMode;
   late double speechRate = widget.state.speechRate;
   late String theme = widget.state.theme;
   late String language = widget.state.language;
+  late String? selectedVoiceName = widget.state.speechVoiceName;
+  late String? selectedVoiceLocale = widget.state.speechVoiceLocale;
+  List<Map<String, dynamic>> _offlineVoices = [];
+  bool _loadingOfflineVoices = false;
+  bool _previewingVoice = false;
   late final TextEditingController name = TextEditingController(
     text: widget.state.assistantName,
   );
@@ -4253,15 +4267,95 @@ class _SettingsState extends State<Settings> {
   void initState() {
     super.initState();
     widget.state.addListener(_stateChanged);
+    _loadOfflineVoices(language);
   }
 
   void _stateChanged() {
     if (mounted) setState(() {});
   }
 
+  Future<void> _loadOfflineVoices(String locale) async {
+    if (mounted) setState(() => _loadingOfflineVoices = true);
+    try {
+      final voices = await _voicePreview.getVoices as List;
+      final installed = installedOfflineVoices(voices, locale);
+      if (mounted) setState(() => _offlineVoices = installed);
+    } catch (_) {
+      if (mounted) setState(() => _offlineVoices = []);
+    } finally {
+      if (mounted) setState(() => _loadingOfflineVoices = false);
+    }
+  }
+
+  Map<String, dynamic>? get _selectedOfflineVoice {
+    for (final voice in _offlineVoices) {
+      if (voice['name'] == selectedVoiceName &&
+          voice['locale'] == selectedVoiceLocale) {
+        return voice;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _previewInstalledVoice() async {
+    if (_previewingVoice) {
+      try {
+        await _voicePreview.stop();
+      } catch (_) {}
+      if (mounted) setState(() => _previewingVoice = false);
+      return;
+    }
+    final voice =
+        _selectedOfflineVoice ??
+        (_offlineVoices.isEmpty ? null : _offlineVoices.first);
+    if (voice == null) {
+      notice(context, 'No matching installed offline voice is available.');
+      return;
+    }
+    final sample = switch (language) {
+      'as-IN' => 'নমস্কাৰ, মই আপোনাৰ সহায়ক।',
+      'hi-IN' => 'नमस्ते, मैं आपका सहायक हूँ।',
+      'hi-Latn-IN' => 'Namaste, main aapka sahayak hoon.',
+      _ => 'Hello, I am your assistant.',
+    };
+    setState(() => _previewingVoice = true);
+    try {
+      final voices = await _voicePreview.getVoices as List;
+      final verified = selectInstalledOfflineVoice(
+        voices,
+        language,
+        preferredName: voice['name']?.toString(),
+        preferredLocale: voice['locale']?.toString(),
+      );
+      if (verified == null ||
+          verified['name'] != voice['name'] ||
+          verified['locale'] != voice['locale']) {
+        throw StateError('The installed offline voice is no longer available.');
+      }
+      await _voicePreview.setLanguage(language);
+      await _voicePreview.setVoice({
+        'name': verified['name'].toString(),
+        'locale': verified['locale'].toString(),
+      });
+      await _voicePreview.setSpeechRate(speechRate);
+      await _voicePreview.awaitSpeakCompletion(true);
+      await _voicePreview.speak(sample);
+    } catch (_) {
+      if (mounted) {
+        notice(
+          context,
+          'This installed voice could not play the sample. Availability depends on the Android speech engine.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _previewingVoice = false);
+    }
+  }
+
   @override
   void dispose() {
     widget.state.removeListener(_stateChanged);
+    unawaited(_voicePreview.stop().catchError((Object _) {}));
     deepgramSecret.dispose();
     name.dispose();
     super.dispose();
@@ -4493,6 +4587,74 @@ class _SettingsState extends State<Settings> {
                     ),
                   ),
                   const SizedBox(height: 12),
+                  KeyedSubtree(
+                    key: ValueKey(
+                      'installed-voice-$language-${selectedVoiceName ?? 'automatic'}-${_offlineVoices.length}',
+                    ),
+                    child: DropdownButtonFormField<String>(
+                      key: const Key('natural-voice-choice'),
+                      isExpanded: true,
+                      initialValue: _selectedOfflineVoice == null
+                          ? _automaticVoiceKey
+                          : offlineVoiceOptionKey(_selectedOfflineVoice!),
+                      decoration: const InputDecoration(
+                        labelText: 'Installed voice',
+                      ),
+                      items: [
+                        const DropdownMenuItem(
+                          value: _automaticVoiceKey,
+                          child: Text(
+                            'Automatic — best installed offline voice',
+                          ),
+                        ),
+                        for (final voice in _offlineVoices)
+                          DropdownMenuItem(
+                            value: offlineVoiceOptionKey(voice),
+                            child: Text(offlineVoiceOptionLabel(voice)),
+                          ),
+                      ],
+                      onChanged: _loadingOfflineVoices
+                          ? null
+                          : (value) {
+                              final selected = _offlineVoices.where(
+                                (voice) =>
+                                    offlineVoiceOptionKey(voice) == value,
+                              );
+                              setState(() {
+                                if (value == _automaticVoiceKey ||
+                                    selected.isEmpty) {
+                                  selectedVoiceName = null;
+                                  selectedVoiceLocale = null;
+                                } else {
+                                  selectedVoiceName = selected.first['name']
+                                      ?.toString();
+                                  selectedVoiceLocale = selected.first['locale']
+                                      ?.toString();
+                                }
+                              });
+                            },
+                    ),
+                  ),
+                  Text(
+                    _loadingOfflineVoices
+                        ? 'Checking installed voices on this device…'
+                        : _offlineVoices.isEmpty
+                        ? 'No matching installed offline voice was found. Speech support depends on the installed Android engine; no network voice or downloaded model is used.'
+                        : 'Uses installed Android offline voices only. Quality and naturalness depend on the device’s speech engine; no voice recording is uploaded.',
+                  ),
+                  OutlinedButton.icon(
+                    key: const Key('preview-natural-voice'),
+                    onPressed: _loadingOfflineVoices || _offlineVoices.isEmpty
+                        ? null
+                        : _previewInstalledVoice,
+                    icon: Icon(
+                      _previewingVoice ? Icons.stop : Icons.play_arrow_rounded,
+                    ),
+                    label: Text(
+                      _previewingVoice ? 'Stop preview' : 'Preview voice',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
                     isExpanded: true,
                     initialValue: language,
@@ -4506,7 +4668,10 @@ class _SettingsState extends State<Settings> {
                           child: Text(entry.value),
                         ),
                     ],
-                    onChanged: (v) => setState(() => language = v!),
+                    onChanged: (v) {
+                      setState(() => language = v!);
+                      _loadOfflineVoices(v!);
+                    },
                   ),
                   const SizedBox(height: 16),
                   const Text(
@@ -4524,6 +4689,10 @@ class _SettingsState extends State<Settings> {
                         await widget.state.setAssistantName(name.text);
                         await widget.state.saveSpeechMode(speechMode);
                         await widget.state.saveSpeechRate(speechRate);
+                        await widget.state.saveSpeechVoice(
+                          name: selectedVoiceName,
+                          locale: selectedVoiceLocale,
+                        );
                         if (speechMode == 'deepgram') {
                           await widget.state.saveCloudProviderKey(
                             'deepgram',

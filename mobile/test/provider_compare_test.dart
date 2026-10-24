@@ -236,19 +236,64 @@ void main() {
     );
   });
 
-  test(
-    'offline system voice selection excludes online and wrong-language voices',
-    () {
-      final voices = [
-        {'name': 'network hindi', 'locale': 'hi-IN', 'network_required': '1'},
-        {'name': 'offline english', 'locale': 'en-US', 'network_required': 0},
-        {'name': 'offline hindi', 'locale': 'hi_IN', 'network_required': false},
-      ];
-      expect(
-        selectInstalledOfflineVoice(voices, 'hi-IN')?['name'],
-        'offline hindi',
-      );
-      expect(selectInstalledOfflineVoice(voices, 'as-IN'), isNull);
-    },
-  );
+  test('offline voices prefer declared quality, honor saved choice and fall back locally', () {
+    final voices = [
+      {
+        'name': 'network best',
+        'locale': 'hi-IN',
+        'network_required': '1',
+        'quality': 'very high',
+      },
+      {
+        'name': 'offline normal',
+        'locale': 'hi_IN',
+        'network_required': false,
+        'quality': 'normal',
+      },
+      {
+        'name': 'offline best',
+        'locale': 'hi-IN',
+        'network_required': 0,
+        'quality': 'very high',
+        'latency': 'low',
+      },
+      {
+        'name': 'wrong language',
+        'locale': 'en-IN',
+        'network_required': 0,
+        'quality': 'very high',
+      },
+    ];
+    expect(
+      installedOfflineVoices(voices, 'hi-IN').map((voice) => voice['name']),
+      ['offline best', 'offline normal'],
+    );
+    expect(
+      selectInstalledOfflineVoice(voices, 'hi-IN')?['name'],
+      'offline best',
+    );
+    expect(
+      selectInstalledOfflineVoice(
+        voices,
+        'hi-IN',
+        preferredName: 'offline normal',
+        preferredLocale: 'hi-IN',
+      )?['name'],
+      'offline normal',
+    );
+    expect(
+      selectInstalledOfflineVoice(
+        voices,
+        'hi-IN',
+        preferredName: 'removed voice',
+        preferredLocale: 'hi-IN',
+      )?['name'],
+      'offline best',
+    );
+    expect(selectInstalledOfflineVoice(voices, 'as-IN'), isNull);
+    expect(
+      offlineVoiceOptionLabel(installedOfflineVoices(voices, 'hi-IN').first),
+      contains('very high'),
+    );
+  });
 }

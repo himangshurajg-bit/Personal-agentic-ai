@@ -92,6 +92,31 @@ void main() {
   );
 
   test(
+    'installed offline voice choice persists and can return to automatic',
+    () async {
+      final state = AssistantState();
+      await state.initialize();
+      expect(state.speechVoiceName, isNull);
+      await state.saveSpeechVoice(name: 'Natural Hindi', locale: 'hi-IN');
+
+      final restored = AssistantState();
+      await restored.initialize();
+      expect(restored.speechVoiceName, 'Natural Hindi');
+      expect(restored.speechVoiceLocale, 'hi-IN');
+      await restored.saveSpeechVoice();
+
+      final automatic = AssistantState();
+      await automatic.initialize();
+      expect(automatic.speechVoiceName, isNull);
+      expect(automatic.speechVoiceLocale, isNull);
+      await expectLater(
+        automatic.saveSpeechVoice(name: 'Incomplete'),
+        throwsA(isA<ServiceException>()),
+      );
+    },
+  );
+
+  test(
     'flashcards migrate old local records and schedule only actual reviews',
     () async {
       const secure = FlutterSecureStorage();

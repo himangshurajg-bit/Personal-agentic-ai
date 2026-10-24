@@ -8,25 +8,95 @@ bool isEligibleForOfflineGemmaSpeech(
     message['state'] == 'complete' &&
     message['engine'] == 'offline';
 
-/// Small selector for the system voices the OS explicitly marks as offline.
-/// It does not download speech models or assume that a language is available.
-Map<String, dynamic>? selectInstalledOfflineVoice(
+/// Installed Android voices explicitly marked offline, ordered by declared
+/// speech quality and then lower latency. Metadata is only a hint; actual
+/// naturalness and language coverage depend on the device's TTS engine.
+List<Map<String, dynamic>> installedOfflineVoices(
   Iterable<dynamic> voices,
   String requestedLocale,
 ) {
-  final expected = requestedLocale.replaceAll('_', '-').toLowerCase();
+  final expected = _normalizedLocale(requestedLocale);
+  final result = <Map<String, dynamic>>[];
   for (final value in voices) {
     if (value is! Map) continue;
     final locale = value['locale'];
-    final networkRequired = value['network_required'];
     if (locale is! String ||
-        locale.replaceAll('_', '-').toLowerCase() != expected ||
-        !(networkRequired == 0 ||
-            networkRequired == false ||
-            networkRequired == '0')) {
+        _normalizedLocale(locale) != expected ||
+        !_isOffline(value['network_required'])) {
       continue;
     }
-    return Map<String, dynamic>.from(value);
+    result.add(Map<String, dynamic>.from(value));
   }
-  return null;
+  result.sort((a, b) {
+    final quality = _qualityRank(b['quality'])
+        .compareTo(_qualityRank(a['quality']));
+    if (quality != 0) return quality;
+    final latency = _latencyRank(b['latency'])
+        .compareTo(_latencyRank(a['latency']));
+    if (latency != 0) return latency;
+    return (a['name']?.toString() ?? '').compareTo(b['name']?.toString() ?? '');
+  });
+  return result;
 }
+
+/// Uses a saved installed voice when it is still available for the exact
+/// language; otherwise safely falls back to the best-ranked offline voice.
+Map<String, dynamic>? selectInstalledOfflineVoice(
+  Iterable<dynamic> voices,
+  String requestedLocale, {
+  String? preferredName,
+  String? preferredLocale,
+}) {
+  final available = installedOfflineVoices(voices, requestedLocale);
+  if (preferredName != null && preferredLocale != null) {
+    for (final voice in available) {
+      if (voice['name'] == preferredName &&
+          voice['locale'] is String &&
+          _normalizedLocale(voice['locale'] as String) ==
+              _normalizedLocale(preferredLocale)) {
+        return voice;
+      }
+    }
+  }
+  return available.isEmpty ? null : available.first;
+}
+
+String offlineVoiceOptionKey(Map<String, dynamic> voice) =>
+    '${voice['name']}|${voice['locale']}';
+
+String offlineVoiceOptionLabel(Map<String, dynamic> voice) {
+  final name = voice['name']?.toString().trim();
+  final quality = voice['quality']?.toString().trim();
+  final locale = voice['locale']?.toString().trim();
+  final details = [
+    if (quality != null && quality.isNotEmpty) quality,
+    if (locale != null && locale.isNotEmpty) locale,
+  ].join(' · ');
+  return [
+    if (name != null && name.isNotEmpty) name else 'Installed voice',
+    if (details.isNotEmpty) '($details)',
+  ].join(' ');
+}
+
+String _normalizedLocale(String locale) =>
+    locale.replaceAll('_', '-').toLowerCase();
+
+bool _isOffline(dynamic value) => value == 0 || value == false || value == '0';
+
+int _qualityRank(dynamic value) => switch (value?.toString().toLowerCase()) {
+  'very high' || 'very_high' => 5,
+  'high' => 4,
+  'normal' => 3,
+  'low' => 2,
+  'very low' || 'very_low' => 1,
+  _ => 0,
+};
+
+int _latencyRank(dynamic value) => switch (value?.toString().toLowerCase()) {
+  'very low' || 'very_low' => 5,
+  'low' => 4,
+  'normal' => 3,
+  'high' => 2,
+  'very high' || 'very_high' => 1,
+  _ => 0,
+};

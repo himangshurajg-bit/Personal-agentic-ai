@@ -97,6 +97,8 @@ class AssistantState extends ChangeNotifier {
   String mcpLoadError = '';
   String speechMode = 'offline';
   double speechRate = 0.5;
+  String? speechVoiceName;
+  String? speechVoiceLocale;
   String assistantName = 'Personal assistant';
   String engine = 'gemini',
       model = geminiModel,
@@ -209,6 +211,15 @@ class AssistantState extends ChangeNotifier {
               savedSpeechRate <= 0.75
           ? savedSpeechRate
           : 0.5;
+      speechVoiceName = await storage.read(key: 'speech_voice_name');
+      speechVoiceLocale = await storage.read(key: 'speech_voice_locale');
+      if (speechVoiceName == null ||
+          speechVoiceName!.isEmpty ||
+          speechVoiceLocale == null ||
+          speechVoiceLocale!.isEmpty) {
+        speechVoiceName = null;
+        speechVoiceLocale = null;
+      }
       engine = await storage.read(key: 'engine') ?? 'gemini';
       experimentalOfflineChatEnabled =
           await storage.read(key: 'experimental_offline_chat') == 'yes';
@@ -853,6 +864,33 @@ class AssistantState extends ChangeNotifier {
     }
     await storage.write(key: 'speech_rate', value: rate.toString());
     speechRate = rate;
+    notifyListeners();
+  }
+
+  Future<void> saveSpeechVoice({String? name, String? locale}) async {
+    if ((name == null) != (locale == null)) {
+      throw ServiceException(
+        'Choose an installed voice or use automatic voice.',
+      );
+    }
+    if (name != null &&
+        (name.trim().isEmpty ||
+            locale!.trim().isEmpty ||
+            name.runes.length > 200 ||
+            locale.runes.length > 40 ||
+            name.contains(RegExp(r'[\x00-\x1f]')) ||
+            locale.contains(RegExp(r'[\x00-\x1f]')))) {
+      throw ServiceException('Choose a valid installed voice.');
+    }
+    if (name == null) {
+      await storage.delete(key: 'speech_voice_name');
+      await storage.delete(key: 'speech_voice_locale');
+    } else {
+      await storage.write(key: 'speech_voice_name', value: name.trim());
+      await storage.write(key: 'speech_voice_locale', value: locale!.trim());
+    }
+    speechVoiceName = name?.trim();
+    speechVoiceLocale = locale?.trim();
     notifyListeners();
   }
 
