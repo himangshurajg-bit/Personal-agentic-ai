@@ -98,6 +98,8 @@ class _AssistantAppState extends State<AssistantApp>
           );
         },
         '/voice': (_) => ChatScreen(state: widget.state, startWithVoice: true),
+        '/offline-qwen': (_) =>
+            ChatScreen(state: widget.state, offlineQwen: true),
         '/settings': (_) => Settings(state: widget.state),
         '/connections': (_) => ApiMcpSettings(state: widget.state),
         '/memory': (_) => Memories(state: widget.state),
@@ -230,6 +232,7 @@ class Shell extends StatelessWidget {
   final Widget child;
   final List<Widget>? actions;
   final bool primaryNavigation;
+  final bool fullScreenChat;
   const Shell({
     super.key,
     required this.title,
@@ -237,6 +240,7 @@ class Shell extends StatelessWidget {
     this.assistantName,
     this.actions,
     this.primaryNavigation = true,
+    this.fullScreenChat = false,
   });
 
   @override
@@ -311,7 +315,9 @@ class Shell extends StatelessWidget {
             child: Align(
               alignment: Alignment.topCenter,
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 700),
+                constraints: BoxConstraints(
+                  maxWidth: fullScreenChat ? 1180 : 700,
+                ),
                 child: child,
               ),
             ),
@@ -650,6 +656,12 @@ class _AssistantDrawer extends StatelessWidget {
                     label: 'Chat',
                     selected: _selected('/chat'),
                     onTap: () => _go(context, '/chat'),
+                  ),
+                  _DrawerRow(
+                    icon: Icons.memory_outlined,
+                    label: 'Offline Qwen chat',
+                    selected: _selected('/offline-qwen'),
+                    onTap: () => _go(context, '/offline-qwen'),
                   ),
                   _DrawerRow(
                     icon: Icons.school_outlined,
@@ -2252,11 +2264,13 @@ class ChatScreen extends StatefulWidget {
   final AssistantState state;
   final String? initialDraft;
   final bool startWithVoice;
+  final bool offlineQwen;
   const ChatScreen({
     super.key,
     required this.state,
     this.initialDraft,
     this.startWithVoice = false,
+    this.offlineQwen = false,
   });
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -2277,6 +2291,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool listening = false, speaking = false, comparing = false;
   bool _draftApplied = false;
   bool _initialVoiceStarted = false;
+  bool _qwenStatusLoading = false;
+  Map<String, dynamic> _qwenStatus = <String, dynamic>{};
+  static const _offlineModel = MethodChannel(
+    'personal_assistant/offline_model',
+  );
   double level = 0;
 
   @override
@@ -2286,7 +2305,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       input.text = widget.initialDraft!;
       _draftApplied = true;
     }
-    if (widget.startWithVoice && !_initialVoiceStarted) {
+    if (!widget.offlineQwen && widget.startWithVoice && !_initialVoiceStarted) {
       _initialVoiceStarted = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) listen();
@@ -2310,8 +2329,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     tts.setErrorHandler((_) {
       if (mounted) setState(() => speaking = false);
     });
+    if (widget.offlineQwen) _qwenStatusLoading = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) widget.state.loadHistory();
+      if (!mounted) return;
+      if (widget.offlineQwen) {
+        widget.state.loadHistory(
+          conversationId: widget.state.offlineQwenConversation,
+        );
+        _refreshQwenStatus();
+      } else {
+        widget.state.loadHistory();
+      }
     });
     voiceEvents.setMethodCallHandler((call) async {
       if (!mounted || call.method != 'voice_event') return;
@@ -2906,6 +2934,52 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  bool _qwenReady(AssistantState state) =>
+      state.experimentalOfflineChatEnabled &&
+      _qwenStatus['experimental_chat_enabled'] == true &&
+      _qwenStatus['selected_model_id'] == 'qwen3-0.6b' &&
+      _qwenStatus['model_present'] == true &&
+      _qwenStatus['model_size_matches'] == true &&
+      _qwenStatus['runtime_loaded'] == true &&
+      _qwenStatus['chat_qualified'] == true;
+
+  Future<void> _refreshQwenStatus() async {
+    if (!widget.offlineQwen) return;
+    if (mounted) setState(() => _qwenStatusLoading = true);
+    try {
+      var status =
+          await _offlineModel.invokeMapMethod<String, dynamic>('status') ??
+          <String, dynamic>{};
+      // Select the pinned Qwen candidate only when no model operation/runtime is
+      // active. This does not download weights or qualify the model.
+      if (status['selected_model_id'] != 'qwen3-0.6b' &&
+          status['model_selection_locked'] != true) {
+        await _offlineModel.invokeMethod<bool>(
+          'select_model',
+          <String, Object?>{'model_id': 'qwen3-0.6b'},
+        );
+        status =
+            await _offlineModel.invokeMapMethod<String, dynamic>('status') ??
+            status;
+      }
+      if (mounted) setState(() => _qwenStatus = status);
+    } on PlatformException catch (error) {
+      if (mounted) {
+        setState(
+          () => _qwenStatus = <String, dynamic>{'status_error': error.message},
+        );
+      }
+    } on MissingPluginException {
+      if (mounted) {
+        setState(
+          () => _qwenStatus = <String, dynamic>{'status_error': 'unavailable'},
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _qwenStatusLoading = false);
+    }
+  }
+
   Future<void> send([String? retry]) async {
     final text = retry ?? input.text;
     if (text.trim().isEmpty) {
@@ -2918,15 +2992,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       setState(() => listening = false);
     }
     if (!mounted) return;
-    final payload = await reviewOnline(context, widget.state, text);
-    if (!payload) return;
+    if (widget.offlineQwen && !_qwenReady(widget.state)) return;
+    if (!widget.offlineQwen) {
+      final payload = await reviewOnline(context, widget.state, text);
+      if (!payload) return;
+    }
     input.clear();
     await widget.state.send(
       text,
-      approvedOnline: true,
-      shareMemories: widget.state.shareMemories,
-      shareHistory: widget.state.shareHistory,
+      approvedOnline: !widget.offlineQwen,
+      shareMemories: widget.offlineQwen ? false : widget.state.shareMemories,
+      shareHistory: widget.offlineQwen ? false : widget.state.shareHistory,
       retryLastMessage: retry != null,
+      engineOverride: widget.offlineQwen ? 'offline' : null,
+      conversationId: widget.offlineQwen
+          ? widget.state.offlineQwenConversation
+          : null,
+      requireQualifiedOfflineModel: widget.offlineQwen,
+      offlineModelQualified:
+          _qwenStatus['chat_qualified'] == true &&
+          _qwenStatus['selected_model_id'] == 'qwen3-0.6b',
     );
     if (widget.state.speakReplies &&
         widget.state.error.isEmpty &&
@@ -2987,33 +3072,126 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  Widget _offlineQwenStatusCard(AssistantState state) {
+    final colors = Theme.of(context).colorScheme;
+    final status = _qwenStatus;
+    final ready = _qwenReady(state);
+    final String message;
+    if (_qwenStatusLoading) {
+      message = 'Checking the on-device Qwen model and runtime…';
+    } else if (status['status_error'] != null) {
+      message = 'This build cannot report the local model status. Offline Qwen chat stays disabled.';
+    } else if (status['selected_model_id'] != 'qwen3-0.6b') {
+      message = status['model_selection_locked'] == true
+          ? 'Another local model is loaded or busy. Close it in Settings before selecting Qwen.'
+          : 'Qwen is not the selected local model. Open Settings to review the pinned Qwen candidate.';
+    } else if (status['model_present'] != true ||
+        status['model_size_matches'] != true) {
+      message = 'The Qwen weights are not installed and verified on this phone. No model download was started.';
+    } else if (status['runtime_loaded'] != true) {
+      message = 'Qwen weights are present, but the local runtime is not loaded. Use Offline model screening in Settings first.';
+    } else if (status['chat_qualified'] != true) {
+      message = 'The local Qwen candidate is connected to the screening path, but chat is not qualified for this device. License, device compatibility and response-quality checks remain outstanding; sending is disabled.';
+    } else if (!state.experimentalOfflineChatEnabled ||
+        status['experimental_chat_enabled'] != true) {
+      message = 'The Qwen runtime is qualified, but experimental local chat opt-in is off in Settings.';
+    } else {
+      message = 'Local Qwen is qualified and ready. Messages stay on this device; there is no network fallback.';
+    }
+    return Card(
+      color: colors.surfaceContainerHighest.withValues(alpha: .78),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.memory_rounded, color: colors.primary),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    'Offline Qwen · local only',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+                Icon(
+                  ready ? Icons.verified_outlined : Icons.hourglass_top_rounded,
+                  color: ready ? colors.primary : colors.error,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(message, style: Theme.of(context).textTheme.bodySmall),
+            if (!ready) ...[
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: () => Navigator.pushNamed(context, '/settings'),
+                icon: const Icon(Icons.tune_rounded),
+                label: const Text('Open offline model settings'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.state,
     builder: (context, _) {
       final state = widget.state;
       return Shell(
-        title: state.assistantName,
+        title: widget.offlineQwen ? 'Offline Qwen' : state.assistantName,
         assistantName: state.assistantName,
+        fullScreenChat: true,
         actions: [
           IconButton(
-            tooltip: 'Read replies with an installed on-device voice',
-            onPressed: () async {
-              try {
-                await state.saveSpeakReplies(!state.speakReplies);
-              } catch (e) {
-                if (context.mounted) notice(context, e);
-              }
-            },
-            icon: Icon(state.speakReplies ? Icons.volume_up : Icons.volume_off),
+            tooltip: widget.offlineQwen
+                ? 'Open regular assistant chat'
+                : 'Open separate Offline Qwen chat',
+            onPressed: () => Navigator.pushReplacementNamed(
+              context,
+              widget.offlineQwen ? '/chat' : '/offline-qwen',
+            ),
+            icon: Icon(
+              widget.offlineQwen ? Icons.cloud_outlined : Icons.memory_outlined,
+            ),
           ),
+          if (widget.offlineQwen)
+            IconButton(
+              tooltip: 'Refresh Qwen model status',
+              onPressed: _qwenStatusLoading ? null : _refreshQwenStatus,
+              icon: const Icon(Icons.refresh_rounded),
+            ),
+          if (!widget.offlineQwen)
+            IconButton(
+              tooltip: 'Read replies with an installed on-device voice',
+              onPressed: () async {
+                try {
+                  await state.saveSpeakReplies(!state.speakReplies);
+                } catch (e) {
+                  if (context.mounted) notice(context, e);
+                }
+              },
+              icon: Icon(
+                state.speakReplies ? Icons.volume_up : Icons.volume_off,
+              ),
+            ),
           IconButton(
             tooltip: 'Conversation history',
             onPressed: state.busy
                 ? null
                 : () async {
                     try {
-                      final rows = await state.conversations();
+                      final allRows = await state.conversations();
+                      final rows = allRows.where((row) {
+                        final id = row['conversation'] as String? ?? '';
+                        return widget.offlineQwen
+                            ? id.startsWith('offline_qwen')
+                            : !id.startsWith('offline_qwen');
+                      }).toList();
                       if (!context.mounted) return;
                       final selected = await showDialog<String>(
                         context: context,
@@ -3055,7 +3233,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             speaking = false;
                           });
                         }
-                        await state.selectConversation(selected);
+                        if (widget.offlineQwen) {
+                          await state.setOfflineQwenConversation(selected);
+                        } else {
+                          await state.selectConversation(selected);
+                        }
                       }
                     } catch (e) {
                       if (context.mounted) notice(context, e);
@@ -3077,10 +3259,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           speaking = false;
                         });
                       }
-                      await state.selectConversation(
-                        'chat_${DateTime.now().microsecondsSinceEpoch}',
-                        load: false,
-                      );
+                      final id = widget.offlineQwen
+                          ? 'offline_qwen_${DateTime.now().microsecondsSinceEpoch}'
+                          : 'chat_${DateTime.now().microsecondsSinceEpoch}';
+                      if (widget.offlineQwen) {
+                        await state.setOfflineQwenConversation(id);
+                      } else {
+                        await state.selectConversation(id, load: false);
+                      }
                     } catch (e) {
                       if (context.mounted) notice(context, e);
                     }
@@ -3101,14 +3287,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 child: Row(
                   children: [
                     Icon(
-                      Icons.shield_outlined,
+                      widget.offlineQwen
+                          ? Icons.memory_outlined
+                          : Icons.shield_outlined,
                       size: 18,
                       color: Theme.of(context).colorScheme.primary,
                     ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        '${state.config.description} · ${state.language} · ${state.specialist}. No automatic online fallback. Memory scope: ${state.conversation}',
+                        widget.offlineQwen
+                            ? 'Separate local-only Qwen conversation · no network fallback · ${state.offlineQwenConversation}'
+                            : '${state.config.description} · ${state.language} · ${state.specialist}. No automatic online fallback. Memory scope: ${state.conversation}',
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -3125,6 +3315,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
                 children: [
+                  if (widget.offlineQwen) _offlineQwenStatusCard(state),
                   if (state.messages.isEmpty)
                     Glass(
                       padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
@@ -3159,7 +3350,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             ? Alignment.centerRight
                             : Alignment.centerLeft,
                         child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 560),
+                          constraints: BoxConstraints(
+                            maxWidth: widget.offlineQwen ? 820 : 760,
+                          ),
                           child: Glass(
                             tintColor: m['role'] == 'user'
                                 ? Theme.of(context).colorScheme.primary
@@ -3186,7 +3379,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                     'Links are not opened automatically. Review and copy the destination if needed.',
                                   ),
                                 ),
-                                if (m['state'] == 'complete' &&
+                                if (!widget.offlineQwen &&
+                                    m['state'] == 'complete' &&
                                     m['role'] == 'assistant' &&
                                     state.engine == 'offline' &&
                                     isEligibleForOfflineGemmaSpeech(
@@ -3207,7 +3401,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                           : 'Play installed offline voice',
                                     ),
                                   )
-                                else if (m['state'] == 'complete' &&
+                                else if (!widget.offlineQwen &&
+                                    m['state'] == 'complete' &&
                                     m['role'] == 'assistant' &&
                                     state.engine != 'offline')
                                   TextButton.icon(
@@ -3351,38 +3546,39 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    ActivityHalo(
-                      active: listening,
-                      color: Theme.of(context).colorScheme.primary,
-                      child: IconButton.filledTonal(
-                        tooltip: listening
-                            ? 'Stop microphone'
-                            : 'Use microphone',
-                        onPressed: listen,
-                        icon: AnimatedSwitcher(
-                          duration: MediaQuery.disableAnimationsOf(context)
-                              ? Duration.zero
-                              : const Duration(milliseconds: 220),
-                          transitionBuilder: (child, animation) =>
-                              ScaleTransition(
-                                scale: animation,
-                                child: RotationTransition(
-                                  turns: Tween<double>(
-                                    begin: -.08,
-                                    end: 0,
-                                  ).animate(animation),
-                                  child: child,
+                    if (!widget.offlineQwen)
+                      ActivityHalo(
+                        active: listening,
+                        color: Theme.of(context).colorScheme.primary,
+                        child: IconButton.filledTonal(
+                          tooltip: listening
+                              ? 'Stop microphone'
+                              : 'Use microphone',
+                          onPressed: listen,
+                          icon: AnimatedSwitcher(
+                            duration: MediaQuery.disableAnimationsOf(context)
+                                ? Duration.zero
+                                : const Duration(milliseconds: 220),
+                            transitionBuilder: (child, animation) =>
+                                ScaleTransition(
+                                  scale: animation,
+                                  child: RotationTransition(
+                                    turns: Tween<double>(
+                                      begin: -.08,
+                                      end: 0,
+                                    ).animate(animation),
+                                    child: child,
+                                  ),
                                 ),
-                              ),
-                          child: Icon(
-                            listening
-                                ? Icons.mic_rounded
-                                : Icons.mic_none_rounded,
-                            key: ValueKey(listening),
+                            child: Icon(
+                              listening
+                                  ? Icons.mic_rounded
+                                  : Icons.mic_none_rounded,
+                              key: ValueKey(listening),
+                            ),
                           ),
                         ),
                       ),
-                    ),
                     const SizedBox(width: 4),
                     Expanded(
                       child: TextField(
@@ -3391,8 +3587,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         maxLines: 5,
                         maxLength: 8000,
                         textCapitalization: TextCapitalization.sentences,
-                        decoration: const InputDecoration(
-                          hintText: 'Message your assistant…',
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) {
+                          if (!state.busy &&
+                              !speaking &&
+                              input.text.trim().isNotEmpty) {
+                            send();
+                          }
+                        },
+                        decoration: InputDecoration(
+                          hintText: widget.offlineQwen
+                              ? 'Message Offline Qwen…'
+                              : 'Message your assistant…',
                           filled: false,
                           contentPadding: EdgeInsets.symmetric(
                             horizontal: 10,
@@ -3414,7 +3620,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         tooltip: state.busy || speaking
                             ? 'Stop response'
                             : 'Send message',
-                        onPressed: state.busy || speaking ? stopAll : send,
+                        onPressed: state.busy || speaking
+                            ? stopAll
+                            : widget.offlineQwen && !_qwenReady(state)
+                            ? null
+                            : send,
                         style: IconButton.styleFrom(
                           fixedSize: const Size(48, 48),
                           backgroundColor: Theme.of(context)
@@ -3452,22 +3662,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: comparing || state.busy || speaking
-                    ? null
-                    : compareAis,
-                icon: comparing
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.compare_arrows_rounded),
-                label: Text(comparing ? 'Comparing…' : 'Compare AIs'),
+            if (!widget.offlineQwen)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: comparing || state.busy || speaking
+                      ? null
+                      : compareAis,
+                  icon: comparing
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.compare_arrows_rounded),
+                  label: Text(comparing ? 'Comparing…' : 'Compare AIs'),
+                ),
               ),
-            ),
           ],
         ),
       );

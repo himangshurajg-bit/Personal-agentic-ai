@@ -85,6 +85,18 @@ void main() {
           expect(find.text('Synthetic navigation memory'), findsOneWidget);
         }
       }
+
+      await tester.tap(find.byTooltip('Open navigation menu'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Offline Qwen chat').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Offline Qwen'), findsOneWidget);
+      expect(
+        find.textContaining('Separate local-only Qwen conversation'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull, reason: 'Entering Offline Qwen');
+
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();
       state.dispose();

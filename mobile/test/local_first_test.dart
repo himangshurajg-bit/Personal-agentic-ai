@@ -230,7 +230,7 @@ void main() {
         await s.send('Explain Newton’s second law with a worked example.');
         expect(
           s.error,
-          contains('Experimental Gemma chat is off'),
+          contains('Experimental local chat is off'),
           reason:
               'locale $locale remains behind the offline qualification gate',
         );
@@ -301,6 +301,76 @@ void main() {
       restored.dispose();
     },
   );
+
+  test('Offline Qwen keeps a separate resumable chat and blocks unqualified inference', () async {
+    final nativeCalls = <MethodCall>[];
+    var networkCalls = 0;
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(AssistantState.offlineModel, null),
+    );
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(AssistantState.offlineModel, (call) async {
+          nativeCalls.add(call);
+          if (call.method == 'run_chat') return 'Local Qwen answer.';
+          return true;
+        });
+    final state = AssistantState(
+      clientFactory: () => MockClient((_) async {
+        networkCalls++;
+        return http.Response('{}', 200);
+      }),
+    );
+    await state.initialize();
+    await state.local.writeChat('personal', [
+      {'role': 'user', 'text': 'online history stays separate'},
+    ]);
+    await state.local.writeChat('offline_qwen', [
+      {'role': 'user', 'text': 'previous local conversation'},
+    ]);
+    await state.setOfflineQwenConversation('offline_qwen');
+    expect(state.messages.single['text'], 'previous local conversation');
+
+    await state.saveExperimentalOfflineChat(true);
+    await state.send(
+      'Do not run until qualified.',
+      engineOverride: 'offline',
+      conversationId: 'offline_qwen',
+      requireQualifiedOfflineModel: true,
+      offlineModelQualified: false,
+    );
+    expect(nativeCalls.where((call) => call.method == 'run_chat'), isEmpty);
+    expect(networkCalls, 0);
+    expect(state.error, contains('not qualified'));
+
+    await state.send(
+      'Run only the local model.',
+      engineOverride: 'offline',
+      conversationId: 'offline_qwen',
+      requireQualifiedOfflineModel: true,
+      offlineModelQualified: true,
+    );
+    expect(
+      nativeCalls.where((call) => call.method == 'run_chat'),
+      hasLength(1),
+    );
+    expect(networkCalls, 0);
+    expect(state.local.chat('offline_qwen').last['text'], 'Local Qwen answer.');
+    expect(state.local.chat('personal'), [
+      {'role': 'user', 'text': 'online history stays separate'},
+    ]);
+
+    await state.setOfflineQwenConversation('offline_qwen_resume-1');
+    final restored = AssistantState();
+    await restored.initialize();
+    expect(restored.offlineQwenConversation, 'offline_qwen_resume-1');
+    await restored.loadHistory(
+      conversationId: restored.offlineQwenConversation,
+    );
+    expect(restored.messages, isEmpty);
+    state.dispose();
+    restored.dispose();
+  });
 
   test(
     'native offline inference failure stays local and never falls back online',

@@ -157,6 +157,7 @@ class AssistantState extends ChangeNotifier {
   }
 
   String conversation = 'personal';
+  String offlineQwenConversation = 'offline_qwen';
   String theme = 'system', visualTheme = 'aurora';
   String error = '', partial = '', lastPrompt = '', note = '';
   bool shareMemories = false, shareHistory = false;
@@ -271,6 +272,15 @@ class AssistantState extends ChangeNotifier {
           ? savedVisualTheme!
           : 'aurora';
       conversation = await storage.read(key: 'conversation') ?? 'personal';
+      final savedOfflineQwenConversation = await storage.read(
+        key: 'offline_qwen_conversation',
+      );
+      offlineQwenConversation =
+          savedOfflineQwenConversation != null &&
+              RegExp(r'^offline_qwen(?:_[a-zA-Z0-9-]{1,60})?$')
+                  .hasMatch(savedOfflineQwenConversation)
+          ? savedOfflineQwenConversation
+          : 'offline_qwen';
       onboarded = await storage.read(key: 'onboarded') == 'yes';
       note = await storage.read(key: 'note') ?? '';
     } catch (_) {
@@ -975,8 +985,20 @@ class AssistantState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> persistChat() async {
-    await local.writeChat(conversation, messages);
+  Future<void> setOfflineQwenConversation(String id) async {
+    if (!RegExp(r'^offline_qwen(?:_[a-zA-Z0-9-]{1,60})?$').hasMatch(id)) {
+      throw ServiceException('Invalid Offline Qwen conversation identifier.');
+    }
+    await storage.write(key: 'offline_qwen_conversation', value: id);
+    offlineQwenConversation = id;
+    messages = local.chat(id);
+    lastPrompt = '';
+    error = '';
+    notifyListeners();
+  }
+
+  Future<void> persistChat({String? conversationId}) async {
+    await local.writeChat(conversationId ?? conversation, messages);
   }
 
   Future<List<Map<String, dynamic>>> conversations([String query = '']) async =>
@@ -1412,8 +1434,8 @@ class AssistantState extends ChangeNotifier {
     if (load) await loadHistory();
   }
 
-  Future<void> loadHistory() async {
-    messages = local.chat(conversation);
+  Future<void> loadHistory({String? conversationId}) async {
+    messages = local.chat(conversationId ?? conversation);
     error = '';
     notifyListeners();
   }
@@ -1424,16 +1446,29 @@ class AssistantState extends ChangeNotifier {
     bool shareMemories = false,
     bool shareHistory = false,
     bool retryLastMessage = false,
+    String? engineOverride,
+    String? conversationId,
+    bool requireQualifiedOfflineModel = false,
+    bool offlineModelQualified = false,
   }) async {
     if (busy || text.trim().isEmpty) {
       return;
     }
-    if (engine == 'offline' && !experimentalOfflineChatEnabled) {
-      error = 'Experimental Gemma chat is off. Turn it on in Settings > AI & Voice after reviewing the warning. No online fallback was used.';
+    final selectedEngine = engineOverride ?? engine;
+    final chatScope = conversationId ?? conversation;
+    if (selectedEngine == 'offline' && !experimentalOfflineChatEnabled) {
+      error = 'Experimental local chat is off. Review the offline-model warning and opt in in Settings before chatting. No online fallback was used.';
       notifyListeners();
       return;
     }
-    if (engine != 'offline' && !approvedOnline) {
+    if (selectedEngine == 'offline' &&
+        requireQualifiedOfflineModel &&
+        !offlineModelQualified) {
+      error = 'Offline Qwen chat is not qualified for this device yet. The local candidate remains in screening; no message was sent and no online fallback was used.';
+      notifyListeners();
+      return;
+    }
+    if (selectedEngine != 'offline' && !approvedOnline) {
       error = 'Review and approve the online payload before sending.';
       notifyListeners();
       return;
@@ -1445,8 +1480,9 @@ class AssistantState extends ChangeNotifier {
       return;
     }
     error = '';
-    final selectedEngine = engine;
-    final selectedConfig = selectedEngine == 'offline' ? null : config;
+    final selectedConfig = selectedEngine == 'offline'
+        ? null
+        : (selectedEngine == engine ? config : null);
     final selectedModel = selectedConfig?.model ?? model;
     final prior = messages
         .where((m) => m['state'] == 'complete')
@@ -1470,7 +1506,7 @@ class AssistantState extends ChangeNotifier {
     _stream = client;
     try {
       final facts = shareMemories
-          ? local.relevant(lastPrompt, conversation)
+          ? local.relevant(lastPrompt, chatScope)
           : <Map<String, dynamic>>[];
       final prompt = jsonEncode({
         'assistant_display_name_data': assistantName,
@@ -1481,7 +1517,7 @@ class AssistantState extends ChangeNotifier {
         if (shareHistory) 'quoted_history': prior,
         'user_message': lastPrompt,
       });
-      await persistChat();
+      await persistChat(conversationId: chatScope);
       if (generation != _generation) return;
       if (selectedEngine == 'offline') {
         _localInferenceActive = true;
@@ -1504,7 +1540,7 @@ class AssistantState extends ChangeNotifier {
           partial = '';
         }
       } else {
-        final req = selectedConfig!.request(conversation, prompt);
+        final req = selectedConfig!.request(chatScope, prompt);
         final res = await client!
             .send(req)
             .timeout(const Duration(seconds: 10));
@@ -1568,7 +1604,7 @@ class AssistantState extends ChangeNotifier {
       }
     } on PlatformException catch (e) {
       if (generation == _generation) {
-        final message = e.message ?? 'Local Gemma could not answer.';
+        final message = e.message ?? 'The local model could not answer.';
         error =
             selectedEngine == 'offline' &&
                 !message.toLowerCase().contains('fallback')
@@ -1578,7 +1614,7 @@ class AssistantState extends ChangeNotifier {
     } catch (e) {
       if (generation == _generation) {
         error = selectedEngine == 'offline'
-            ? 'Local Gemma failed: $e. No online fallback was used.'
+            ? 'Local model failed: $e. No online fallback was used.'
             : e is TimeoutException
             ? 'The reply timed out. Check the connection and retry explicitly.'
             : e is http.ClientException
@@ -1599,7 +1635,7 @@ class AssistantState extends ChangeNotifier {
       _localInferenceActive = false;
       if (generation == _generation) {
         try {
-          await persistChat();
+          await persistChat(conversationId: chatScope);
         } catch (_) {
           error = 'Reply could not be saved locally. Export or copy important text before leaving.';
         }
