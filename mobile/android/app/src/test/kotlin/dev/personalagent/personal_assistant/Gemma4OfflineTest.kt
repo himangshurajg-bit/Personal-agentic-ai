@@ -63,6 +63,10 @@ class Gemma4OfflineTest {
         val reserve = Gemma4Artifact.SAFETY_RESERVE_BYTES
         assertTrue(Gemma4TransferPolicy.hasEnoughSpace(reserve + 88L, 12L, 100L))
         assertFalse(Gemma4TransferPolicy.hasEnoughSpace(reserve + 87L, 12L, 100L))
+        assertFalse(Gemma4TransferPolicy.hasEnoughSpace(reserve + 99L, 101L, 100L))
+        assertTrue(Gemma4TransferPolicy.hasEnoughSpace(reserve + 100L, 101L, 100L))
+        assertFalse(Gemma4TransferPolicy.hasEnoughSpace(reserve + 99L, -1L, 100L))
+        assertTrue(Gemma4TransferPolicy.hasEnoughSpace(reserve + 100L, -1L, 100L))
     }
 
     @Test
