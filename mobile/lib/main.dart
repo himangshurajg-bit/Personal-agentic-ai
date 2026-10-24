@@ -4,6 +4,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+
 import 'package:record/record.dart';
 import 'package:flutter/services.dart';
 
@@ -21,6 +22,29 @@ import 'visual_theme.dart';
 import 'voice_services.dart';
 
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+
+const MethodChannel _assistantAudioChannel = MethodChannel(
+  'personal_assistant/audio',
+);
+final ValueNotifier<bool> _assistantAudioPlaying = ValueNotifier(false);
+
+Future<void> _playAssistantAudio(Object bytes) async {
+  _assistantAudioPlaying.value = true;
+  try {
+    await _assistantAudioChannel.invokeMethod('play_audio', {'bytes': bytes});
+  } catch (_) {
+    _assistantAudioPlaying.value = false;
+    rethrow;
+  }
+}
+
+Future<void> _stopAssistantAudio() async {
+  try {
+    await _assistantAudioChannel.invokeMethod('stop_audio');
+  } finally {
+    _assistantAudioPlaying.value = false;
+  }
+}
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -43,11 +67,19 @@ class _AssistantAppState extends State<AssistantApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _assistantAudioChannel.setMethodCallHandler((call) async {
+      if (call.method != 'audio_event') return;
+      final event = Map<String, dynamic>.from(call.arguments);
+      if (event['kind'] == 'completed' || event['kind'] == 'error') {
+        _assistantAudioPlaying.value = false;
+      }
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _assistantAudioChannel.setMethodCallHandler(null);
     super.dispose();
   }
 
@@ -231,6 +263,8 @@ class Shell extends StatelessWidget {
   final Widget child;
   final List<Widget>? actions;
   final bool primaryNavigation;
+  final bool showBottomNavigation;
+  final double contentMaxWidth;
   const Shell({
     super.key,
     required this.title,
@@ -238,6 +272,8 @@ class Shell extends StatelessWidget {
     this.assistantName,
     this.actions,
     this.primaryNavigation = true,
+    this.showBottomNavigation = true,
+    this.contentMaxWidth = 700,
   });
 
   @override
@@ -256,7 +292,7 @@ class Shell extends StatelessWidget {
             )
           : null,
       drawerScrimColor: theme.colorScheme.scrim.withValues(alpha: .34),
-      bottomNavigationBar: primaryNavigation
+      bottomNavigationBar: primaryNavigation && showBottomNavigation
           ? _AssistantDock(currentRoute: currentRoute)
           : null,
       appBar: AppBar(
@@ -312,7 +348,7 @@ class Shell extends StatelessWidget {
             child: Align(
               alignment: Alignment.topCenter,
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 700),
+                constraints: BoxConstraints(maxWidth: contentMaxWidth),
                 child: child,
               ),
             ),
@@ -2360,8 +2396,13 @@ class _AppPickerSheetState extends State<AppPickerSheet> {
 
 class VoiceTranscriptReviewDialog extends StatefulWidget {
   final String transcript;
+  final bool sendMessage;
 
-  const VoiceTranscriptReviewDialog({super.key, required this.transcript});
+  const VoiceTranscriptReviewDialog({
+    super.key,
+    required this.transcript,
+    this.sendMessage = false,
+  });
 
   @override
   State<VoiceTranscriptReviewDialog> createState() =>
@@ -2392,8 +2433,10 @@ class _VoiceTranscriptReviewDialogState
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Correct anything recognition got wrong. Using this transcript only places it in the message box; it does not send or execute anything.',
+        Text(
+          widget.sendMessage
+              ? 'Correct anything recognition got wrong. Tapping Send submits this message; device actions still need their normal approval.'
+              : 'Correct anything recognition got wrong. Using this transcript only places it in the message box; it does not send or execute anything.',
         ),
         const SizedBox(height: 12),
         TextField(
@@ -2417,7 +2460,7 @@ class _VoiceTranscriptReviewDialogState
         onPressed: _controller.text.trim().isEmpty
             ? null
             : () => Navigator.pop(context, _controller.text),
-        child: const Text('Use transcript'),
+        child: Text(widget.sendMessage ? 'Send message' : 'Use transcript'),
       ),
     ],
   );
@@ -2439,8 +2482,52 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final input = TextEditingController();
+  final ScrollController _chatScrollController = ScrollController();
+  int _lastObservedMessageCount = -1;
+  String? _lastObservedConversation;
+  String _lastObservedPartial = '';
+
+  void _chatStateChanged() {
+    final state = widget.state;
+    final count = state.messages.length;
+    final conversation = state.conversation;
+    final partial = state.partial;
+    if (count == _lastObservedMessageCount &&
+        conversation == _lastObservedConversation &&
+        partial == _lastObservedPartial) {
+      return;
+    }
+    _lastObservedMessageCount = count;
+    _lastObservedConversation = conversation;
+    _lastObservedPartial = partial;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scrollToLatest();
+    });
+  }
+
+  void _audioPlaybackChanged() {
+    if (!mounted) return;
+    final isPlaying = _assistantAudioPlaying.value;
+    if (speaking != isPlaying) setState(() => speaking = isPlaying);
+  }
+
+  void _scrollToLatest({bool jump = false}) {
+    if (!_chatScrollController.hasClients) return;
+    final position = _chatScrollController.position;
+    if (!position.hasContentDimensions) return;
+    final target = position.maxScrollExtent;
+    if (jump) {
+      _chatScrollController.jumpTo(target);
+    } else {
+      _chatScrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
   static const voiceEvents = MethodChannel('personal_assistant/voice');
-  static const audioEvents = MethodChannel('personal_assistant/audio');
   late final AzureSpeechSynthesizer _azureSpeech = AzureSpeechSynthesizer(
     clientFactory: widget.state.clientFactory,
   );
@@ -2452,10 +2539,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Timer? _deepgramLimit;
   int _deepgramBytes = 0;
   bool _deepgramLimitHit = false;
-  bool listening = false, speaking = false, comparing = false;
+  bool listening = false, speaking = false;
   bool _draftApplied = false;
   bool _reviewingTranscript = false;
   bool _speakNextReply = false;
+  bool _handsFreeSessionActive = false;
+  bool _handsFreeOnlineApproved = false;
   bool _initialVoiceStarted = false;
   double level = 0;
 
@@ -2478,6 +2567,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _lastObservedMessageCount = widget.state.messages.length;
+    _lastObservedConversation = widget.state.conversation;
+    _lastObservedPartial = widget.state.partial;
+    widget.state.addListener(_chatStateChanged);
+    _assistantAudioPlaying.addListener(_audioPlaybackChanged);
     tts.setStartHandler(() {
       if (mounted) setState(() => speaking = true);
     });
@@ -2490,8 +2584,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     tts.setErrorHandler((_) {
       if (mounted) setState(() => speaking = false);
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) widget.state.loadHistory();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await widget.state.loadHistory();
+      if (!mounted) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _scrollToLatest(jump: true);
+      });
     });
     voiceEvents.setMethodCallHandler((call) async {
       if (!mounted || call.method != 'voice_event') return;
@@ -2511,23 +2610,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         final transcript = (event['value'] as String? ?? '').trim();
         if (transcript.isEmpty) {
           notice(context, 'No speech was recognized. Your draft is unchanged.');
+          if (_handsFreeSessionActive) unawaited(_endHandsFreeSession());
         } else {
           unawaited(_reviewVoiceTranscript(transcript));
         }
       }
-      if (kind == 'error') notice(context, event['value'].toString());
-    });
-    audioEvents.setMethodCallHandler((call) async {
-      if (!mounted || call.method != 'audio_event') return;
-      final event = Map<String, dynamic>.from(call.arguments);
-      if (event['kind'] == 'completed' || event['kind'] == 'error') {
-        if (mounted) setState(() => speaking = false);
-        if (event['kind'] == 'error' && mounted) {
-          notice(
-            context,
-            'Expressive voice playback stopped; the reply remains readable.',
-          );
-        }
+      if (kind == 'error') {
+        notice(context, event['value'].toString());
+        if (_handsFreeSessionActive) unawaited(_endHandsFreeSession());
       }
     });
   }
@@ -2535,6 +2625,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
+      _handsFreeSessionActive = false;
+      _handsFreeOnlineApproved = false;
       AssistantState.device.invokeMethod('voice_cancel');
       unawaited(_cancelDeepgramRecording());
       _deepgram.cancel();
@@ -2552,7 +2644,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> stopExpressiveAudio() async {
     try {
-      await audioEvents.invokeMethod('stop_audio');
+      await _stopAssistantAudio();
     } on MissingPluginException {
       // Platforms without the Android playback channel keep other chat controls usable.
     } on PlatformException {
@@ -2561,6 +2653,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> stopAll() async {
+    _handsFreeSessionActive = false;
+    _handsFreeOnlineApproved = false;
     if (listening && widget.state.speechMode == 'deepgram') {
       await _cancelDeepgramRecording();
     }
@@ -2760,44 +2854,114 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> listen() async {
+    if (_handsFreeSessionActive) {
+      await _endHandsFreeSession();
+      return;
+    }
+    if (widget.state.voiceConversationMode == 'hands_free') {
+      await _startHandsFreeSession();
+      return;
+    }
+    await _listenOnce();
+  }
+
+  Future<void> _startHandsFreeSession() async {
+    if (widget.state.speechMode == 'deepgram') {
+      notice(
+        context,
+        'Hands-free sessions work with Android speech recognition. Deepgram needs you to stop each recording manually.',
+      );
+      return;
+    }
+    if (input.text.trim().isNotEmpty) {
+      notice(
+        context,
+        'Send or clear your current draft before starting a voice session.',
+      );
+      return;
+    }
+    _handsFreeSessionActive = true;
+    _handsFreeOnlineApproved = false;
+    if (mounted) setState(() {});
+    final started = await _listenOnce(handsFreeSession: true);
+    if (!started && _handsFreeSessionActive) {
+      await _endHandsFreeSession();
+    }
+  }
+
+  Future<void> _endHandsFreeSession() async {
+    _handsFreeSessionActive = false;
+    _handsFreeOnlineApproved = false;
+    try {
+      await AssistantState.device.invokeMethod('voice_cancel');
+    } catch (_) {
+      // A missing speech plugin must not leave the session UI active.
+    }
+    try {
+      await tts.stop();
+    } catch (_) {
+      // The session can still be ended if speech playback is unavailable.
+    }
+    if (speaking) await stopExpressiveAudio();
+    if (mounted) {
+      setState(() {
+        listening = false;
+        speaking = false;
+        level = 0;
+      });
+    }
+  }
+
+  Future<bool> _listenOnce({bool handsFreeSession = false}) async {
     if (listening && widget.state.speechMode == 'deepgram') {
       await _stopDeepgramRecording();
-      return;
+      return true;
     }
     if (listening) {
       await stopAll();
-      return;
+      return false;
     }
-    await stopAll();
-    if (!mounted) return;
+    if (!handsFreeSession) await stopAll();
+    if (!mounted) return false;
     if (widget.state.speechMode == 'deepgram') {
       await _startDeepgramRecording();
-      return;
+      return false;
     }
     var approved = false;
     if (widget.state.speechMode == 'online') {
-      approved =
-          await showDialog<bool>(
-            context: context,
-            builder: (c) => AlertDialog(
-              title: const Text('Use online speech recognition?'),
-              content: Text(
-                'Your Android recognition service may send microphone audio to its provider for ${widget.state.language}. This is independent of the AI engine. No offline fallback or automatic retry.',
+      if (handsFreeSession && _handsFreeOnlineApproved) {
+        approved = true;
+      } else {
+        approved =
+            await showDialog<bool>(
+              context: context,
+              builder: (c) => AlertDialog(
+                title: const Text('Use online speech recognition?'),
+                content: Text(
+                  handsFreeSession
+                      ? 'During this hands-free session, Android recognition may send microphone audio to its provider for ${widget.state.language} on each turn, until you tap Stop or leave the app. This is independent of the AI engine. No offline fallback or automatic retry.'
+                      : 'Your Android recognition service may send microphone audio to its provider for ${widget.state.language}. This is independent of the AI engine. No offline fallback or automatic retry.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(c, false),
+                    child: const Text('Keep typing'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(c, true),
+                    child: Text(
+                      handsFreeSession
+                          ? 'Start online session'
+                          : 'Start online microphone',
+                    ),
+                  ),
+                ],
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(c, false),
-                  child: const Text('Keep typing'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(c, true),
-                  child: const Text('Start online microphone'),
-                ),
-              ],
-            ),
-          ) ??
-          false;
-      if (!approved) return;
+            ) ??
+            false;
+        if (!approved) return false;
+        if (handsFreeSession) _handsFreeOnlineApproved = true;
+      }
     }
     try {
       await AssistantState.device.invokeMethod('voice_start', {
@@ -2805,10 +2969,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         'locale': widget.state.language,
         'approved_online': approved,
       });
+      return true;
     } on PlatformException catch (e) {
       if (mounted) {
         notice(context, e.message ?? 'Speech unavailable; type instead.');
       }
+      return false;
     }
   }
 
@@ -2816,12 +2982,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (_reviewingTranscript || !mounted) return;
     _reviewingTranscript = true;
     try {
+      final inHandsFreeSession = _handsFreeSessionActive;
       final corrected = await showDialog<String>(
         context: context,
-        builder: (_) => VoiceTranscriptReviewDialog(transcript: transcript),
+        builder: (_) => VoiceTranscriptReviewDialog(
+          transcript: transcript,
+          sendMessage: inHandsFreeSession,
+        ),
       );
-      if (corrected == null || !mounted || corrected.trim().isEmpty) return;
-      final existing = input.text.trim();
+      if (corrected == null || !mounted || corrected.trim().isEmpty) {
+        if (inHandsFreeSession && _handsFreeSessionActive) {
+          await _endHandsFreeSession();
+        }
+        return;
+      }
+      final existing = inHandsFreeSession ? '' : input.text.trim();
       final reviewed = corrected.trim();
       final combined = [
         existing,
@@ -2832,15 +3007,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         selection: TextSelection.collapsed(offset: combined.length),
       );
       _speakNextReply = true;
+      if (inHandsFreeSession && _handsFreeSessionActive) {
+        await send();
+      }
     } finally {
       _reviewingTranscript = false;
     }
   }
 
-  Future<void> playReplyVoice(String text) async {
+  Future<bool> playReplyVoice(String text) async {
     if (speaking) {
       await stopAll();
-      return;
+      return false;
     }
     String? onlineFailure;
     if (widget.state.azureSpeechEnabled && widget.state.engine != 'offline') {
@@ -2860,10 +3038,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             locale: widget.state.language,
             rate: widget.state.speechRate,
           );
-          if (!mounted) return;
+          if (!mounted) return false;
           setState(() => speaking = true);
-          await audioEvents.invokeMethod('play_audio', {'bytes': audio});
-          return; // Native completion event resets speaking after the audio ends.
+          await _playAssistantAudio(audio);
+          return true; // Native completion event resets speaking after the audio ends.
         } catch (error) {
           onlineFailure = error.toString();
         }
@@ -2891,7 +3069,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       });
       await tts.setSpeechRate(widget.state.speechRate);
       await tts.awaitSpeakCompletion(true);
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() => speaking = true);
       await tts.speak(text);
       if (onlineFailure != null && mounted) {
@@ -2900,6 +3078,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           '$onlineFailure Using the installed Android voice instead.',
         );
       }
+      return true;
     } catch (_) {
       if (mounted) {
         final reason = onlineFailure == null ? '' : '$onlineFailure ';
@@ -2908,287 +3087,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           '${reason}No installed Android voice could play this reply. It remains readable; no other online provider was used.',
         );
       }
+      return false;
     } finally {
       if (mounted) setState(() => speaking = false);
-    }
-  }
-
-  Future<void> playOfflineVoice(Map<String, dynamic> message) async {
-    if (speaking) {
-      await stopAll();
-      return;
-    }
-    if (widget.state.engine != 'offline' ||
-        !isEligibleForOfflineGemmaSpeech(
-          message,
-          optedIn: widget.state.experimentalOfflineChatEnabled,
-        )) {
-      notice(
-        context,
-        'Offline playback is available only for opted-in Offline · Gemma chat.',
-      );
-      return;
-    }
-    try {
-      if (await tts.isLanguageAvailable(widget.state.language) != true) {
-        throw StateError('Selected speech language is unavailable');
-      }
-      final voices = await tts.getVoices as List;
-      final voice = selectInstalledOfflineVoice(
-        voices,
-        widget.state.language,
-        preferredName: widget.state.speechVoiceName,
-        preferredLocale: widget.state.speechVoiceLocale,
-      );
-      if (voice == null) {
-        throw StateError(
-          'No installed offline voice for the selected language',
-        );
-      }
-      await tts.setLanguage(widget.state.language);
-      await tts.setVoice({
-        'name': voice['name'].toString(),
-        'locale': voice['locale'].toString(),
-      });
-      await tts.setSpeechRate(widget.state.speechRate);
-      await tts.awaitSpeakCompletion(true);
-      await tts.speak(message['text'] as String);
-    } catch (_) {
-      if (mounted) {
-        notice(
-          context,
-          'No installed offline voice for this language, or local playback is unavailable. No network voice was used.',
-        );
-      }
-    } finally {
-      if (mounted) setState(() => speaking = false);
-    }
-  }
-
-  Future<void> playExpressiveVoice(String text) async {
-    if (speaking) {
-      await stopAll();
-      return;
-    }
-    var style = 'neutral';
-    final approved =
-        await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => StatefulBuilder(
-            builder: (dialogContext, setDialogState) => AlertDialog(
-              title: const Text('Generate expressive voice?'),
-              scrollable: true,
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'This sends the selected reply text to your private service and then to ElevenLabs. ElevenLabs retains text and generated-audio history by default. Avoid sending private text unless you accept this retention. Zero Retention is available only to some Enterprise accounts. It can use credits from the account configured on that service. Nothing is generated until you confirm here.',
-                  ),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    initialValue: style,
-                    decoration: const InputDecoration(labelText: 'Expression'),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'neutral',
-                        child: Text('Natural'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'curious',
-                        child: Text('Curious'),
-                      ),
-                      DropdownMenuItem(value: 'crying', child: Text('Crying')),
-                      DropdownMenuItem(
-                        value: 'mischievous',
-                        child: Text('Mischievous'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'whispering',
-                        child: Text('Whispering'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'shouting',
-                        child: Text('Shouting'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'laughing',
-                        child: Text('Laughing'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'sighing',
-                        child: Text('Sighing'),
-                      ),
-                    ],
-                    onChanged: (value) =>
-                        setDialogState(() => style = value ?? 'neutral'),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'These documented audio tags guide delivery; they cannot guarantee every emotion or a particular performance.',
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext, false),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(dialogContext, true),
-                  child: const Text('Generate once'),
-                ),
-              ],
-            ),
-          ),
-        ) ??
-        false;
-    if (!approved || !mounted) return;
-    setState(() => speaking = true);
-    try {
-      final audio = await widget.state.synthesizeElevenLabs(text, style);
-      await audioEvents.invokeMethod('play_audio', {'bytes': audio});
-    } catch (e) {
-      if (mounted) {
-        setState(() => speaking = false);
-        if (e is! PlatformException || e.code != 'cancelled') {
-          notice(context, e);
-        }
-      }
-    }
-  }
-
-  Future<void> compareAis() async {
-    final prompt = input.text;
-    if (prompt.trim().isEmpty) {
-      notice(context, 'Write the exact prompt you want to compare first.');
-      return;
-    }
-    final configured = widget.state.providerProfiles
-        .where((p) => p.isConfigured)
-        .toList(growable: false);
-    if (configured.length < 2) {
-      notice(
-        context,
-        'Configure at least two provider profiles in Settings > AI & Voice first.',
-      );
-      return;
-    }
-    final selectedIds = await showDialog<List<String>>(
-      context: context,
-      builder: (dialogContext) {
-        final selected = <String>{};
-        return StatefulBuilder(
-          builder: (dialogContext, setDialogState) => AlertDialog(
-            title: const Text('Review AI comparison'),
-            scrollable: true,
-            content: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Choose two or more configured providers. This is separate from normal chat, including when Offline · Gemma is selected.',
-                ),
-                const SizedBox(height: 10),
-                for (final profile in widget.state.providerProfiles)
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: selected.contains(profile.id),
-                    onChanged: profile.isConfigured
-                        ? (value) => setDialogState(() {
-                            if (value == true) {
-                              selected.add(profile.id);
-                            } else {
-                              selected.remove(profile.id);
-                            }
-                          })
-                        : null,
-                    title: Text(profile.name),
-                    subtitle: Text(
-                      profile.isConfigured
-                          ? '${profile.model} · ${Uri.tryParse(profile.origin)?.host ?? 'endpoint'}'
-                          : 'Not configured',
-                    ),
-                    controlAffinity: ListTileControlAffinity.leading,
-                  ),
-                const SizedBox(height: 12),
-                const Text('Exact prompt sent to each selected provider:'),
-                const SizedBox(height: 6),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Theme.of(dialogContext)
-                        .colorScheme
-                        .surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: SelectableText(prompt),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Each selected provider receives this text directly. Their API may retain it and may charge your account. No request is sent until you tap “Send to selected AIs”. No retries or hidden fan-out.',
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: selected.length >= 2
-                    ? () => Navigator.pop(dialogContext, selected.toList())
-                    : null,
-                child: const Text('Send to selected AIs'),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-    if (selectedIds == null || !mounted) return;
-    setState(() => comparing = true);
-    try {
-      final results = await widget.state.compareProviders(
-        providerIds: selectedIds,
-        prompt: prompt,
-        approvedThisRun: true,
-      );
-      if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Comparison results'),
-          scrollable: true,
-          content: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final result in results) ...[
-                Text(
-                  result.providerName,
-                  style: Theme.of(dialogContext).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 4),
-                SelectableText(result.answer ?? result.error ?? 'No result.'),
-                const Divider(height: 24),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Done'),
-            ),
-          ],
-        ),
-      );
-    } catch (error) {
-      if (mounted) notice(context, error);
-    } finally {
-      if (mounted) setState(() => comparing = false);
     }
   }
 
@@ -3205,8 +3106,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     if (!mounted) return;
     final payload = await reviewOnline(context, widget.state, text);
-    if (!payload) return;
-    final speakThisReply = widget.state.speakReplies || _speakNextReply;
+    if (!payload) {
+      if (_handsFreeSessionActive) await _endHandsFreeSession();
+      return;
+    }
+    final speakThisReply =
+        widget.state.speakReplies || _speakNextReply || _handsFreeSessionActive;
     _speakNextReply = false;
     input.clear();
     await widget.state.send(
@@ -3222,16 +3127,32 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         mounted) {
       final last = widget.state.messages.last;
       if (last['role'] == 'assistant' && last['state'] == 'complete') {
-        await playReplyVoice(last['text'] as String);
+        final played = await playReplyVoice(last['text'] as String);
+        if (_handsFreeSessionActive) {
+          if (played) {
+            final started = await _listenOnce(handsFreeSession: true);
+            if (!started && _handsFreeSessionActive) {
+              await _endHandsFreeSession();
+            }
+          } else {
+            await _endHandsFreeSession();
+          }
+        }
+      } else if (_handsFreeSessionActive) {
+        await _endHandsFreeSession();
       }
+    } else if (_handsFreeSessionActive) {
+      await _endHandsFreeSession();
     }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.state.removeListener(_chatStateChanged);
+    _assistantAudioPlaying.removeListener(_audioPlaybackChanged);
+    _chatScrollController.dispose();
     voiceEvents.setMethodCallHandler(null);
-    audioEvents.setMethodCallHandler(null);
     if (speaking) unawaited(stopExpressiveAudio());
     _deepgramLimit?.cancel();
     unawaited(_deepgramSubscription?.cancel());
@@ -3252,135 +3173,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return Shell(
         title: state.assistantName,
         assistantName: state.assistantName,
-        actions: [
-          IconButton(
-            tooltip: 'Read replies with an installed on-device voice',
-            onPressed: () async {
-              try {
-                await state.saveSpeakReplies(!state.speakReplies);
-              } catch (e) {
-                if (context.mounted) notice(context, e);
-              }
-            },
-            icon: Icon(state.speakReplies ? Icons.volume_up : Icons.volume_off),
-          ),
-          IconButton(
-            tooltip: 'Conversation history',
-            onPressed: state.busy
-                ? null
-                : () async {
-                    try {
-                      final rows = await state.conversations();
-                      if (!context.mounted) return;
-                      final selected = await showDialog<String>(
-                        context: context,
-                        builder: (c) => SimpleDialog(
-                          title: const Text('Conversation history'),
-                          children: rows.isEmpty
-                              ? [
-                                  const Padding(
-                                    padding: EdgeInsets.all(24),
-                                    child: Text('No saved conversations yet.'),
-                                  ),
-                                ]
-                              : rows
-                                    .map(
-                                      (r) => SimpleDialogOption(
-                                        onPressed: () => Navigator.pop(
-                                          c,
-                                          r['conversation'] as String,
-                                        ),
-                                        child: Text(
-                                          (r['title'] as String? ??
-                                              'Conversation'),
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    )
-                                    .toList(),
-                        ),
-                      );
-                      if (selected != null) {
-                        await AssistantState.device.invokeMethod(
-                          'voice_cancel',
-                        );
-                        await tts.stop();
-                        if (mounted) {
-                          setState(() {
-                            listening = false;
-                            speaking = false;
-                          });
-                        }
-                        await state.selectConversation(selected);
-                      }
-                    } catch (e) {
-                      if (context.mounted) notice(context, e);
-                    }
-                  },
-            icon: const Icon(Icons.history),
-          ),
-          IconButton(
-            tooltip: 'New conversation',
-            onPressed: state.busy
-                ? null
-                : () async {
-                    try {
-                      await AssistantState.device.invokeMethod('voice_cancel');
-                      await tts.stop();
-                      if (mounted) {
-                        setState(() {
-                          listening = false;
-                          speaking = false;
-                        });
-                      }
-                      await state.selectConversation(
-                        'chat_${DateTime.now().microsecondsSinceEpoch}',
-                        load: false,
-                      );
-                    } catch (e) {
-                      if (context.mounted) notice(context, e);
-                    }
-                  },
-            icon: const Icon(Icons.add_comment_outlined),
-          ),
-        ],
+        contentMaxWidth: 1280,
+        showBottomNavigation: false,
         child: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-              child: Glass(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                bottomSpacing: 2,
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.shield_outlined,
-                      size: 18,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        '${state.config.description} · ${state.language} · ${state.specialist}. No automatic online fallback. Memory scope: ${state.conversation}',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          height: 1.3,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
             Expanded(
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+                controller: _chatScrollController,
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
                 children: [
                   if (state.messages.isEmpty)
                     Glass(
@@ -3416,12 +3216,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             ? Alignment.centerRight
                             : Alignment.centerLeft,
                         child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 560),
+                          constraints: const BoxConstraints(maxWidth: 1180),
                           child: Glass(
                             tintColor: m['role'] == 'user'
                                 ? Theme.of(context).colorScheme.primary
                                 : null,
-                            padding: const EdgeInsets.all(16),
+                            padding: const EdgeInsets.all(12),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -3443,49 +3243,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                     'Links are not opened automatically. Review and copy the destination if needed.',
                                   ),
                                 ),
-                                if (m['state'] == 'complete' &&
-                                    m['role'] == 'assistant' &&
-                                    state.engine == 'offline' &&
-                                    isEligibleForOfflineGemmaSpeech(
-                                      m,
-                                      optedIn:
-                                          state.experimentalOfflineChatEnabled,
-                                    ))
-                                  TextButton.icon(
-                                    onPressed: () => playOfflineVoice(m),
-                                    icon: Icon(
-                                      speaking
-                                          ? Icons.stop_circle_outlined
-                                          : Icons.record_voice_over,
-                                    ),
-                                    label: Text(
-                                      speaking
-                                          ? 'Stop voice'
-                                          : 'Play installed offline voice',
-                                    ),
-                                  )
-                                else if (m['state'] == 'complete' &&
-                                    m['role'] == 'assistant' &&
-                                    state.engine != 'offline')
-                                  TextButton.icon(
-                                    onPressed: () => state.azureSpeechEnabled
-                                        ? playReplyVoice(m['text'] as String)
-                                        : playExpressiveVoice(
-                                            m['text'] as String,
-                                          ),
-                                    icon: Icon(
-                                      speaking
-                                          ? Icons.stop_circle_outlined
-                                          : Icons.record_voice_over,
-                                    ),
-                                    label: Text(
-                                      speaking
-                                          ? 'Stop voice'
-                                          : state.azureSpeechEnabled
-                                          ? 'Play Azure online voice'
-                                          : 'Generate online ElevenLabs voice',
-                                    ),
-                                  ),
                                 if (m['state'] != 'complete')
                                   const Text(
                                     'Interrupted • not a completed reply',
@@ -3528,7 +3285,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ],
               ),
             ),
-            if (listening || state.busy || speaking)
+            if (listening || state.busy || speaking || _handsFreeSessionActive)
               Padding(
                 padding: const EdgeInsets.only(top: 2, bottom: 2),
                 child: Column(
@@ -3547,6 +3304,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     Text(
                       listening
                           ? 'Listening'
+                          : _handsFreeSessionActive && !state.busy && !speaking
+                          ? 'Hands-free session · review each transcript'
                           : state.busy
                           ? 'Thinking'
                           : 'Speaking',
@@ -3604,19 +3363,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   : const SizedBox(key: ValueKey('not-listening')),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
               child: Glass(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                 bottomSpacing: 0,
                 borderRadius: BorderRadius.circular(28),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     ActivityHalo(
-                      active: listening,
+                      active: listening || _handsFreeSessionActive,
                       color: Theme.of(context).colorScheme.primary,
                       child: IconButton.filledTonal(
-                        tooltip: listening
+                        tooltip: _handsFreeSessionActive
+                            ? 'End hands-free session'
+                            : widget.state.voiceConversationMode == 'hands_free'
+                            ? 'Start hands-free session'
+                            : listening
                             ? 'Stop microphone'
                             : 'Use microphone',
                         onPressed: listen,
@@ -3636,10 +3399,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 ),
                               ),
                           child: Icon(
-                            listening
+                            _handsFreeSessionActive
+                                ? Icons.stop_circle_rounded
+                                : listening
                                 ? Icons.mic_rounded
                                 : Icons.mic_none_rounded,
-                            key: ValueKey(listening),
+                            key: ValueKey((listening, _handsFreeSessionActive)),
                           ),
                         ),
                       ),
@@ -3656,8 +3421,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           hintText: 'Message your assistant…',
                           filled: false,
                           contentPadding: EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 14,
+                            horizontal: 8,
+                            vertical: 10,
                           ),
                           border: InputBorder.none,
                           enabledBorder: InputBorder.none,
@@ -3711,22 +3476,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     ),
                   ],
                 ),
-              ),
-            ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: comparing || state.busy || speaking
-                    ? null
-                    : compareAis,
-                icon: comparing
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.compare_arrows_rounded),
-                label: Text(comparing ? 'Comparing…' : 'Compare AIs'),
               ),
             ),
           ],
@@ -4227,7 +3976,7 @@ class _ProviderProfilesEditorState extends State<ProviderProfilesEditor> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'These profiles are used only when you explicitly start Compare AIs and approve that run. OpenAI API access is separate from a ChatGPT subscription. ElevenLabs is separate online speech, not a chat provider.',
+            'These profiles are used only when you explicitly compare providers from Settings and approve that run. OpenAI API access is separate from a ChatGPT subscription. ElevenLabs is separate online speech, not a chat provider.',
           ),
           const SizedBox(height: 12),
           for (final p in widget.state.providerProfiles) ...[
@@ -4306,6 +4055,7 @@ class _SettingsState extends State<Settings> {
   );
   final FlutterTts _voicePreview = FlutterTts();
   late String speechMode = widget.state.speechMode;
+  late String voiceConversationMode = widget.state.voiceConversationMode;
   late double speechRate = widget.state.speechRate;
   late String theme = widget.state.theme;
   late String language = widget.state.language;
@@ -4315,6 +4065,9 @@ class _SettingsState extends State<Settings> {
   List<Map<String, dynamic>> _offlineVoices = [];
   bool _loadingOfflineVoices = false;
   bool _previewingVoice = false;
+  bool _playingExpressiveVoice = false;
+  bool _comparingProviders = false;
+  final TextEditingController _comparisonPrompt = TextEditingController();
   late final TextEditingController name = TextEditingController(
     text: widget.state.assistantName,
   );
@@ -4322,11 +4075,279 @@ class _SettingsState extends State<Settings> {
   void initState() {
     super.initState();
     widget.state.addListener(_stateChanged);
+    _assistantAudioPlaying.addListener(_expressiveAudioChanged);
     _loadOfflineVoices(language);
   }
 
   void _stateChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _expressiveAudioChanged() {
+    if (mounted && _playingExpressiveVoice != _assistantAudioPlaying.value) {
+      setState(() => _playingExpressiveVoice = _assistantAudioPlaying.value);
+    }
+  }
+
+  Future<void> _openConversationHistory() async {
+    try {
+      final rows = await widget.state.conversations();
+      if (!mounted) return;
+      final selected = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => SimpleDialog(
+          title: const Text('Conversation history'),
+          children: rows.isEmpty
+              ? const [
+                  Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text('No saved conversations yet.'),
+                  ),
+                ]
+              : rows
+                    .map(
+                      (row) => SimpleDialogOption(
+                        onPressed: () => Navigator.pop(
+                          dialogContext,
+                          row['conversation'] as String,
+                        ),
+                        child: Text(
+                          row['title'] as String? ?? 'Conversation',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    )
+                    .toList(),
+        ),
+      );
+      if (selected == null || !mounted) return;
+      await widget.state.selectConversation(selected);
+      if (mounted) Navigator.pushReplacementNamed(context, '/chat');
+    } catch (error) {
+      if (mounted) notice(context, error);
+    }
+  }
+
+  Future<void> _startNewConversation() async {
+    try {
+      await widget.state.selectConversation(
+        'chat_${DateTime.now().microsecondsSinceEpoch}',
+        load: false,
+      );
+      if (mounted) Navigator.pushReplacementNamed(context, '/chat');
+    } catch (error) {
+      if (mounted) notice(context, error);
+    }
+  }
+
+  Future<void> _generateLatestExpressiveVoice() async {
+    final latest = widget.state.messages.reversed
+        .where(
+          (message) =>
+              message['role'] == 'assistant' && message['state'] == 'complete',
+        )
+        .firstOrNull;
+    final text = latest?['text'] as String?;
+    if (text == null || text.trim().isEmpty) {
+      notice(context, 'There is no completed assistant reply to play yet.');
+      return;
+    }
+    var style = 'neutral';
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Generate expressive voice?'),
+          scrollable: true,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'This sends the exact selected reply text to your private service and then to ElevenLabs. ElevenLabs retains text and generated-audio history by default; Zero Retention is available only to some Enterprise accounts. Avoid private text unless you accept this retention. It may use credits from the account configured on that service. Nothing is generated until you confirm here.',
+              ),
+              const SizedBox(height: 12),
+              const Text('Exact reply text:'),
+              const SizedBox(height: 4),
+              SelectableText(text),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: style,
+                decoration: const InputDecoration(labelText: 'Expression'),
+                items: const [
+                  DropdownMenuItem(value: 'neutral', child: Text('Natural')),
+                  DropdownMenuItem(value: 'curious', child: Text('Curious')),
+                  DropdownMenuItem(value: 'crying', child: Text('Crying')),
+                  DropdownMenuItem(
+                    value: 'mischievous',
+                    child: Text('Mischievous'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'whispering',
+                    child: Text('Whispering'),
+                  ),
+                  DropdownMenuItem(value: 'shouting', child: Text('Shouting')),
+                  DropdownMenuItem(value: 'laughing', child: Text('Laughing')),
+                  DropdownMenuItem(value: 'sighing', child: Text('Sighing')),
+                ],
+                onChanged: (value) =>
+                    setDialogState(() => style = value ?? 'neutral'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Generate once'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (approved != true || !mounted) return;
+    setState(() => _playingExpressiveVoice = true);
+    try {
+      final audio = await widget.state.synthesizeElevenLabs(text, style);
+      if (!mounted) return;
+      await _playAssistantAudio(audio);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _playingExpressiveVoice = false);
+        if (error is! PlatformException || error.code != 'cancelled') {
+          notice(context, error);
+        }
+      }
+    }
+  }
+
+  Future<void> _compareAisFromSettings() async {
+    if (_comparingProviders) return;
+    final configured = widget.state.providerProfiles
+        .where((profile) => profile.isConfigured)
+        .toList();
+    if (configured.length < 2) {
+      notice(
+        context,
+        'Configure at least two provider profiles in Settings > API & MCP connections first.',
+      );
+      return;
+    }
+    _comparisonPrompt.clear();
+    final ids = <String>{};
+    final selectedIds = await showDialog<List<String>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Review AI comparison'),
+          scrollable: true,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Choose two or more configured providers and enter the exact prompt. Each selected provider receives it directly.',
+              ),
+              const SizedBox(height: 10),
+              for (final profile in widget.state.providerProfiles)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: ids.contains(profile.id),
+                  onChanged: profile.isConfigured
+                      ? (value) => setDialogState(() {
+                          if (value == true) {
+                            ids.add(profile.id);
+                          } else {
+                            ids.remove(profile.id);
+                          }
+                        })
+                      : null,
+                  title: Text(profile.name),
+                  subtitle: Text(
+                    profile.isConfigured
+                        ? '${profile.model} · ${Uri.tryParse(profile.origin)?.host ?? 'endpoint'}'
+                        : 'Not configured',
+                  ),
+                  controlAffinity: ListTileControlAffinity.leading,
+                ),
+              TextField(
+                controller: _comparisonPrompt,
+                onChanged: (_) => setDialogState(() {}),
+                minLines: 2,
+                maxLines: 5,
+                maxLength: 8000,
+                decoration: const InputDecoration(
+                  labelText: 'Exact prompt to send',
+                ),
+              ),
+              const Text(
+                'Provider APIs may retain this prompt and charge your account. Nothing is sent until you choose Send to selected AIs; no retries or hidden fallback.',
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed:
+                  ids.length >= 2 && _comparisonPrompt.text.trim().isNotEmpty
+                  ? () => Navigator.pop(dialogContext, ids.toList())
+                  : null,
+              child: const Text('Send to selected AIs'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (selectedIds == null || !mounted) return;
+    final prompt = _comparisonPrompt.text;
+    setState(() => _comparingProviders = true);
+    try {
+      final results = await widget.state.compareProviders(
+        providerIds: selectedIds,
+        prompt: prompt,
+        approvedThisRun: true,
+      );
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Comparison results'),
+          scrollable: true,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final result in results) ...[
+                Text(
+                  result.providerName,
+                  style: Theme.of(dialogContext).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 4),
+                SelectableText(result.answer ?? result.error ?? 'No result.'),
+                const Divider(height: 24),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) notice(context, error);
+    } finally {
+      if (mounted) setState(() => _comparingProviders = false);
+    }
   }
 
   Future<void> _loadOfflineVoices(String locale) async {
@@ -4410,12 +4431,26 @@ class _SettingsState extends State<Settings> {
   @override
   void dispose() {
     widget.state.removeListener(_stateChanged);
+    _assistantAudioPlaying.removeListener(_expressiveAudioChanged);
+    if (_playingExpressiveVoice) unawaited(_stopAssistantAudio());
     unawaited(_voicePreview.stop().catchError((Object _) {}));
     deepgramSecret.dispose();
     azureSpeechSecret.dispose();
     azureSpeechRegion.dispose();
     name.dispose();
+    _comparisonPrompt.dispose();
     super.dispose();
+  }
+
+  Future<void> _saveVoiceConversationMode(String mode) async {
+    try {
+      await widget.state.saveVoiceConversationMode(mode);
+      if (!mounted) return;
+      setState(() => voiceConversationMode = mode);
+    } catch (error) {
+      if (!mounted) return;
+      notice(context, error);
+    }
   }
 
   Future<void> _setExperimentalOfflineChat(bool enabled) async {
@@ -4564,6 +4599,30 @@ class _SettingsState extends State<Settings> {
                   const Text(
                     'Offline requires a verified installed language on Android 13+. Unsupported devices/languages stay unavailable. Online asks before microphone use. No silent network fallback.',
                   ),
+                  DropdownButtonFormField<String>(
+                    key: const Key('voice-conversation-mode'),
+                    initialValue: voiceConversationMode,
+                    decoration: const InputDecoration(
+                      labelText: 'Voice conversation mode',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'push_to_talk',
+                        child: Text('Push-to-talk · one turn'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'hands_free',
+                        child: Text('Hands-free · session until Stop'),
+                      ),
+                    ],
+                    onChanged: (mode) {
+                      if (mode == null) return;
+                      unawaited(_saveVoiceConversationMode(mode));
+                    },
+                  ),
+                  const Text(
+                    'Hands-free starts only when you tap the microphone, stays in the foreground, reviews each transcript before sending, speaks the reply, then listens for the next turn. Tap Stop to end. Android recognition only; Deepgram remains manual start/stop.',
+                  ),
                   if (speechMode == 'deepgram') ...[
                     const Align(
                       alignment: Alignment.centerLeft,
@@ -4619,6 +4678,41 @@ class _SettingsState extends State<Settings> {
                     subtitle: const Text(
                       'Off by default. Uses an installed Android voice unless Azure online speech is explicitly enabled; then spoken reply text is sent to Azure.',
                     ),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.record_voice_over_rounded),
+                    title: const Text('Generate online ElevenLabs voice'),
+                    subtitle: Text(
+                      widget.state.messages.any(
+                            (message) =>
+                                message['role'] == 'assistant' &&
+                                message['state'] == 'complete',
+                          )
+                          ? 'For the latest completed assistant reply; review text and retention before each one-time generation.'
+                          : 'A completed assistant reply will appear here for one-time playback.',
+                    ),
+                    trailing: IconButton(
+                      tooltip: _playingExpressiveVoice
+                          ? 'Stop voice'
+                          : 'Generate voice',
+                      onPressed: _playingExpressiveVoice
+                          ? () async {
+                              await _stopAssistantAudio();
+                              if (mounted) {
+                                setState(() => _playingExpressiveVoice = false);
+                              }
+                            }
+                          : _generateLatestExpressiveVoice,
+                      icon: Icon(
+                        _playingExpressiveVoice
+                            ? Icons.stop_circle_outlined
+                            : Icons.play_circle_outline_rounded,
+                      ),
+                    ),
+                  ),
+                  const Text(
+                    'The exact selected reply is sent to your private service and ElevenLabs. Review is required every time; ElevenLabs retains text and generated audio by default, and this can use account credits.',
                   ),
                   SwitchListTile(
                     key: const Key('azure-speech-opt-in'),
@@ -5000,6 +5094,17 @@ class _SettingsState extends State<Settings> {
             ),
             Glass(
               child: ListTile(
+                leading: const Icon(Icons.compare_arrows_rounded),
+                title: const Text('Compare AIs'),
+                subtitle: const Text(
+                  'Choose the exact prompt and configured providers in Settings; each provider request needs review.',
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: _compareAisFromSettings,
+              ),
+            ),
+            Glass(
+              child: ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.lock_person_outlined),
                 title: const Text('Approved memories'),
@@ -5085,6 +5190,48 @@ class _SettingsState extends State<Settings> {
             ),
             Glass(
               child: SwitchListTile(
+                key: const Key('online-history-sharing'),
+                contentPadding: EdgeInsets.zero,
+                value: widget.state.shareHistory,
+                onChanged: (enabled) async {
+                  try {
+                    await widget.state.saveOnlineHistorySharing(enabled);
+                  } catch (error) {
+                    if (context.mounted) notice(context, error);
+                  }
+                },
+                secondary: const _SettingsIconTile(icon: Icons.history_rounded),
+                title: const Text('Allow current-chat history in online sends'),
+                subtitle: const Text(
+                  'Off by default. When on, completed messages from this chat may be included after you approve each online send. Review shows the exact history sent.',
+                ),
+              ),
+            ),
+            Glass(
+              child: SwitchListTile(
+                key: const Key('online-memory-sharing'),
+                contentPadding: EdgeInsets.zero,
+                value: widget.state.shareMemories,
+                onChanged: (enabled) async {
+                  try {
+                    await widget.state.saveOnlineMemorySharing(enabled);
+                  } catch (error) {
+                    if (context.mounted) notice(context, error);
+                  }
+                },
+                secondary: const _SettingsIconTile(
+                  icon: Icons.bookmark_outline_rounded,
+                ),
+                title: const Text(
+                  'Allow relevant approved memories in online sends',
+                ),
+                subtitle: const Text(
+                  'Off by default. Matching approved memories may be included only after you approve each online send; unrelated facts stay on this phone.',
+                ),
+              ),
+            ),
+            Glass(
+              child: SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 value: widget.state.appLockEnabled,
                 onChanged: widget.state.appLockBusy
@@ -5128,6 +5275,24 @@ class _SettingsState extends State<Settings> {
           subtitle: 'Export local data or delete the current chat',
           icon: Icons.storage_outlined,
           children: [
+            Glass(
+              child: ListTile(
+                leading: const Icon(Icons.history_rounded),
+                title: const Text('Conversation history'),
+                subtitle: const Text('Open a saved on-phone conversation.'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: _openConversationHistory,
+              ),
+            ),
+            Glass(
+              child: ListTile(
+                leading: const Icon(Icons.add_comment_outlined),
+                title: const Text('New conversation'),
+                subtitle: const Text('Start a fresh on-phone chat.'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: _startNewConversation,
+              ),
+            ),
             Glass(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

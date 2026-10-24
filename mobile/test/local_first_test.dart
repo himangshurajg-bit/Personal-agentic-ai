@@ -66,6 +66,27 @@ void main() {
     },
   );
   test(
+    'voice conversation mode persists and rejects unsupported values',
+    () async {
+      final state = AssistantState();
+      await state.initialize();
+      expect(state.voiceConversationMode, 'push_to_talk');
+
+      await state.saveVoiceConversationMode('hands_free');
+      final restored = AssistantState();
+      await restored.initialize();
+      expect(restored.voiceConversationMode, 'hands_free');
+
+      await expectLater(
+        restored.saveVoiceConversationMode('always_listening'),
+        throwsA(isA<ServiceException>()),
+      );
+      final unchanged = AssistantState();
+      await unchanged.initialize();
+      expect(unchanged.voiceConversationMode, 'hands_free');
+    },
+  );
+  test(
     'on-device speech rate persists and rejects unsupported values',
     () async {
       final state = AssistantState();

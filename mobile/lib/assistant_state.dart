@@ -185,6 +185,7 @@ class AssistantState extends ChangeNotifier {
   bool shareMemories = false, shareHistory = false;
   Map<String, dynamic>? selectedFile;
   bool ready = false, onboarded = false, busy = false, speakReplies = false;
+  String voiceConversationMode = 'push_to_talk';
   bool experimentalOfflineChatEnabled = false;
   List<AIProviderProfile> providerProfiles = AIProviderProfile.defaults();
   late final ProviderCompareService providerCompare = ProviderCompareService(
@@ -225,6 +226,14 @@ class AssistantState extends ChangeNotifier {
         speechMode = 'offline';
       }
       speakReplies = await storage.read(key: 'speak_replies') == 'yes';
+      final savedVoiceConversationMode = await storage.read(
+        key: 'voice_conversation_mode',
+      );
+      voiceConversationMode = savedVoiceConversationMode == 'hands_free'
+          ? 'hands_free'
+          : 'push_to_talk';
+      shareHistory = await storage.read(key: 'online_share_history') == 'yes';
+      shareMemories = await storage.read(key: 'online_share_memories') == 'yes';
       final savedSpeechRate = double.tryParse(
         await storage.read(key: 'speech_rate') ?? '',
       );
@@ -891,6 +900,33 @@ class AssistantState extends ChangeNotifier {
   Future<void> saveSpeakReplies(bool enabled) async {
     await storage.write(key: 'speak_replies', value: enabled ? 'yes' : 'no');
     speakReplies = enabled;
+    notifyListeners();
+  }
+
+  Future<void> saveVoiceConversationMode(String mode) async {
+    if (!['push_to_talk', 'hands_free'].contains(mode)) {
+      throw ServiceException('Choose a supported voice conversation mode.');
+    }
+    await storage.write(key: 'voice_conversation_mode', value: mode);
+    voiceConversationMode = mode;
+    notifyListeners();
+  }
+
+  Future<void> saveOnlineHistorySharing(bool enabled) async {
+    await storage.write(
+      key: 'online_share_history',
+      value: enabled ? 'yes' : 'no',
+    );
+    shareHistory = enabled;
+    notifyListeners();
+  }
+
+  Future<void> saveOnlineMemorySharing(bool enabled) async {
+    await storage.write(
+      key: 'online_share_memories',
+      value: enabled ? 'yes' : 'no',
+    );
+    shareMemories = enabled;
     notifyListeners();
   }
 
@@ -1577,7 +1613,12 @@ class AssistantState extends ChangeNotifier {
     final selectedConfig = selectedEngine == 'offline' ? null : config;
     final selectedModel = selectedConfig?.model ?? model;
     final prior = messages
-        .where((m) => m['state'] == 'complete')
+        .where(
+          (m) =>
+              m['state'] == 'complete' &&
+              const {'user', 'assistant'}.contains(m['role']) &&
+              m['text'] is String,
+        )
         .map((m) => {'role': m['role'], 'text': m['text']})
         .toList();
     if (retryLastMessage) {

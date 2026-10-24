@@ -47,6 +47,43 @@ void main() {
     },
   );
 
+  testWidgets('hands-free transcript requires an explicit send action', (
+    tester,
+  ) async {
+    String? result;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                result = await showDialog<String>(
+                  context: context,
+                  builder: (_) => const VoiceTranscriptReviewDialog(
+                    transcript: 'What is the speed of light?',
+                    sendMessage: true,
+                  ),
+                );
+              },
+              child: const Text('Open session review'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open session review'));
+    await tester.pumpAndSettle();
+    expect(find.text('Send message'), findsOneWidget);
+    expect(
+      find.textContaining('device actions still need their normal approval'),
+      findsOneWidget,
+    );
+    expect(result, isNull);
+    await tester.tap(find.text('Send message'));
+    await tester.pumpAndSettle();
+    expect(result, 'What is the speed of light?');
+  });
+
   testWidgets('canceling transcript review discards recognition', (
     tester,
   ) async {

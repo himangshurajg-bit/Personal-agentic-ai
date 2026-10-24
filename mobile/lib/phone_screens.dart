@@ -18,78 +18,84 @@ import 'google_sheets.dart';
 import 'ui_motion.dart';
 import 'main.dart' show Shell, Glass, notice, Home;
 
-/// Exact per-send disclosure. Unselected memories, notes and past chats stay local.
+/// Exact per-send disclosure, with sharing choices managed in Settings.
 Future<bool> reviewOnline(
   BuildContext context,
   AssistantState state,
   String text,
 ) async {
   if (state.engine == 'offline') return true;
-  var history = false, memory = false;
-  final relevant = state.local.relevant(text, state.conversation);
+  final reviewHistory = state.messages
+      .where(
+        (message) =>
+            message['state'] == 'complete' &&
+            const {'user', 'assistant'}.contains(message['role']) &&
+            message['text'] is String,
+      )
+      .map((message) => {'role': message['role'], 'text': message['text']})
+      .toList(growable: false);
+  final relevant = state.shareMemories
+      ? state.local.relevant(text, state.conversation)
+      : <Map<String, dynamic>>[];
   return await showDialog<bool>(
         context: context,
-        builder: (c) => StatefulBuilder(
-          builder: (c, set) => AlertDialog(
-            title: const Text('Review online send'),
-            content: SizedBox(
-              width: 500,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Destination: ${state.endpoint}\nModel: ${state.model.isEmpty ? 'service configured model' : state.model}\nMode: ${state.specialist} · ${state.language}',
+        builder: (c) => AlertDialog(
+          title: const Text('Review online send'),
+          content: SizedBox(
+            width: 500,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Destination: ${state.endpoint}\nModel: ${state.model.isEmpty ? 'service configured model' : state.model}\nMode: ${state.specialist} · ${state.language}',
+                  ),
+                  const SizedBox(height: 12),
+                  SelectableText(text),
+                  Text(
+                    state.engine == 'gemini'
+                        ? 'Google may retain this prompt. On Gemini’s free tier, Google says submitted content may be used to improve its products; quotas and eligibility apply. This review does not erase provider copies.'
+                        : 'The provider/service may retain this prompt and charge your account. The private FastAPI option also retains its prior server-side history. This review does not erase those copies.',
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    state.shareHistory
+                        ? 'Settings allows current-chat history to be attached to this approved online request:'
+                        : 'Current-chat history stays on this phone. You can change this in Settings > Privacy & access.',
+                  ),
+                  if (state.shareHistory)
+                    ...reviewHistory.map(
+                      (m) => Text('${m['role']}: ${m['text']}'),
                     ),
-                    const SizedBox(height: 12),
-                    SelectableText(text),
-                    Text(
-                      state.engine == 'gemini'
-                          ? 'Google may retain this prompt. On Gemini’s free tier, Google says submitted content may be used to improve its products; quotas and eligibility apply. This review does not erase provider copies.'
-                          : 'The provider/service may retain this prompt and charge your account. The private FastAPI option also retains its prior server-side history. This review does not erase those copies.',
-                    ),
-                    CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: history,
-                      title: const Text('Include this on-phone chat history'),
-                      onChanged: (v) => set(() => history = v ?? false),
-                    ),
-                    if (history)
-                      ...state.messages.map(
-                        (m) => Text('${m['role']}: ${m['text']}'),
-                      ),
-                    CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: memory,
-                      title: Text(
-                        'Include ${relevant.length} relevant approved memories',
-                      ),
-                      onChanged: (v) => set(() => memory = v ?? false),
-                    ),
-                    if (memory) ...relevant.map((m) => Text(m['fact'])),
-                    const Text(
-                      'Private notebook, unrelated memories, files and other conversations are NOT attached. Files included as prompt text above are sent only if you approve.',
-                    ),
-                  ],
-                ),
+                  const SizedBox(height: 10),
+                  Text(
+                    state.shareMemories
+                        ? relevant.isEmpty
+                              ? 'Settings allows relevant approved memories, but none match this prompt.'
+                              : 'Settings allows these relevant approved memories to be attached:'
+                        : 'Approved memories stay on this phone. You can change this in Settings > Privacy & access.',
+                  ),
+                  if (state.shareMemories)
+                    ...relevant.map((m) => Text(m['fact'] as String)),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Private notebook, unrelated memories, files and other conversations are NOT attached. Files included as prompt text above are sent only if you approve.',
+                  ),
+                ],
               ),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(c, false),
-                child: const Text('Keep local'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  state.shareHistory = history;
-                  state.shareMemories = memory;
-                  Navigator.pop(c, true);
-                },
-                child: const Text('Send this payload'),
-              ),
-            ],
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Keep local'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Send this payload'),
+            ),
+          ],
         ),
       ) ??
       false;
