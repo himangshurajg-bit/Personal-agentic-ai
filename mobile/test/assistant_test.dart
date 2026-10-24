@@ -16,6 +16,7 @@ import 'package:personal_assistant/main.dart';
 
 AssistantState stateWith(http.Client client) =>
     AssistantState(clientFactory: () => client)
+      ..chatMode = 'online'
       ..engine = 'private_service'
       ..token = 'test-only-token-not-a-live-secret';
 void main() {
@@ -209,7 +210,7 @@ void main() {
           );
         }),
       );
-      await state.send('hello', approvedOnline: true);
+      await state.send('hello');
       expect(state.messages.last['text'], 'नमस्ते world');
       expect(state.messages.last['state'], 'complete');
       expect(state.error, isEmpty);
@@ -230,7 +231,7 @@ void main() {
           );
         }),
       );
-      await state.send('hi', approvedOnline: true);
+      await state.send('hi');
       expect(calls, 1);
       expect(state.messages.last['state'], 'interrupted');
       expect(state.error, contains('before completion'));
@@ -246,7 +247,7 @@ void main() {
           return http.Response('{}', status);
         }),
       );
-      await state.send('hi', approvedOnline: true);
+      await state.send('hi');
       expect(state.messages.where((m) => m['role'] == 'assistant'), isEmpty);
       expect(state.error, AssistantState.describeStatus(status));
       expect(calls, 1);
@@ -268,7 +269,7 @@ void main() {
             ..model = 'gpt-4o-mini'
             ..openAiApiKey = 'test-only-key';
 
-      await state.send('Hello', approvedOnline: true);
+      await state.send('Hello');
 
       expect(calls, 1);
       expect(state.error, contains('OpenAI rate-limited'));
@@ -293,9 +294,10 @@ void main() {
           )
           ..engine = 'openai'
           ..model = 'gpt-4o-mini'
-          ..openAiApiKey = 'test-only-key';
+          ..openAiApiKey = 'test-only-key'
+          ..chatMode = 'online';
 
-    await state.send('Hello', approvedOnline: true);
+    await state.send('Hello');
 
     expect(state.error, contains('OpenAI rate-limited'));
     expect(state.error, matches(RegExp(r'at least \d+ seconds')));
@@ -311,7 +313,7 @@ void main() {
         ..model = 'gpt-4o-mini'
         ..openAiApiKey = 'test-only-key';
 
-      await state.send('Hello', approvedOnline: true);
+      await state.send('Hello');
 
       expect(
         state.error,
@@ -351,15 +353,11 @@ void main() {
           ..engine = 'openai'
           ..model = 'gpt-4o-mini'
           ..openAiApiKey = 'test-only-key';
+    await state.saveChatMode('online');
 
-    await state.send('Hello', approvedOnline: true, shareHistory: true);
+    await state.send('Hello', shareHistory: true);
     expect(state.messages.where((m) => m['role'] == 'user'), hasLength(1));
-    await state.send(
-      'Hello',
-      approvedOnline: true,
-      shareHistory: true,
-      retryLastMessage: true,
-    );
+    await state.send('Hello', shareHistory: true, retryLastMessage: true);
 
     expect(calls, 2);
     expect(state.messages.where((m) => m['role'] == 'user'), hasLength(1));
@@ -382,11 +380,11 @@ void main() {
           throw TimeoutException('weak network');
         }),
       );
-      await state.send('hi', approvedOnline: true);
+      await state.send('hi');
       expect(state.error, contains('timed out'));
       expect(calls, 1);
       state.token = '';
-      await state.send('again', approvedOnline: true);
+      await state.send('again');
       expect(state.error, contains('Configure this provider'));
       state.dispose();
     },

@@ -8,7 +8,6 @@ import 'package:http/testing.dart';
 import 'package:personal_assistant/assistant_state.dart';
 import 'package:personal_assistant/engines.dart';
 import 'package:personal_assistant/main.dart';
-import 'package:personal_assistant/phone_screens.dart' show reviewOnline;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -369,6 +368,8 @@ void main() {
       expect(find.text('AI engine'), findsNothing);
       expect(find.text('Custom MCP servers'), findsNothing);
 
+      await tester.ensureVisible(find.text('API & MCP connections'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('API & MCP connections'));
       await tester.pumpAndSettle();
 
@@ -564,104 +565,61 @@ void main() {
     },
   );
 
-  testWidgets(
-    'online-send review follows sharing settings without per-send options',
-    (tester) async {
-      final state = AssistantState();
-      bool? approved;
-      const history = [
-        {'role': 'user', 'text': 'What is 2 + 2?', 'state': 'complete'},
-        {'role': 'assistant', 'text': '4', 'state': 'complete'},
-        {'role': 'user', 'text': 'unfinished audio', 'state': 'interrupted'},
-      ];
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Builder(
-            builder: (context) => Scaffold(
-              body: ElevatedButton(
-                onPressed: () async {
-                  state.messages = history;
-                  approved = await reviewOnline(
-                    context,
-                    state,
-                    'Send this chat message.',
-                  );
-                },
-                child: const Text('Review summary'),
-              ),
-            ),
-          ),
-        ),
-      );
-
-      await tester.tap(find.text('Review summary'));
-      await tester.pumpAndSettle();
-      expect(find.text('Review online send'), findsOneWidget);
-      expect(find.text('user: What is 2 + 2?'), findsNothing);
-      expect(
-        find.textContaining('history stays on this phone'),
-        findsOneWidget,
-      );
-      expect(find.text('Include this on-phone chat history'), findsNothing);
-      expect(find.text('Include relevant approved memories'), findsNothing);
-      await tester.tap(find.text('Keep local'));
-      await tester.pumpAndSettle();
-      expect(approved, false);
-      expect(state.shareHistory, isFalse);
-
-      state.shareHistory = true;
-      approved = null;
-      await tester.tap(find.text('Review summary'));
-      await tester.pumpAndSettle();
-      expect(find.text('user: What is 2 + 2?'), findsOneWidget);
-      expect(find.text('assistant: 4'), findsOneWidget);
-      expect(find.text('user: unfinished audio'), findsNothing);
-      expect(find.text('Include this on-phone chat history'), findsNothing);
-      await tester.tap(find.text('Send this payload'));
-      await tester.pumpAndSettle();
-      expect(approved, true);
-      state.dispose();
-    },
-  );
-
-  testWidgets('Gemini online-send review discloses free-tier data use', (
+  testWidgets('Settings exposes and persists an explicit chat mode', (
     tester,
   ) async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(device, (call) async {
+          if (call.method == 'get_launcher_icon') return 'nexa_1';
+          if (call.method == 'device_status') {
+            return <String, dynamic>{
+              'sdk': 36,
+              'microphone_granted': false,
+              'notifications_granted': false,
+              'on_device_recognizer': false,
+              'system_recognizer': false,
+            };
+          }
+          return <String, dynamic>{};
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(device, null);
+    });
     final state = AssistantState();
-    bool? approved;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Builder(
-          builder: (context) => Scaffold(
-            body: ElevatedButton(
-              onPressed: () async {
-                approved = await reviewOnline(
-                  context,
-                  state,
-                  'A prompt that should remain local unless approved.',
-                );
-              },
-              child: const Text('Review'),
-            ),
-          ),
-        ),
-      ),
+    await state.initialize();
+    expect(state.chatMode, 'offline');
+    await tester.pumpWidget(MaterialApp(home: Settings(state: state)));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('AI, memory & models'),
+      250,
+      scrollable: find.byType(Scrollable).first,
     );
+    await tester.tap(find.text('AI, memory & models'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('chat-mode-setting')),
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(
+      find.textContaining('Online sends each chat message'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('never falls back online'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('chat-mode-setting')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Online · selected AI provider').last);
+    await tester.pumpAndSettle();
+    expect(state.chatMode, 'online');
+    expect(await state.storage.read(key: 'chat_mode'), 'online');
 
-    await tester.tap(find.text('Review'));
-    await tester.pumpAndSettle();
-    expect(find.text('Review online send'), findsOneWidget);
-    expect(
-      find.textContaining('may be used to improve its products'),
-      findsOneWidget,
-    );
-    expect(
-      find.text('A prompt that should remain local unless approved.'),
-      findsOneWidget,
-    );
-    await tester.tap(find.text('Keep local'));
-    await tester.pumpAndSettle();
-    expect(approved, false);
+    final restored = AssistantState();
+    await restored.initialize();
+    expect(restored.chatMode, 'online');
+    await tester.pumpWidget(const SizedBox.shrink());
     state.dispose();
+    restored.dispose();
   });
 }

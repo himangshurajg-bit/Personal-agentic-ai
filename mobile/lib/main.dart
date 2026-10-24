@@ -3425,22 +3425,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       setState(() => listening = false);
     }
     if (!mounted) return;
-    final payload = await reviewOnline(context, widget.state, text);
-    if (!payload) {
-      if (_handsFreeSessionActive) await _endHandsFreeSession();
-      return;
-    }
+    final priorUserMessageCount = widget.state.messages
+        .where((message) => message['role'] == 'user')
+        .length;
+    final priorPrompt = widget.state.lastPrompt;
     final speakThisReply =
         widget.state.speakReplies || _speakNextReply || _handsFreeSessionActive;
     _speakNextReply = false;
-    input.clear();
     await widget.state.send(
       text,
-      approvedOnline: true,
       shareMemories: widget.state.shareMemories,
       shareHistory: widget.state.shareHistory,
       retryLastMessage: retry != null,
     );
+    final currentUserMessageCount = widget.state.messages
+        .where((message) => message['role'] == 'user')
+        .length;
+    if (currentUserMessageCount > priorUserMessageCount ||
+        (retry != null && text.trim() == priorPrompt)) {
+      input.clear();
+    }
     if (speakThisReply &&
         widget.state.error.isEmpty &&
         widget.state.messages.isNotEmpty &&
@@ -4375,6 +4379,7 @@ class _SettingsState extends State<Settings> {
   );
   final FlutterTts _voicePreview = FlutterTts();
   late String speechMode = widget.state.speechMode;
+  late String chatMode = widget.state.chatMode;
   late String voiceConversationMode = widget.state.voiceConversationMode;
   late double speechRate = widget.state.speechRate;
   late String theme = widget.state.theme;
@@ -4828,6 +4833,15 @@ class _SettingsState extends State<Settings> {
     name.dispose();
     _comparisonPrompt.dispose();
     super.dispose();
+  }
+
+  Future<void> _saveChatMode(String mode) async {
+    try {
+      await widget.state.saveChatMode(mode);
+      if (mounted) setState(() => chatMode = mode);
+    } catch (error) {
+      if (mounted) notice(context, error);
+    }
   }
 
   Future<void> _saveVoiceConversationMode(String mode) async {
@@ -5504,6 +5518,33 @@ class _SettingsState extends State<Settings> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   DropdownButtonFormField<String>(
+                    key: const Key('chat-mode-setting'),
+                    isExpanded: true,
+                    initialValue: chatMode,
+                    decoration: const InputDecoration(
+                      labelText: 'Chat connection',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'offline',
+                        child: Text('Offline · keep chat on this phone'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'online',
+                        child: Text('Online · selected AI provider'),
+                      ),
+                    ],
+                    onChanged: (mode) {
+                      if (mode != null) unawaited(_saveChatMode(mode));
+                    },
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Online sends each chat message to the selected provider. Offline keeps messages on this phone and uses experimental Gemma only after opt-in and download/load. If the local model is unavailable, chat fails locally; it never falls back online. Current-chat history and relevant memories are sent online only when their separate Settings switches are on.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
                     key: const Key('ai-response-mode-setting'),
                     isExpanded: true,
                     initialValue: aiMode,
@@ -5634,7 +5675,7 @@ class _SettingsState extends State<Settings> {
           children: [
             const Glass(
               child: Text(
-                'Your chats, approved memories, notes, tasks and study records stay on this phone. Gemma is an experimental offline option that requires your opt-in, a manual download and load; it is not qualified for this phone. Online requests require explicit payload review. The private FastAPI adapter remains optional.',
+                'Chat mode is chosen above. Online sends each prompt to the selected provider; offline uses experimental local Gemma only after opt-in and download/load, with no online fallback. Action, purchase, permission and other safety reviews remain separate. The private FastAPI adapter remains optional.',
               ),
             ),
             Glass(
@@ -5652,7 +5693,7 @@ class _SettingsState extends State<Settings> {
                 secondary: const _SettingsIconTile(icon: Icons.history_rounded),
                 title: const Text('Allow current-chat history in online sends'),
                 subtitle: const Text(
-                  'Off by default. When on, completed messages from this chat may be included after you approve each online send. Review shows the exact history sent.',
+                  'Off by default. When on, completed messages from this chat are included in each online request without a per-message review. Turn it off to keep chat history on this phone.',
                 ),
               ),
             ),
@@ -5675,7 +5716,7 @@ class _SettingsState extends State<Settings> {
                   'Allow relevant approved memories in online sends',
                 ),
                 subtitle: const Text(
-                  'Off by default. Matching approved memories may be included only after you approve each online send; unrelated facts stay on this phone.',
+                  'Off by default. Matching approved memories are included in each online request without a per-message review. Unrelated facts stay on this phone.',
                 ),
               ),
             ),
@@ -6373,7 +6414,7 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
         ),
         const SizedBox(height: 8),
         const Text(
-          'Online requests require your review before sending. This screen never runs tools automatically.',
+          'Chat messages follow the persistent Online/Offline choice in Settings. This screen never runs tools automatically; action, purchase, permission and other safety reviews remain separate.',
         ),
         const SizedBox(height: 16),
         const SizedBox(height: 12),

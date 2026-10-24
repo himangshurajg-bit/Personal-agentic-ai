@@ -286,6 +286,41 @@ void main() {
     await s.forget(id);
     expect(s.local.relevant('blue', 'personal'), isEmpty);
   });
+  test('chat mode defaults local, persists explicit choice, and preserves legacy selection', () async {
+    final fresh = AssistantState();
+    await fresh.initialize();
+    expect(fresh.chatMode, 'offline');
+    expect(await fresh.storage.read(key: 'chat_mode'), 'offline');
+    await fresh.saveChatMode('online');
+    final restored = AssistantState();
+    await restored.initialize();
+    expect(restored.chatMode, 'online');
+    await restored.saveChatMode('offline');
+    expect(await restored.storage.read(key: 'chat_mode'), 'offline');
+    await expectLater(
+      restored.saveChatMode('automatic'),
+      throwsA(isA<ServiceException>()),
+    );
+    expect(restored.chatMode, 'offline');
+    fresh.dispose();
+    restored.dispose();
+
+    FlutterSecureStorage.setMockInitialValues({'engine': 'gemini'});
+    final legacyOnline = AssistantState();
+    await legacyOnline.initialize();
+    expect(legacyOnline.chatMode, 'online');
+    legacyOnline.dispose();
+
+    FlutterSecureStorage.setMockInitialValues({
+      'engine': 'gemini',
+      'chat_mode': 'offline',
+    });
+    final explicitOffline = AssistantState();
+    await explicitOffline.initialize();
+    expect(explicitOffline.chatMode, 'offline');
+    explicitOffline.dispose();
+  });
+
   test(
     'offline chat stays opt-in and never falls back to the network',
     () async {
@@ -302,7 +337,7 @@ void main() {
         await s.send('Explain Newton’s second law with a worked example.');
         expect(
           s.error,
-          contains('Experimental Gemma chat is off'),
+          contains('experimental Gemma chat is off'),
           reason:
               'locale $locale remains behind the offline qualification gate',
         );
@@ -314,7 +349,7 @@ void main() {
       }
       await s.saveEngine('compatible', 'test-model', 'en-IN');
       await s.send('hello');
-      expect(s.error, contains('Review and approve'));
+      expect(s.error, contains('Offline chat is selected'));
       expect(calls, 0);
       s.dispose();
     },
@@ -342,7 +377,8 @@ void main() {
         }),
       );
       await s.initialize();
-      await s.saveEngine('offline', '', 'en-IN');
+      await s.saveEngine('compatible', 'test-model', 'en-IN');
+      await s.saveChatMode('offline');
       expect(s.experimentalOfflineChatEnabled, isFalse);
       await s.saveExperimentalOfflineChat(true);
       await s.send('Explain Newton’s second law.');
@@ -401,7 +437,8 @@ void main() {
         }),
       );
       await s.initialize();
-      await s.saveEngine('offline', '', 'en-IN');
+      await s.saveEngine('compatible', 'test-model', 'en-IN');
+      await s.saveChatMode('offline');
       await s.saveExperimentalOfflineChat(true);
 
       await s.send('Do a local task.');
@@ -415,6 +452,32 @@ void main() {
       s.dispose();
     },
   );
+
+  test('online mode sends directly to selected provider without per-message review', () async {
+    var networkCalls = 0;
+    final s = AssistantState(
+      clientFactory: () => MockClient((request) async {
+        networkCalls++;
+        expect(request.url.host, 'provider.example');
+        return http.Response(
+          'data: {"choices":[{"delta":{"content":"Online answer."},"finish_reason":null}]}\n\n'
+          'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+          'data: [DONE]\n\n',
+          200,
+        );
+      }),
+    );
+    await s.initialize();
+    await s.saveEngine('compatible', 'test-model', 'en-IN');
+    s.compatibleApiEndpoint = 'https://provider.example';
+    s.compatibleApiKey = 'test-only-key';
+    await s.saveChatMode('online');
+    await s.send('hello');
+    expect(networkCalls, 1);
+    expect(s.messages.last['text'], 'Online answer.');
+    expect(s.error, isEmpty);
+    s.dispose();
+  });
 
   for (final entry in const {
     'en-IN': 'English',
@@ -437,12 +500,10 @@ void main() {
       );
       await s.initialize();
       await s.saveEngine('compatible', 'test-model', entry.key);
+      await s.saveChatMode('online');
       s.compatibleApiEndpoint = 'https://provider.example';
       s.compatibleApiKey = 'test-only-key';
-      await s.send(
-        'Explain Newton’s second law with a worked example.',
-        approvedOnline: true,
-      );
+      await s.send('Explain Newton’s second law with a worked example.');
       final body = jsonDecode(sent!.body) as Map<String, dynamic>;
       final messages = body['messages'] as List;
       final prompt = jsonDecode(
@@ -504,12 +565,13 @@ void main() {
       );
       await s.initialize();
       s.engine = 'compatible';
+      await s.saveChatMode('online');
       s.endpoint = 'https://provider.example';
       s.token = 'test';
       s.model = 'selected';
       await s.saveNote('private notebook');
       await s.remember('hidden memory');
-      await s.send('hello', approvedOnline: true);
+      await s.send('hello');
       expect(body, contains('hello'));
       expect(body, isNot(contains('private notebook')));
       expect(body, isNot(contains('hidden memory')));

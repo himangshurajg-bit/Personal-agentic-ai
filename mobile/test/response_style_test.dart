@@ -51,10 +51,11 @@ void main() {
       final state = AssistantState(clientFactory: () => client);
       await state.initialize();
       state.engine = 'private_service';
+      await state.saveChatMode('online');
       state.privateServiceToken = 'test-only-token';
       await state.saveResponseStyle('concise');
 
-      await state.send('Explain this briefly', approvedOnline: true);
+      await state.send('Explain this briefly');
 
       final instruction = sentPrompt!['instruction'] as String;
       expect(instruction, contains('Answer directly and briefly'));
@@ -110,11 +111,12 @@ void main() {
       final state = AssistantState(clientFactory: () => client);
       await state.initialize();
       state.engine = 'private_service';
+      await state.saveChatMode('online');
       state.privateServiceToken = 'test-only-token';
 
       for (final mode in AssistantState.aiModeLabels.keys) {
         await state.saveAiMode(mode);
-        await state.send('prompt for $mode', approvedOnline: true);
+        await state.send('prompt for $mode');
         final instruction = instructions.last;
         expect(instruction, contains(AssistantState.aiModeInstructions[mode]!));
         expect(instruction, contains('AI mode affects response approach only'));
@@ -132,24 +134,27 @@ void main() {
     },
   );
 
-  test('AI modes do not bypass online payload approval', () async {
-    var requests = 0;
-    final state = AssistantState(
-      clientFactory: () {
-        requests++;
-        return MockClient((_) async => http.Response('', 500));
-      },
-    );
-    await state.initialize();
-    state.engine = 'private_service';
+  test(
+    'AI response modes do not change Offline chat or trigger network sends',
+    () async {
+      var requests = 0;
+      final state = AssistantState(
+        clientFactory: () {
+          requests++;
+          return MockClient((_) async => http.Response('', 500));
+        },
+      );
+      await state.initialize();
+      state.engine = 'private_service';
 
-    for (final mode in AssistantState.aiModeLabels.keys) {
-      await state.saveAiMode(mode);
-      await state.send('must remain reviewed');
-      expect(state.error, contains('Review and approve the online payload'));
-      expect(state.messages, isEmpty);
-    }
-    expect(requests, 0);
-    state.dispose();
-  });
+      for (final mode in AssistantState.aiModeLabels.keys) {
+        await state.saveAiMode(mode);
+        await state.send('must remain reviewed');
+        expect(state.error, contains('Offline chat is selected'));
+        expect(state.messages, isEmpty);
+      }
+      expect(requests, 0);
+      state.dispose();
+    },
+  );
 }

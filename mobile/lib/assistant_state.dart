@@ -139,6 +139,7 @@ class AssistantState extends ChangeNotifier {
   String? speechVoiceLocale;
   String assistantName = 'Personal assistant';
   String engine = 'gemini',
+      chatMode = 'offline',
       model = geminiModel,
       geminiModelSelection = geminiModel,
       language = 'en-IN',
@@ -311,7 +312,23 @@ class AssistantState extends ChangeNotifier {
         speechVoiceName = null;
         speechVoiceLocale = null;
       }
-      engine = await storage.read(key: 'engine') ?? 'gemini';
+      final savedEngine = await storage.read(key: 'engine');
+      engine = savedEngine ?? 'gemini';
+      final savedChatMode = await storage.read(key: 'chat_mode');
+      if (savedChatMode == 'online' || savedChatMode == 'offline') {
+        chatMode = savedChatMode!;
+      } else {
+        // Preserve a legacy provider selection as the user's existing online
+        // choice, but never treat the built-in Gemini default as consent.
+        const onlineEngines = {
+          'private_service',
+          'compatible',
+          'gemini',
+          'openai',
+        };
+        chatMode = onlineEngines.contains(savedEngine) ? 'online' : 'offline';
+        await storage.write(key: 'chat_mode', value: chatMode);
+      }
       experimentalOfflineChatEnabled =
           await storage.read(key: 'experimental_offline_chat') == 'yes';
       if (experimentalOfflineChatEnabled) {
@@ -1172,6 +1189,21 @@ class AssistantState extends ChangeNotifier {
     );
   }
 
+  Future<void> saveChatMode(String mode) async {
+    if (!['offline', 'online'].contains(mode)) {
+      throw ServiceException('Choose Online or Offline chat.');
+    }
+    if (mode == 'online' && engine == 'offline') {
+      throw ServiceException(
+        'Choose an online provider in API & MCP connections before enabling Online chat.',
+      );
+    }
+    if (mode != chatMode) stop();
+    await storage.write(key: 'chat_mode', value: mode);
+    chatMode = mode;
+    notifyListeners();
+  }
+
   Future<void> saveExperimentalOfflineChat(bool enabled) async {
     await storage.write(
       key: 'experimental_offline_chat',
@@ -1675,7 +1707,6 @@ class AssistantState extends ChangeNotifier {
 
   Future<void> send(
     String text, {
-    bool approvedOnline = false,
     bool shareMemories = false,
     bool shareHistory = false,
     bool retryLastMessage = false,
@@ -1683,13 +1714,13 @@ class AssistantState extends ChangeNotifier {
     if (busy || text.trim().isEmpty) {
       return;
     }
-    if (engine == 'offline' && !experimentalOfflineChatEnabled) {
-      error = 'Experimental Gemma chat is off. Turn it on in Settings > AI & Voice after reviewing the warning. No online fallback was used.';
+    if (chatMode == 'offline' && !experimentalOfflineChatEnabled) {
+      error = 'Offline chat is selected, but experimental Gemma chat is off. Turn it on in Settings > AI, memory & models after reviewing the warning, then download and load Gemma. No online fallback was used.';
       notifyListeners();
       return;
     }
-    if (engine != 'offline' && !approvedOnline) {
-      error = 'Review and approve the online payload before sending.';
+    if (chatMode == 'online' && engine == 'offline') {
+      error = 'Online chat is selected, but no online provider is selected. Choose one in Settings > API & MCP connections. No offline fallback was used.';
       notifyListeners();
       return;
     }
@@ -1700,7 +1731,7 @@ class AssistantState extends ChangeNotifier {
       return;
     }
     error = '';
-    final selectedEngine = engine;
+    final selectedEngine = chatMode == 'offline' ? 'offline' : engine;
     final selectedConfig = selectedEngine == 'offline' ? null : config;
     final selectedModel = selectedConfig?.model ?? model;
     final prior = messages
