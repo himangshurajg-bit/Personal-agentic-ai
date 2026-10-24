@@ -4308,6 +4308,7 @@ class _SettingsState extends State<Settings> {
   late double speechRate = widget.state.speechRate;
   late String theme = widget.state.theme;
   late String language = widget.state.language;
+  late String responseStyle = widget.state.responseStyle;
   late String? selectedVoiceName = widget.state.speechVoiceName;
   late String? selectedVoiceLocale = widget.state.speechVoiceLocale;
   List<Map<String, dynamic>> _offlineVoices = [];
@@ -4818,6 +4819,32 @@ class _SettingsState extends State<Settings> {
                       _loadOfflineVoices(v!);
                     },
                   ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    key: const Key('response-style-setting'),
+                    isExpanded: true,
+                    initialValue: responseStyle,
+                    decoration: const InputDecoration(
+                      labelText: 'Answer style',
+                    ),
+                    items: [
+                      for (final entry
+                          in AssistantState.responseStyleLabels.entries)
+                        DropdownMenuItem(
+                          value: entry.key,
+                          child: Text(entry.value),
+                        ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) setState(() => responseStyle = value);
+                    },
+                  ),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Changes answer presentation only. It does not change safety, approvals or language.',
+                    ),
+                  ),
                   const SizedBox(height: 16),
                   const Text(
                     'Voice replies and recognition use your selected language where the device/provider supports it. English, Assamese, Hindi and Hinglish can be selected; this is not automatic language detection. Online providers may retain submitted content and charge your account; offline never falls back online.',
@@ -4834,6 +4861,7 @@ class _SettingsState extends State<Settings> {
                         await widget.state.setAssistantName(name.text);
                         await widget.state.saveSpeechMode(speechMode);
                         await widget.state.saveSpeechRate(speechRate);
+                        await widget.state.saveResponseStyle(responseStyle);
                         await widget.state.saveSpeechVoice(
                           name: selectedVoiceName,
                           locale: selectedVoiceLocale,
