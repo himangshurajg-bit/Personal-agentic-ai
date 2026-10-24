@@ -3413,6 +3413,58 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _openConversationHistory() async {
+    try {
+      final rows = await widget.state.conversations();
+      if (!mounted) return;
+      final selected = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => SimpleDialog(
+          title: const Text('Conversation history'),
+          children: rows.isEmpty
+              ? const [
+                  Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text('No saved conversations yet.'),
+                  ),
+                ]
+              : rows
+                    .map(
+                      (row) => SimpleDialogOption(
+                        onPressed: () => Navigator.pop(
+                          dialogContext,
+                          row['conversation'] as String,
+                        ),
+                        child: Text(
+                          row['title'] as String? ?? 'Conversation',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    )
+                    .toList(),
+        ),
+      );
+      if (selected == null || !mounted) return;
+      await widget.state.selectConversation(selected);
+      if (mounted) _scrollToLatest(jump: true);
+    } catch (error) {
+      if (mounted) notice(context, error);
+    }
+  }
+
+  Future<void> _startNewConversation() async {
+    try {
+      await widget.state.selectConversation(
+        'chat_${DateTime.now().microsecondsSinceEpoch}',
+        load: false,
+      );
+      if (mounted) _scrollToLatest(jump: true);
+    } catch (error) {
+      if (mounted) notice(context, error);
+    }
+  }
+
   Future<void> send([String? retry]) async {
     final text = retry ?? input.text;
     if (text.trim().isEmpty) {
@@ -3499,6 +3551,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         assistantName: state.assistantName,
         contentMaxWidth: 1280,
         showBottomNavigation: false,
+        actions: [
+          IconButton(
+            key: const ValueKey('chat-history-button'),
+            tooltip: 'Conversation history',
+            onPressed: _openConversationHistory,
+            icon: const Icon(Icons.history_rounded),
+          ),
+          IconButton(
+            key: const ValueKey('new-conversation-button'),
+            tooltip: 'New conversation',
+            onPressed: _startNewConversation,
+            icon: const Icon(Icons.add_comment_outlined),
+          ),
+        ],
         child: Column(
           children: [
             Expanded(
