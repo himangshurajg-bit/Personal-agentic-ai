@@ -6,6 +6,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -34,6 +35,55 @@ internal fun isValidTextSharePayload(title: String?, text: String?): Boolean =
     !title.isNullOrBlank() && title.length <= 80 && !text.isNullOrBlank() && text.length <= 10000
 
 class MainActivity : FlutterFragmentActivity() {
+    private val launcherIconAliases = (1..9).associate { index ->
+        "nexa_$index" to ComponentName(this, "$packageName.LauncherNexa$index")
+    }
+
+    private fun currentLauncherIcon(): String = launcherIconAliases.entries
+        .firstOrNull { (_, component) ->
+            when (packageManager.getComponentEnabledSetting(component)) {
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> true
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED -> false
+                else -> component.className.endsWith(".LauncherNexa1")
+            }
+        }?.key ?: "nexa_1"
+
+    private fun setLauncherIcon(iconId: String) {
+        val selected = launcherIconAliases[iconId]
+            ?: throw IllegalArgumentException("Unknown home-screen icon choice")
+        val previous = launcherIconAliases[currentLauncherIcon()]
+        try {
+            // Enable the replacement before disabling the old alias so the launcher
+            // never ends up with no entry. Final state has exactly one enabled alias.
+            packageManager.setComponentEnabledSetting(
+                selected,
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                PackageManager.DONT_KILL_APP,
+            )
+            launcherIconAliases.values.filter { it != selected }.forEach { component ->
+                packageManager.setComponentEnabledSetting(
+                    component,
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    PackageManager.DONT_KILL_APP,
+                )
+            }
+        } catch (error: Exception) {
+            // Best-effort rollback if Android rejects a component-state change.
+            launcherIconAliases.values.forEach { component ->
+                try {
+                    packageManager.setComponentEnabledSetting(
+                        component,
+                        if (component == previous) PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                        else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                        PackageManager.DONT_KILL_APP,
+                    )
+                } catch (_: Exception) {
+                    // Preserve the original failure for the caller.
+                }
+            }
+            throw error
+        }
+    }
     private var permissionResult: MethodChannel.Result? = null
     private var pendingAction: Map<*, *>? = null
     private var exportResult: MethodChannel.Result? = null
@@ -276,6 +326,20 @@ class MainActivity : FlutterFragmentActivity() {
         }
         MethodChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/device").setMethodCallHandler { call, result ->
             when (call.method) {
+                "get_launcher_icon" -> result.success(currentLauncherIcon())
+                "set_launcher_icon" -> {
+                    val iconId = call.argument<String>("icon_id")
+                    if (iconId == null || iconId !in launcherIconAliases) {
+                        result.error("invalid_icon", "Choose one of the bundled home-screen icons.", null)
+                    } else {
+                        try {
+                            setLauncherIcon(iconId)
+                            result.success(iconId)
+                        } catch (error: Exception) {
+                            result.error("launcher_icon_failed", "Android could not change the home-screen icon.", error.message)
+                        }
+                    }
+                }
                 "device_status" -> result.success(mapOf(
                     "sdk" to Build.VERSION.SDK_INT,
                     "microphone_granted" to (checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED),

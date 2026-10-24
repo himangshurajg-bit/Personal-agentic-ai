@@ -199,6 +199,18 @@ class AssistantState extends ChangeNotifier {
   List<Map<String, dynamic>> messages = [], memories = [];
   List<LaunchableApp> _launchableApps = [];
   List<LaunchableApp> get launchableApps => List.unmodifiable(_launchableApps);
+  static const Map<String, String> launcherIconAssets = {
+    'nexa_1': 'assets/launcher_icons/nexa_1.png',
+    'nexa_2': 'assets/launcher_icons/nexa_2.png',
+    'nexa_3': 'assets/launcher_icons/nexa_3.png',
+    'nexa_4': 'assets/launcher_icons/nexa_4.png',
+    'nexa_5': 'assets/launcher_icons/nexa_5.png',
+    'nexa_6': 'assets/launcher_icons/nexa_6.png',
+    'nexa_7': 'assets/launcher_icons/nexa_7.png',
+    'nexa_8': 'assets/launcher_icons/nexa_8.png',
+    'nexa_9': 'assets/launcher_icons/nexa_9.png',
+  };
+  String launcherIconId = 'nexa_1';
   http.Client? _stream;
   int _generation = 0;
   static const device = MethodChannel('personal_assistant/device');
@@ -210,6 +222,25 @@ class AssistantState extends ChangeNotifier {
       appLockEnabled = savedLock == 'yes';
       appLocked = appLockEnabled;
       await local.load();
+      launcherIconId = await storage.read(key: 'launcher_icon_id') ?? 'nexa_1';
+      if (!launcherIconAssets.containsKey(launcherIconId)) {
+        launcherIconId = 'nexa_1';
+      }
+      try {
+        final nativeIcon = await device.invokeMethod<String>(
+          'get_launcher_icon',
+        );
+        if (nativeIcon != null && launcherIconAssets.containsKey(nativeIcon)) {
+          launcherIconId = nativeIcon;
+          await storage.write(key: 'launcher_icon_id', value: nativeIcon);
+        }
+      } on PlatformException {
+        // Older/non-Android builds retain the local choice for the settings UI.
+      } on MissingPluginException {
+        // The native Android launcher alias selector is unavailable off-device.
+      } on TypeError {
+        // Ignore malformed or legacy channel replies instead of aborting startup.
+      }
       try {
         customMcpServers = await mcpStore.load();
       } catch (_) {
@@ -345,6 +376,30 @@ class AssistantState extends ChangeNotifier {
     ready = true;
     notifyListeners();
   }
+
+  Future<void> saveLauncherIcon(String iconId) async {
+    if (!launcherIconAssets.containsKey(iconId)) {
+      throw ServiceException('Choose one of the nine included app icons.');
+    }
+    try {
+      await device.invokeMethod<String>('set_launcher_icon', {
+        'icon_id': iconId,
+      });
+    } on PlatformException catch (error) {
+      throw ServiceException(
+        error.message ?? 'Android could not change the app icon.',
+      );
+    } on MissingPluginException {
+      throw ServiceException(
+        'Home-screen icon selection is available in the Android app.',
+      );
+    }
+    await storage.write(key: 'launcher_icon_id', value: iconId);
+    launcherIconId = iconId;
+    notifyListeners();
+  }
+
+  Future<void> resetLauncherIcon() => saveLauncherIcon('nexa_1');
 
   bool get appLockGateVisible => !appLockConfigurationReady || appLocked;
 

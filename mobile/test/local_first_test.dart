@@ -517,6 +517,72 @@ void main() {
     },
   );
   test(
+    'nine home-screen icon choices bundle locally, persist, and reset',
+    () async {
+      var selectedNativeIcon = 'nexa_1';
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(AssistantState.device, (call) async {
+        if (call.method == 'get_launcher_icon') return selectedNativeIcon;
+        if (call.method == 'set_launcher_icon') {
+          final icon = (call.arguments as Map)['icon_id'] as String;
+          expect(AssistantState.launcherIconAssets.containsKey(icon), isTrue);
+          selectedNativeIcon = icon;
+          return icon;
+        }
+        if (call.method == 'list_launchable_apps') {
+          return [
+            {
+              'package': 'com.example.reader',
+              'label': 'Reader',
+              'icon_png_base64': null,
+            },
+          ];
+        }
+        fail('Unexpected device method: ${call.method}');
+      });
+
+      expect(AssistantState.launcherIconAssets, hasLength(9));
+      for (final entry in AssistantState.launcherIconAssets.entries) {
+        final bytes = await rootBundle.load(entry.value);
+        expect(bytes.lengthInBytes, greaterThan(1000));
+        expect(bytes.getUint8(0), 0x89);
+        expect(bytes.getUint8(1), 0x50);
+      }
+      final state = AssistantState();
+      await state.initialize();
+      for (final iconId in AssistantState.launcherIconAssets.keys) {
+        await state.saveLauncherIcon(iconId);
+        expect(state.launcherIconId, iconId);
+        expect(selectedNativeIcon, iconId);
+      }
+      final restored = AssistantState();
+      await restored.initialize();
+      expect(restored.launcherIconId, 'nexa_9');
+      await restored.resetLauncherIcon();
+      expect(restored.launcherIconId, 'nexa_1');
+      expect(selectedNativeIcon, 'nexa_1');
+      await expectLater(
+        restored.saveLauncherIcon('not-an-option'),
+        throwsA(isA<ServiceException>()),
+      );
+
+      // Changing the app's icon leaves selected target-app packages and their
+      // user-reviewed, expiring launch actions untouched.
+      final apps = await state.loadLaunchableApps();
+      final launch = await state.prepareSelectedAppLaunch(apps.single);
+      expect(launch['status'], 'prepared');
+      expect(launch['action']['package'], 'com.example.reader');
+      expect(launch['action']['app_name'], 'Reader');
+      expect(
+        launch['expires'],
+        greaterThan(DateTime.now().millisecondsSinceEpoch),
+      );
+      messenger.setMockMethodCallHandler(AssistantState.device, null);
+    },
+  );
+
+  test(
     'app launches need a current picker selection and one-use owner approval',
     () async {
       final s = AssistantState();
