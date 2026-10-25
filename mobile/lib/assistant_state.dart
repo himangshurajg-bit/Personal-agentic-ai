@@ -1438,6 +1438,45 @@ class AssistantState extends ChangeNotifier {
     await local.writeChat(conversation, messages);
   }
 
+  /// Adds a reviewed online feature exchange without persisting attachment bytes.
+  Future<void> addFeatureExchange({
+    required String userText,
+    required String answerText,
+    required String feature,
+    List<Map<String, dynamic>> sources = const [],
+    String? attachmentName,
+  }) async {
+    if (!['web_research', 'file_analysis'].contains(feature) ||
+        userText.trim().isEmpty ||
+        answerText.trim().isEmpty) {
+      throw ArgumentError('A complete supported feature exchange is required.');
+    }
+    final start = messages.length;
+    error = '';
+    messages.add({
+      'role': 'user',
+      'text': userText,
+      'state': 'complete',
+      'feature': feature,
+      'attachmentName': ?attachmentName,
+    });
+    messages.add({
+      'role': 'assistant',
+      'text': answerText,
+      'state': 'complete',
+      'feature': feature,
+      if (feature == 'web_research') 'sources': sources,
+    });
+    try {
+      await persistChat();
+      lastPrompt = userText;
+      notifyListeners();
+    } catch (_) {
+      messages.removeRange(start, messages.length);
+      rethrow;
+    }
+  }
+
   Future<List<Map<String, dynamic>>> conversations([String query = '']) async =>
       local.searchChats(query);
   Future<void> deleteHistory() async {
