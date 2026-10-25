@@ -18,6 +18,7 @@ import 'offline_voice.dart';
 import 'phone_screens.dart';
 import 'safe_workflows.dart';
 import 'image_generation_screen.dart';
+import 'assistant_features_screen.dart';
 import 'ui_motion.dart';
 import 'typing_indicator.dart';
 import 'visual_theme.dart';
@@ -211,6 +212,19 @@ class _AssistantAppState extends State<AssistantApp>
             : Onboarding(state: widget.state),
         routes: {
           '/home': (_) => Home(state: widget.state),
+          '/features': (context) => FeaturesScreen(
+            state: widget.state,
+            onReminder: (context, title) =>
+                Home(state: widget.state)
+                    .reminder(context, initialTitle: title),
+          ),
+          '/features/research': (context) => FeaturesScreen(
+            state: widget.state,
+            initialTab: 2,
+            onReminder: (context, title) =>
+                Home(state: widget.state)
+                    .reminder(context, initialTitle: title),
+          ),
           '/chat': (context) {
             final draft = ModalRoute.of(context)?.settings.arguments;
             return ChatScreen(
@@ -2191,8 +2205,8 @@ class Home extends StatelessWidget {
     }
   }
 
-  Future<void> reminder(BuildContext context) async {
-    final title = TextEditingController();
+  Future<void> reminder(BuildContext context, {String? initialTitle}) async {
+    final title = TextEditingController(text: initialTitle ?? '');
     final text = await showDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
@@ -2451,6 +2465,12 @@ class Home extends StatelessWidget {
                         label: 'Memory',
                         icon: Icons.psychology_alt_outlined,
                         onTap: () => Navigator.pushNamed(context, '/memory'),
+                      ),
+                      const SizedBox(width: 8),
+                      _HomeQuickAction(
+                        label: 'Tools',
+                        icon: Icons.build_circle_outlined,
+                        onTap: () => Navigator.pushNamed(context, '/features'),
                       ),
                     ],
                   ),

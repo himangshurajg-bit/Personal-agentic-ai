@@ -140,6 +140,8 @@ class MainActivity : FlutterFragmentActivity() {
     private var exportText: String? = null
     private var voice: SpeechRecognizer? = null
     private var voiceChannel: MethodChannel? = null
+    private var featureVoiceChannel: MethodChannel? = null
+    private var activeVoiceChannel: MethodChannel? = null
     private var audioChannel: MethodChannel? = null
     private var audioPlayer: MediaPlayer? = null
     private var audioFile: java.io.File? = null
@@ -149,7 +151,7 @@ class MainActivity : FlutterFragmentActivity() {
     private var accessPermissionKind: String? = null
     private var voiceArgs: Map<*,*>? = null
     private var liveStopReceiver: BroadcastReceiver? = null
-    private fun voiceEvent(kind:String, value:Any? = null) { voiceChannel?.invokeMethod("voice_event",mapOf("kind" to kind,"value" to value)) }
+    private fun voiceEvent(kind:String, value:Any? = null) { activeVoiceChannel?.invokeMethod("voice_event",mapOf("kind" to kind,"value" to value)) }
     private fun stopVoice() { voice?.cancel();voice?.destroy();voice=null;voiceEvent("stopped") }
     private fun stopAudio() {
         val pending = audioStartResult
@@ -196,6 +198,7 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
     private fun startVoice(args:Map<*,*>, result:MethodChannel.Result) {
+        activeVoiceChannel = if(args["feature_voice"]==true) featureVoiceChannel else voiceChannel
         val mode=args["mode"] as? String
         val locale=args["locale"] as? String
         if(mode !in setOf("offline","online") || locale !in setOf("as-IN","en-IN","hi-IN","hi-Latn-IN")) { result.error("invalid","Unsupported speech selection",null);return }
@@ -306,6 +309,7 @@ class MainActivity : FlutterFragmentActivity() {
         super.onDestroy()
     }
     private var fileResult: MethodChannel.Result? = null
+    private var fileForAi = false
     private var offlineModelCoordinator: Gemma4OfflineCoordinator? = null
     private var offlineModelEventSink: EventChannel.EventSink? = null
     override fun configureFlutterEngine(engine: FlutterEngine) {
@@ -436,6 +440,7 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
         voiceChannel=MethodChannel(engine.dartExecutor.binaryMessenger,"personal_assistant/voice")
+        featureVoiceChannel=MethodChannel(engine.dartExecutor.binaryMessenger,"personal_assistant/feature_voice")
         audioChannel=MethodChannel(engine.dartExecutor.binaryMessenger,"personal_assistant/audio")
         audioChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -569,8 +574,9 @@ class MainActivity : FlutterFragmentActivity() {
                     if(fileResult != null) result.error("busy","A selection is already open",null)
                     else {
                         fileResult=result
-                        try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="*/*"; putExtra(Intent.EXTRA_MIME_TYPES,arrayOf("text/plain","text/markdown","application/json","application/pdf","image/png","image/jpeg")) },43) }
-                        catch(_:Exception) { fileResult=null;result.error("unavailable","Document picker unavailable",null) }
+                        fileForAi=call.argument<Boolean>("ai_document")==true
+                        try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="*/*"; putExtra(Intent.EXTRA_MIME_TYPES,arrayOf("text/plain","text/markdown","application/json","application/pdf","image/png","image/jpeg","image/webp")) },43) }
+                        catch(_:Exception) { fileResult=null;fileForAi=false;result.error("unavailable","Document picker unavailable",null) }
                     }
                 }
                 "export" -> {
@@ -775,6 +781,7 @@ class MainActivity : FlutterFragmentActivity() {
         super.onActivityResult(requestCode,resultCode,data)
         if(requestCode==43) {
             val result=fileResult;fileResult=null
+            val forAi=fileForAi;fileForAi=false
             val uri=data?.data
             if(resultCode!=RESULT_OK || uri==null) {result?.error("cancelled","No file selected",null);return}
             try {
@@ -782,7 +789,16 @@ class MainActivity : FlutterFragmentActivity() {
                 var name="Selected file"
                 contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)?.use { cursor -> if(cursor.moveToFirst()) name=cursor.getString(0) ?: name }
                 val response=mutableMapOf<String,Any>("name" to name.take(200),"mime" to mime)
-                if(mime=="application/pdf") {response["unsupported"]="PDF selected. Extraction and PDF/image inference are not available in this build; no content was sent."}
+                if(forAi) {
+                    if(mime !in setOf("application/pdf","image/jpeg","image/png","image/webp")) throw IllegalArgumentException("Choose a PDF or PNG, JPEG or WebP image")
+                    val bytes=contentResolver.openInputStream(uri)?.use { input ->
+                        val out=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192);var total=0
+                        while(true) {val n=input.read(buffer);if(n<0)break;total+=n;if(total>12*1024*1024)throw IllegalArgumentException("File exceeds the 12 MB AI feature limit");out.write(buffer,0,n)}
+                        out.toByteArray()
+                    } ?: throw IllegalStateException("Could not read selected file")
+                    if(bytes.isEmpty()) throw IllegalArgumentException("Selected file is empty")
+                    response["content_base64"]=Base64.encodeToString(bytes,Base64.NO_WRAP)
+                } else if(mime=="application/pdf") {response["unsupported"]="PDF selected. Extraction and PDF/image inference are not available in this build; no content was sent."}
                 else {
                     val limit=if(mime.startsWith("image/")) 2000000 else 200000
                     val bytes=contentResolver.openInputStream(uri)?.use { input ->
