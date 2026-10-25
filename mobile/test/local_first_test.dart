@@ -337,7 +337,7 @@ void main() {
         await s.send('Explain Newton’s second law with a worked example.');
         expect(
           s.error,
-          contains('experimental Gemma chat is off'),
+          contains('experimental offline chat is off'),
           reason:
               'locale $locale remains behind the offline qualification gate',
         );
@@ -382,18 +382,30 @@ void main() {
       expect(s.experimentalOfflineChatEnabled, isFalse);
       await s.saveExperimentalOfflineChat(true);
       await s.send('Explain Newton’s second law.');
+      await s.send('What did I ask you before?');
 
       expect(networkCalls, 0);
       expect(
         calls.map((call) => call.method),
         contains('set_experimental_chat_enabled'),
       );
-      final chatCall = calls.singleWhere((call) => call.method == 'run_chat');
-      expect((chatCall.arguments as Map)['experimental_opt_in'], isTrue);
-      final prompt = jsonDecode(
-        (chatCall.arguments as Map)['prompt'] as String,
+      final chatCalls = calls
+          .where((call) => call.method == 'run_chat')
+          .toList();
+      expect(chatCalls, hasLength(2));
+      expect((chatCalls.last.arguments as Map)['experimental_opt_in'], isTrue);
+      final firstPrompt = jsonDecode(
+        (chatCalls.first.arguments as Map)['prompt'] as String,
       );
-      expect(prompt['user_message'], 'Explain Newton’s second law.');
+      expect(firstPrompt['quoted_history'], isEmpty);
+      final prompt = jsonDecode(
+        (chatCalls.last.arguments as Map)['prompt'] as String,
+      );
+      expect(prompt['user_message'], 'What did I ask you before?');
+      expect(prompt['quoted_history'], [
+        {'role': 'user', 'text': 'Explain Newton’s second law.'},
+        {'role': 'assistant', 'text': 'A local answer.'},
+      ]);
       expect(s.messages.last, {
         'role': 'assistant',
         'text': 'A local answer.',

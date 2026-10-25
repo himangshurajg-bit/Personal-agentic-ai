@@ -15,7 +15,7 @@ class EngineConfig {
     required this.token,
   });
   String get description => switch (mode) {
-    'offline' => 'Offline · Gemma experimental',
+    'offline' => 'Offline · experimental on-device model',
     'gemini' => 'Online · Gemini $model',
     'openai' => 'Online · OpenAI ChatGPT',
     'compatible' => 'Online · OpenAI-compatible',
@@ -24,7 +24,7 @@ class EngineConfig {
   http.Request request(String conversation, String prompt) {
     if (mode == 'offline') {
       throw ServiceException(
-        'Offline chat must use the explicitly opted-in local Gemma runtime. No online fallback was made.',
+        'Offline chat must use an explicitly opted-in on-device model. No online fallback was made.',
       );
     }
     if (token.isEmpty) {

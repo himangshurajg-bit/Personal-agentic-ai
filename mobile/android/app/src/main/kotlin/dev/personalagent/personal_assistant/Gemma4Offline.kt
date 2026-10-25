@@ -644,7 +644,7 @@ internal class Gemma4OfflineCoordinator(
                     }
                     val activeEngine = engine
                     if (activeEngine == null) {
-                        finish(null, "model_unavailable", "Download and load a model from Settings > Offline Model & Experimental Chat first. No online fallback was used.")
+                        finish(null, "model_unavailable", "Choose, download and load an on-device model in Settings > AI, memory & models first. No online fallback was used.")
                         return@withLock
                     }
                     if (inferenceActive || runtimeOperation) {

@@ -261,14 +261,14 @@ class _OfflineModelPanelState extends State<OfflineModelPanel>
                         ? null
                         : () async {
                             final proceed = await _confirm(
-                              bytes > 0 ? 'Resume model download?' : 'Download model for screening?',
+                              bytes > 0 ? 'Resume model download?' : 'Download model for offline chat?',
                               'This starts a user-requested ${_formatModelSize(total)} download of $selectedModelName. It uses app-private storage and keeps 512 MB free as a reserve. Downloading alone does not load it or opt it into normal chat.',
                               bytes > 0 ? 'Resume download' : 'Download',
                             );
                             if (proceed && mounted) await _invoke('download');
                           },
                     icon: const Icon(Icons.download_outlined),
-                    label: Text(bytes > 0 ? 'Resume download' : 'Download for screening'),
+                    label: Text(bytes > 0 ? 'Resume download' : 'Download for offline chat'),
                   ),
                 if (downloading)
                   OutlinedButton.icon(onPressed: _calling ? null : () => _invoke('cancel_download'), icon: const Icon(Icons.pause_rounded), label: const Text('Pause')),

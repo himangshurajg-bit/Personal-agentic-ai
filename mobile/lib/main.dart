@@ -2232,10 +2232,10 @@ class Home extends StatelessWidget {
         : hour < 17
         ? 'Good afternoon'
         : 'Good evening';
-    final modeLabel = state.engine == 'offline'
+    final modeLabel = state.chatMode == 'offline'
         ? state.experimentalOfflineChatEnabled
-              ? 'Experimental Gemma · local only'
-              : 'Gemma opt-in needed'
+              ? 'Offline · local only'
+              : 'Offline opt-in needed'
         : 'Online mode selected';
     return Shell(
       title: state.assistantName,
@@ -2300,7 +2300,7 @@ class Home extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        state.engine == 'offline'
+                        state.chatMode == 'offline'
                             ? Icons.cloud_off_rounded
                             : Icons.auto_awesome_rounded,
                         size: 15,
@@ -4948,9 +4948,9 @@ class _SettingsState extends State<Settings> {
       final proceed = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('Try experimental Gemma chat?'),
+          title: const Text('Try experimental offline chat?'),
           content: const Text(
-            'Gemma 4 E2B has not passed answer-quality or Redmi/HyperOS memory, speed and heat testing. It has 2.3B effective parameters (5.1B with embeddings); its 2.59 GB download is not a measure of its full memory use. It may give wrong answers, run slowly, or make the phone warm. You must download and load it yourself. Typed chat prompts stay on this phone; errors never switch to an online provider. Continue only as an experiment.',
+            'Qwen3 0.6B downloads about 614 MB; Gemma 4 E2B downloads about 2.59 GB. Neither has been qualified for answer quality, speed, memory use or heat on this phone. Select a model, then download and load it yourself. Chat prompts and local conversation history stay on this phone; errors never switch to an online provider. Replies may be inaccurate or slow, and the phone may get warm. Continue only as an experiment.',
           ),
           actions: [
             TextButton(
@@ -4972,7 +4972,7 @@ class _SettingsState extends State<Settings> {
         notice(
           context,
           enabled
-              ? 'Experimental local chat is opted in. Download and load Gemma below; it is still unqualified.'
+              ? 'Experimental offline chat is opted in. Choose, download and load a model below before chatting.'
               : 'Experimental local chat is off. The model is not used for normal chat.',
         );
       }
@@ -5619,7 +5619,7 @@ class _SettingsState extends State<Settings> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Online sends each chat message to the selected provider. Offline keeps messages on this phone and uses experimental Gemma only after opt-in and download/load. If the local model is unavailable, chat fails locally; it never falls back online. Current-chat history and relevant memories are sent online only when their separate Settings switches are on.',
+                    'Online sends each chat message to the selected provider. Offline keeps chat and its recent conversation history on this phone and uses the selected Qwen3 0.6B or Gemma 4 E2B model only after opt-in, download and load. If the model is unavailable, chat fails locally; it never falls back online. History and relevant memories are sent to online providers only when their separate Settings switches are on.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 16),
@@ -5690,9 +5690,11 @@ class _SettingsState extends State<Settings> {
                 value: widget.state.experimentalOfflineChatEnabled,
                 onChanged: (enabled) => _setExperimentalOfflineChat(enabled),
                 secondary: const _SettingsIconTile(icon: Icons.memory_rounded),
-                title: const Text('Use Gemma in normal chat · experimental'),
+                title: const Text(
+                  'Use an on-device model in chat · experimental',
+                ),
                 subtitle: const Text(
-                  'Explicit opt-in. Select Offline · Gemma in API & MCP connections to use it. It only runs locally after you download and load the model. Not qualified for Redmi/HyperOS; replies may be inaccurate, slow or heat the phone. There is no online fallback.',
+                  'Explicit opt-in. First choose Offline in Chat connection above, then select Qwen3 0.6B or Gemma 4 E2B and download/load it below. Neither model is qualified for Redmi/HyperOS; replies may be inaccurate, slow or heat the phone. There is no online fallback.',
                 ),
               ),
             ),
@@ -5754,7 +5756,7 @@ class _SettingsState extends State<Settings> {
           children: [
             const Glass(
               child: Text(
-                'Chat mode is chosen above. Online sends each prompt to the selected provider; offline uses experimental local Gemma only after opt-in and download/load, with no online fallback. Action, purchase, permission and other safety reviews remain separate. The private FastAPI adapter remains optional.',
+                'Chat mode is chosen above. Online sends each prompt to the selected provider; offline uses the selected local Qwen3 or Gemma model only after opt-in and download/load, with no online fallback. Action, purchase, permission and other safety reviews remain separate. The private FastAPI adapter remains optional.',
               ),
             ),
             Glass(
@@ -6188,7 +6190,7 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
         ),
         const SizedBox(height: 6),
         const Text(
-          'Saving settings does not connect a server. Use Test connection to verify the selected endpoint. Provider credentials stay in Android secure storage and are never displayed again.',
+          'Chat routing is chosen separately in Settings > AI, memory & models. Saving settings does not connect a server. Use Test connection to verify the selected endpoint. Provider credentials stay in Android secure storage and are never displayed again.',
         ),
         const SizedBox(height: 16),
         const _SettingsSectionLabel('AI PROVIDER'),
@@ -6211,7 +6213,9 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
                   ),
                   DropdownMenuItem(
                     value: 'offline',
-                    child: Text('Offline · Gemma (experimental)'),
+                    child: Text(
+                      'Offline runtime · choose Offline chat separately',
+                    ),
                   ),
                   DropdownMenuItem(
                     value: 'compatible',
@@ -6421,7 +6425,7 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
                   ),
               ] else ...[
                 const Text(
-                  'Offline mode does not connect to a server. Enable experimental chat in Settings, then download and load Gemma on this phone. There is no online fallback.',
+                  'Offline mode does not connect to a server. In Settings > AI, memory & models, enable experimental chat, select Qwen3 0.6B or Gemma 4 E2B, then download and load it on this phone. There is no online fallback.',
                 ),
               ],
               const SizedBox(height: 12),
