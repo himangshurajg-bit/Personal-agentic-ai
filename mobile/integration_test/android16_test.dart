@@ -117,7 +117,7 @@ void main() {
       expect(bad!['result'], 'failed');
       await s.saveEngine('offline', '', 'en-IN');
       await s.send('No network should be used');
-      expect(s.error, contains('Experimental Gemma chat is off'));
+      expect(s.error, contains('experimental Gemma chat is off'));
       phase('unopted offline chat failed closed');
       final modelStatus = await AssistantState.offlineModel
           .invokeMapMethod<String, dynamic>('status');
