@@ -15,6 +15,7 @@ class PhoneData {
     'study_decks': [],
     'flashcards': [],
     'study_reviews': [],
+    'study_lessons': [],
   };
   bool _loadFailed = false;
   Future<void> _tail = Future.value();
@@ -37,9 +38,11 @@ class PhoneData {
         parsed.putIfAbsent('study_decks', () => <dynamic>[]);
         parsed.putIfAbsent('flashcards', () => <dynamic>[]);
         parsed.putIfAbsent('study_reviews', () => <dynamic>[]);
+        parsed.putIfAbsent('study_lessons', () => <dynamic>[]);
         if (parsed['study_decks'] is! List ||
             parsed['flashcards'] is! List ||
-            parsed['study_reviews'] is! List) {
+            parsed['study_reviews'] is! List ||
+            parsed['study_lessons'] is! List) {
           throw const FormatException('Invalid local study data');
         }
         _data = parsed;
@@ -95,11 +98,12 @@ class PhoneData {
     }
     final request = jsonEncode({'query': query, 'conversations': chats});
     try {
-      final raw = await _rustSearch.invokeMethod<String>(
-        'search_chats',
-        {'request': request},
-      );
-      if (raw == null) throw const FormatException('Missing Rust search result');
+      final raw = await _rustSearch.invokeMethod<String>('search_chats', {
+        'request': request,
+      });
+      if (raw == null) {
+        throw const FormatException('Missing Rust search result');
+      }
       final response = Map<String, dynamic>.from(jsonDecode(raw) as Map);
       final results = response['results'];
       if (response['engine'] != 'rust' ||
@@ -234,6 +238,50 @@ class PhoneData {
       'at': DateTime.now().toUtc().toIso8601String(),
     }),
   );
+
+  List<Map<String, dynamic>> get studyLessons {
+    final lessons = rows('study_lessons');
+    lessons.sort(
+      (a, b) => (b['created_at'] as int? ?? 0).compareTo(
+        a['created_at'] as int? ?? 0,
+      ),
+    );
+    return lessons;
+  }
+
+  Future<String> saveStudyLesson({
+    required String topic,
+    required String explanation,
+    required String conversationId,
+  }) async {
+    final cleanTopic = topic.trim();
+    final cleanExplanation = explanation.trim();
+    if (cleanTopic.isEmpty || cleanTopic.length > 8000) {
+      throw ArgumentError('A study topic must be 1–8,000 characters.');
+    }
+    if (cleanExplanation.isEmpty || cleanExplanation.length > 100000) {
+      throw ArgumentError('A study explanation must be 1–100,000 characters.');
+    }
+    final lessonId = id();
+    await change(
+      (d) => (d['study_lessons'] as List).add({
+        'id': lessonId,
+        'topic': cleanTopic,
+        'explanation': cleanExplanation,
+        'conversation_id': conversationId,
+        'created_at': DateTime.now().toUtc().millisecondsSinceEpoch,
+      }),
+    );
+    return lessonId;
+  }
+
+  Future<void> deleteStudyLesson(String lessonId) => change((d) {
+    final lessons = d['study_lessons'] as List;
+    if (!lessons.any((lesson) => lesson['id'] == lessonId)) {
+      throw StateError('Study lesson no longer exists.');
+    }
+    lessons.removeWhere((lesson) => lesson['id'] == lessonId);
+  });
 
   List<Map<String, dynamic>> get studyDecks => rows('study_decks');
 

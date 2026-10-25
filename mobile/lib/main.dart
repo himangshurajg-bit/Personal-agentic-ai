@@ -226,6 +226,13 @@ class _AssistantAppState extends State<AssistantApp>
           '/memory': (_) => Memories(state: widget.state),
           '/library': (_) => PhoneLibrary(state: widget.state),
           '/study': (_) => StudyScreen(state: widget.state),
+          '/whiteboard': (context) {
+            final lessonId = ModalRoute.of(context)?.settings.arguments;
+            return StudyWhiteboardScreen(
+              state: widget.state,
+              lessonId: lessonId is String ? lessonId : null,
+            );
+          },
           '/files': (_) => SelectedFiles(state: widget.state),
           '/automations': (_) => ActionHistory(state: widget.state),
           '/drafts': (_) => const OutboundDraftsScreen(),
@@ -786,6 +793,12 @@ class _AssistantDrawer extends StatelessWidget {
                     label: 'Study',
                     selected: _selected('/study'),
                     onTap: () => _go(context, '/study'),
+                  ),
+                  _DrawerRow(
+                    icon: Icons.draw_outlined,
+                    label: 'Whiteboard',
+                    selected: _selected('/whiteboard'),
+                    onTap: () => _go(context, '/whiteboard'),
                   ),
                   _DrawerRow(
                     icon: Icons.bolt_rounded,
@@ -3564,12 +3577,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final speakThisReply =
         widget.state.speakReplies || _speakNextReply || _handsFreeSessionActive;
     _speakNextReply = false;
+    final studyModeForRequest = widget.state.studyModeEnabled;
     await widget.state.send(
       text,
       shareMemories: widget.state.shareMemories,
       shareHistory: widget.state.shareHistory,
       retryLastMessage: retry != null,
     );
+    final lessonId = widget.state.lastStudyLessonId;
+    if (studyModeForRequest && lessonId != null && mounted) {
+      await Navigator.pushNamed(context, '/whiteboard', arguments: lessonId);
+    }
     final currentUserMessageCount = widget.state.messages
         .where((message) => message['role'] == 'user')
         .length;
@@ -3632,6 +3650,35 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         contentMaxWidth: 1280,
         showBottomNavigation: false,
         actions: [
+          IconButton(
+            key: const ValueKey('study-mode-toggle'),
+            tooltip: state.studyModeEnabled
+                ? 'Study Mode on · tap to turn off'
+                : 'Study Mode off · tap to send lessons to Whiteboard',
+            onPressed: () async {
+              try {
+                await state.saveStudyModeEnabled(!state.studyModeEnabled);
+                if (context.mounted) {
+                  notice(
+                    context,
+                    state.studyModeEnabled
+                        ? 'Study Mode is on. Topic replies will open on Whiteboard.'
+                        : 'Study Mode is off. Replies stay in chat.',
+                  );
+                }
+              } catch (error) {
+                if (context.mounted) notice(context, error);
+              }
+            },
+            icon: Icon(
+              state.studyModeEnabled
+                  ? Icons.school_rounded
+                  : Icons.school_outlined,
+              color: state.studyModeEnabled
+                  ? Theme.of(context).colorScheme.primary
+                  : null,
+            ),
+          ),
           IconButton(
             key: const ValueKey('chat-history-button'),
             tooltip: 'Conversation history',

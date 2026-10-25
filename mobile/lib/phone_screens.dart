@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import 'assistant_state.dart';
 import 'phone_data.dart';
@@ -2890,6 +2891,159 @@ class _AssistantOrbState extends State<AssistantOrb>
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class StudyWhiteboardScreen extends StatefulWidget {
+  final AssistantState state;
+  final String? lessonId;
+  const StudyWhiteboardScreen({super.key, required this.state, this.lessonId});
+
+  @override
+  State<StudyWhiteboardScreen> createState() => _StudyWhiteboardScreenState();
+}
+
+class _StudyWhiteboardScreenState extends State<StudyWhiteboardScreen> {
+  String? selectedLessonId;
+
+  @override
+  void initState() {
+    super.initState();
+    selectedLessonId = widget.lessonId;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lessons = widget.state.local.studyLessons;
+    Map<String, dynamic>? lesson;
+    for (final saved in lessons) {
+      if (saved['id'] == selectedLessonId) {
+        lesson = saved;
+        break;
+      }
+    }
+    lesson ??= lessons.isEmpty ? null : lessons.first;
+    return Shell(
+      title: 'Study Whiteboard',
+      assistantName: widget.state.assistantName,
+      actions: [
+        IconButton(
+          key: const ValueKey('whiteboard-return-to-chat'),
+          tooltip: 'Back to chat',
+          onPressed: () {
+            if (Navigator.of(context).canPop()) {
+              Navigator.pop(context);
+            } else {
+              Navigator.pushReplacementNamed(context, '/chat');
+            }
+          },
+          icon: const Icon(Icons.chat_bubble_outline_rounded),
+        ),
+      ],
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(18, 12, 18, 120),
+        children: [
+          if (lessons.isNotEmpty)
+            DropdownButtonFormField<String>(
+              key: const ValueKey('whiteboard-lesson-picker'),
+              initialValue: lesson?['id'] as String?,
+              decoration: const InputDecoration(labelText: 'Saved lessons'),
+              items: [
+                for (final item in lessons)
+                  DropdownMenuItem<String>(
+                    value: item['id'] as String,
+                    child: Text(
+                      item['topic'] as String? ?? 'Study topic',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (value) => setState(() => selectedLessonId = value),
+            ),
+          const SizedBox(height: 16),
+          if (lesson == null)
+            Glass(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.draw_outlined, size: 34),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Your Whiteboard is ready',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Turn on Study Mode in chat, then send a topic. The AI explanation and progressive practice set will appear here.',
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Generated JEE-style questions are original practice, not verified verbatim previous-year questions. No official PYQ source is connected yet.',
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: () {
+                      if (Navigator.of(context).canPop()) {
+                        Navigator.pop(context);
+                      } else {
+                        Navigator.pushReplacementNamed(context, '/chat');
+                      }
+                    },
+                    icon: const Icon(Icons.chat_rounded),
+                    label: const Text('Open chat'),
+                  ),
+                ],
+              ),
+            )
+          else ...[
+            Glass(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'TOPIC',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      letterSpacing: 1.1,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    lesson['topic'] as String? ?? 'Study lesson',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'AI-generated explanation and practice · saved on this phone',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Glass(
+              child: MarkdownBody(
+                data: lesson['explanation'] as String? ?? '',
+                selectable: true,
+                imageBuilder: (_, _, _) => const Text(
+                  '[Remote image blocked — no automatic network fetch]',
+                ),
+                onTapLink: (_, _, _) => notice(
+                  context,
+                  'Links are not opened automatically. Review and copy the destination if needed.',
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'JEE practice is labelled as original unless a verified past-paper source is provided. Check solutions against your class material.',
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ],
       ),
     );
   }
