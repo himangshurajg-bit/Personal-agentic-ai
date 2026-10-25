@@ -103,10 +103,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          expected_version_name='1.00.00.0000.0'
           version_name="$(tr -d '\r\n' < mobile/android-version.txt)"
-          if [ "$version_name" != "$expected_version_name" ]; then
-            echo "Expected Android versionName $expected_version_name; found $version_name." >&2
+          if ! [[ "$version_name" =~ ^[0-9]+(\.[0-9]+){2,4}$ ]]; then
+            echo "Invalid Android versionName in mobile/android-version.txt: $version_name" >&2
             exit 1
           fi
           version_line="$(sed -n 's/^version:[[:space:]]*//p' mobile/pubspec.yaml | head -n 1)"
@@ -115,12 +114,12 @@ jobs:
           max_code="$current_code"
           while IFS= read -r tag; do
             case "$tag" in
-              "v${version_name}-build"*)
+              v*-build*)
                 candidate="${tag##*-build}"
                 if [[ "$candidate" =~ ^[0-9]+$ ]] && [ "$candidate" -gt "$max_code" ]; then max_code="$candidate"; fi
                 ;;
             esac
-          done < <(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName')
+          done < <(git ls-remote --tags --refs origin | awk -F '\t' '{ sub("^refs/tags/", "", $2); print $2 }')
           build_number=$((max_code + 1))
           tag="v${version_name}-build${build_number}"
           if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then

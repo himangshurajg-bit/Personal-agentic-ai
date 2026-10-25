@@ -1,10 +1,10 @@
-# Personal Agentic AI for Android — 1.00.00.0000.0
+# Personal Agentic AI for Android — 1.23.07.01
 
-This is the stable, direct-install ARM64 release; its Android `versionName` is exactly `1.00.00.0000.0`, and the release workflow assigns the next monotonically increasing integer `versionCode`. It is signed with the owner's configured Android release key, not a development certificate, and is not a Google Play Store listing. Android 16 / API 36 is the automated qualification target; `minSdk 26` is a package setting, not a promise of tested older-device compatibility. The Redmi 24090RA29I has not been physically verified with this release. The existing Python/CLI/web and older Android projects are separate and unchanged.
+This is the stable, direct-install ARM64 release; its Android `versionName` is exactly `1.23.07.01`, and the release workflow assigns the next monotonically increasing integer `versionCode`. It is signed with the owner's configured Android release key, not a development certificate, and is not a Google Play Store listing. Android 16 / API 36 is the automated qualification target; `minSdk 26` is a package setting, not a promise of tested older-device compatibility. The Redmi 24090RA29I has not been physically verified with this release. The existing Python/CLI/web and older Android projects are separate and unchanged.
 
 ## Install on a phone (no computer required for local tools)
 
-1. Download `app-release.apk` from the GitHub release tagged `v1.00.00.0000.0-build18`.
+1. Download `app-release.apk` from the [latest stable GitHub release](https://github.com/himangshurajg-bit/Personal-agentic-ai/releases/latest).
 2. Open the APK on the phone. If Android blocks installation, allow installation from that specific browser/file app only if you trust the release; turn that allowance off afterward. The launcher label is **Personal AI**. Do not uninstall an older copy merely to bypass a signer mismatch: export local data first and inspect the mismatch.
 3. Complete onboarding and optionally choose the assistant display name. This changes UI and quoted self-introduction context, not package identity or wake recognition.
 4. Offline AI now has an explicitly opted-in experimental Gemma 4 E2B path. It requires a separately started 2.59 GB model download and an explicit load; without those, typed chat reports unavailable and never falls back online. Local notes, approved memories, tasks, chat search/history, user-authored flashcards, JSON exports and reviewed native actions work without a server.
