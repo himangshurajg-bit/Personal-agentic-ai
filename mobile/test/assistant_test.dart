@@ -323,6 +323,74 @@ void main() {
     },
   );
 
+  test('provider prompt override keeps the visible topic command and sends no history', () async {
+    Map<String, dynamic>? requestBody;
+    final state =
+        AssistantState(
+            clientFactory: () => MockClient.streaming((request, body) async {
+              requestBody = jsonDecode(
+                utf8.decode(await body.toBytes()),
+              ) as Map<String, dynamic>;
+              return http.StreamedResponse(
+                Stream.value(
+                  utf8.encode(
+                    'data: {"choices":[{"delta":{"content":"Practice set"},"finish_reason":null}]}\n\n'
+                    'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+                  ),
+                ),
+                200,
+              );
+            }),
+          )
+          ..engine = 'openai'
+          ..model = 'gpt-4o-mini'
+          ..openAiApiKey = 'test-only-key';
+
+    await state.send(
+      '/jee Capacitors',
+      providerMessageOverride:
+          'Generate original JEE-style capacitor practice.',
+      approvedOnline: true,
+      shareHistory: false,
+      shareMemories: false,
+    );
+
+    expect(state.messages.first['text'], '/jee Capacitors');
+    final sentPrompt = jsonDecode(
+      ((requestBody!['messages'] as List).single as Map)['content'] as String,
+    ) as Map<String, dynamic>;
+    expect(
+      sentPrompt['user_message'],
+      'Generate original JEE-style capacitor practice.',
+    );
+    expect(sentPrompt.containsKey('quoted_history'), isFalse);
+    expect(sentPrompt.containsKey('approved_memory_data'), isFalse);
+    expect(state.messages.last['text'], 'Practice set');
+    state.dispose();
+  });
+
+  test(
+    'generated study override is refused by an unqualified offline engine',
+    () async {
+      final state = stateWith(
+        MockClient((_) async {
+          fail('A generated offline request must not call a provider.');
+        }),
+      )..engine = 'offline';
+
+      await state.send(
+        '/jee Capacitors',
+        providerMessageOverride:
+            'Generate original JEE-style capacitor practice.',
+      );
+
+      expect(state.messages, isEmpty);
+      expect(state.error, contains('not qualified'));
+      expect(state.error, contains('no online fallback was used'));
+      state.dispose();
+    },
+  );
+
   test('an explicit retry reuses the original user turn and adds no duplicate history', () async {
     final requestBodies = <Map<String, dynamic>>[];
     var calls = 0;

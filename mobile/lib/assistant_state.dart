@@ -1445,6 +1445,11 @@ class AssistantState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void reportOfflineGenerationUnavailable(String feature) {
+    error = '$feature No message was sent and no online fallback was used.';
+    notifyListeners();
+  }
+
   Future<void> send(
     String text, {
     bool approvedOnline = false,
@@ -1455,12 +1460,18 @@ class AssistantState extends ChangeNotifier {
     String? conversationId,
     bool requireQualifiedOfflineModel = false,
     bool offlineModelQualified = false,
+    String? providerMessageOverride,
   }) async {
     if (busy || text.trim().isEmpty) {
       return;
     }
     final selectedEngine = engineOverride ?? engine;
     final chatScope = conversationId ?? conversation;
+    if (selectedEngine == 'offline' && providerMessageOverride != null) {
+      error = 'This generated study request needs a qualified online or local model. The current local model is not qualified for question generation; no message was sent and no online fallback was used.';
+      notifyListeners();
+      return;
+    }
     if (selectedEngine == 'offline' && !experimentalOfflineChatEnabled) {
       error = 'Experimental local chat is off. Review the offline-model warning and opt in in Settings before chatting. No online fallback was used.';
       notifyListeners();
@@ -1520,7 +1531,7 @@ class AssistantState extends ChangeNotifier {
         if (facts.isNotEmpty)
           'approved_memory_data': facts.map((m) => m['fact']).toList(),
         if (shareHistory) 'quoted_history': prior,
-        'user_message': lastPrompt,
+        'user_message': providerMessageOverride ?? lastPrompt,
       });
       await persistChat(conversationId: chatScope);
       if (generation != _generation) return;

@@ -8,6 +8,7 @@ import 'package:record/record.dart';
 import 'package:flutter/services.dart';
 
 import 'assistant_state.dart';
+import 'jee_question_request.dart';
 import 'mcp_servers.dart';
 import 'wajo_oauth.dart';
 import 'offline_model.dart';
@@ -2278,6 +2279,7 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final input = TextEditingController();
+  final _inputFocus = FocusNode();
   static const voiceEvents = MethodChannel('personal_assistant/voice');
   static const audioEvents = MethodChannel('personal_assistant/audio');
   final tts = FlutterTts();
@@ -3018,6 +3020,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (text.trim().isEmpty) {
       return;
     }
+    final jeeRequest = JeeQuestionRequest.fromMessage(text);
+    final providerMessage = jeeRequest?.buildPrompt();
+    if (jeeRequest != null &&
+        (widget.offlineQwen || widget.state.engine == 'offline')) {
+      widget.state.reportOfflineGenerationUnavailable(
+        'JEE question generation is not available in the unqualified local model. Select a configured online model to use this feature.',
+      );
+      return;
+    }
     await AssistantState.device.invokeMethod('voice_cancel');
     await tts.stop();
     if (speaking) await stopExpressiveAudio();
@@ -3030,15 +3041,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return;
     }
     if (!widget.offlineQwen) {
-      final payload = await reviewOnline(context, widget.state, text);
+      final payload = await reviewOnline(
+        context,
+        widget.state,
+        providerMessage ?? text,
+        includeContextOptions: jeeRequest == null,
+      );
       if (!payload) return;
     }
     input.clear();
     await widget.state.send(
       text,
+      providerMessageOverride: providerMessage,
       approvedOnline: !widget.offlineQwen,
-      shareMemories: widget.offlineQwen ? false : widget.state.shareMemories,
-      shareHistory: widget.offlineQwen ? false : widget.state.shareHistory,
+      shareMemories: widget.offlineQwen || jeeRequest != null
+          ? false
+          : widget.state.shareMemories,
+      shareHistory: widget.offlineQwen || jeeRequest != null
+          ? false
+          : widget.state.shareHistory,
       retryLastMessage: retry != null,
       engineOverride: widget.offlineQwen ? 'offline' : null,
       conversationId: widget.offlineQwen
@@ -3103,6 +3124,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     tts.stop();
     widget.state.stop(notify: false);
     input.dispose();
+    _inputFocus.dispose();
     super.dispose();
   }
 
@@ -3597,6 +3619,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     Expanded(
                       child: TextField(
                         controller: input,
+                        focusNode: _inputFocus,
                         minLines: 1,
                         maxLines: 5,
                         maxLength: 8000,
@@ -3673,20 +3696,42 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ),
             ),
             if (!widget.offlineQwen)
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: comparing || state.busy || speaking
-                      ? null
-                      : compareAis,
-                  icon: comparing
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.compare_arrows_rounded),
-                  label: Text(comparing ? 'Comparing…' : 'Compare AIs'),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 2),
+                child: Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  runAlignment: WrapAlignment.center,
+                  children: [
+                    TextButton.icon(
+                      onPressed: state.busy || speaking
+                          ? null
+                          : () {
+                              final existing = input.text.trim();
+                              input.text = existing.isEmpty
+                                  ? '/jee '
+                                  : '/jee $existing';
+                              input.selection = TextSelection.collapsed(
+                                offset: input.text.length,
+                              );
+                              _inputFocus.requestFocus();
+                            },
+                      icon: const Icon(Icons.quiz_outlined),
+                      label: const Text('JEE practice'),
+                    ),
+                    TextButton.icon(
+                      onPressed: comparing || state.busy || speaking
+                          ? null
+                          : compareAis,
+                      icon: comparing
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.compare_arrows_rounded),
+                      label: Text(comparing ? 'Comparing…' : 'Compare AIs'),
+                    ),
+                  ],
                 ),
               ),
           ],

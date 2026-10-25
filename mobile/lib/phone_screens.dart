@@ -22,11 +22,14 @@ import 'main.dart' show Shell, Glass, notice, Home;
 Future<bool> reviewOnline(
   BuildContext context,
   AssistantState state,
-  String text,
-) async {
+  String text, {
+  bool includeContextOptions = true,
+}) async {
   if (state.engine == 'offline') return true;
   var history = false, memory = false;
-  final relevant = state.local.relevant(text, state.conversation);
+  final relevant = includeContextOptions
+      ? state.local.relevant(text, state.conversation)
+      : <Map<String, dynamic>>[];
   return await showDialog<bool>(
         context: context,
         builder: (c) => StatefulBuilder(
@@ -49,28 +52,33 @@ Future<bool> reviewOnline(
                           ? 'Google may retain this prompt. On Gemini’s free tier, Google says submitted content may be used to improve its products; quotas and eligibility apply. This review does not erase provider copies.'
                           : 'The provider/service may retain this prompt and charge your account. The private FastAPI option also retains its prior server-side history. This review does not erase those copies.',
                     ),
-                    CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: history,
-                      title: const Text('Include this on-phone chat history'),
-                      onChanged: (v) => set(() => history = v ?? false),
-                    ),
-                    if (history)
-                      ...state.messages.map(
-                        (m) => Text('${m['role']}: ${m['text']}'),
+                    if (includeContextOptions) ...[
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: history,
+                        title: const Text('Include this on-phone chat history'),
+                        onChanged: (v) => set(() => history = v ?? false),
                       ),
-                    CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: memory,
-                      title: Text(
-                        'Include ${relevant.length} relevant approved memories',
+                      if (history)
+                        ...state.messages.map(
+                          (m) => Text('${m['role']}: ${m['text']}'),
+                        ),
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: memory,
+                        title: Text(
+                          'Include ${relevant.length} relevant approved memories',
+                        ),
+                        onChanged: (v) => set(() => memory = v ?? false),
                       ),
-                      onChanged: (v) => set(() => memory = v ?? false),
-                    ),
-                    if (memory) ...relevant.map((m) => Text(m['fact'])),
-                    const Text(
-                      'Private notebook, unrelated memories, files and other conversations are NOT attached. Files included as prompt text above are sent only if you approve.',
-                    ),
+                      if (memory) ...relevant.map((m) => Text(m['fact'])),
+                      const Text(
+                        'Private notebook, unrelated memories, files and other conversations are NOT attached. Files included as prompt text above are sent only if you approve.',
+                      ),
+                    ] else
+                      const Text(
+                        'This generated JEE prompt uses only the topic you entered; chat history, memories and files are not attached.',
+                      ),
                   ],
                 ),
               ),
