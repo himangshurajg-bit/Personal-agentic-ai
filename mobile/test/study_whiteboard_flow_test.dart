@@ -286,6 +286,7 @@ class _ImmediateStudyState extends AssistantState {
     bool shareMemories = false,
     bool shareHistory = false,
     bool retryLastMessage = false,
+    bool spokenConversation = false,
   }) async {
     lastStudyLessonId = studyModeEnabled ? lessonId : null;
     messages.add({'role': 'user', 'text': text, 'state': 'complete'});
