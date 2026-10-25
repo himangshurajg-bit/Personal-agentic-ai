@@ -38,10 +38,10 @@ void main() {
     reopened.dispose();
   });
 
-  testWidgets('all three tactile theme choices apply and save immediately', (
+  testWidgets('all five tactile theme choices apply and save immediately', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(390, 260);
+    tester.view.physicalSize = const Size(390, 420);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -67,6 +67,30 @@ void main() {
     expect(find.text('Aurora'), findsOneWidget);
     expect(find.text('Solar'), findsOneWidget);
     expect(find.text('Deep Space'), findsOneWidget);
+    expect(find.text('Forest'), findsOneWidget);
+    expect(find.text('Crimson'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('theme-choice-forest')));
+    await tester.pumpAndSettle();
+    expect(state.visualTheme, 'forest');
+    expect(await state.storage.read(key: 'visual_theme'), 'forest');
+    expect(
+      tester.getSemantics(find.byKey(const ValueKey('theme-choice-forest'))),
+      matchesSemantics(
+        isButton: true,
+        label: 'Forest, Forest green · moss, selected',
+        hasSelectedState: true,
+        isSelected: true,
+        isFocusable: true,
+        hasTapAction: true,
+        hasFocusAction: true,
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('theme-choice-crimson')));
+    await tester.pumpAndSettle();
+    expect(state.visualTheme, 'crimson');
+    expect(await state.storage.read(key: 'visual_theme'), 'crimson');
 
     await tester.tap(find.byKey(const ValueKey('theme-choice-solar')));
     await tester.pumpAndSettle();
@@ -143,9 +167,27 @@ void main() {
 
   test('each palette provides a distinct dark surface and orb spectrum', () {
     final palettes = FuturisticPalette.all;
-    expect(palettes.map((p) => p.id), ['aurora', 'solar', 'deep_space']);
-    expect(palettes.map((p) => p.darkBackground).toSet(), hasLength(3));
-    expect(palettes.map((p) => p.primary).toSet(), hasLength(3));
+    expect(palettes.map((p) => p.id), [
+      'aurora',
+      'solar',
+      'deep_space',
+      'forest',
+      'crimson',
+    ]);
+    expect(palettes.map((p) => p.darkBackground).toSet(), hasLength(5));
+    expect(palettes.map((p) => p.primary).toSet(), hasLength(5));
+    expect(
+      FuturisticPalette.fromId('forest').darkBackground,
+      const Color(0xff101812),
+    );
+    expect(
+      FuturisticPalette.fromId('forest').description,
+      'Forest green · moss',
+    );
+    expect(
+      FuturisticPalette.fromId('crimson').primary.r,
+      greaterThan(FuturisticPalette.fromId('crimson').primary.g),
+    );
     for (final palette in palettes) {
       expect(palette.orbColors, hasLength(4));
     }

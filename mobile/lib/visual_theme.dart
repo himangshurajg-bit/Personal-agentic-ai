@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// The three color worlds used by the app-wide futuristic visual system.
+/// The color worlds used by the app-wide visual system.
 class FuturisticPalette {
   final String id;
   final String name;
@@ -100,6 +100,46 @@ class FuturisticPalette {
         Color(0xff848dff),
         Color(0xffa9c6ff),
         Color(0xffc09fff),
+      ],
+    ),
+    FuturisticPalette(
+      id: 'forest',
+      name: 'Forest',
+      description: 'Forest green · moss',
+      icon: Icons.forest_rounded,
+      primary: Color(0xffa9c98a),
+      secondary: Color(0xff6fa987),
+      tertiary: Color(0xffc9b276),
+      lightPrimary: Color(0xff416a3c),
+      lightSecondary: Color(0xff39745d),
+      lightTertiary: Color(0xff78642e),
+      darkBackground: Color(0xff101812),
+      lightBackground: Color(0xfff1f5ed),
+      orbColors: [
+        Color(0xffb4d58d),
+        Color(0xff67b58c),
+        Color(0xffd1bd7e),
+        Color(0xff789976),
+      ],
+    ),
+    FuturisticPalette(
+      id: 'crimson',
+      name: 'Crimson',
+      description: 'Deep red · rose',
+      icon: Icons.local_fire_department_rounded,
+      primary: Color(0xffffa0a0),
+      secondary: Color(0xffe86d78),
+      tertiary: Color(0xffffc1a6),
+      lightPrimary: Color(0xff9f3441),
+      lightSecondary: Color(0xffb24454),
+      lightTertiary: Color(0xff914a39),
+      darkBackground: Color(0xff1a1013),
+      lightBackground: Color(0xfffaf1f1),
+      orbColors: [
+        Color(0xffff9b9f),
+        Color(0xffe66c7a),
+        Color(0xffffc0a6),
+        Color(0xffb96972),
       ],
     ),
   ];

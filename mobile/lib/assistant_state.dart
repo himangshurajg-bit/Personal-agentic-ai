@@ -1891,7 +1891,7 @@ class AssistantState extends ChangeNotifier {
     final studyModeForRequest = studyModeEnabled;
     final studyConversation = conversation;
     if (chatMode == 'offline' && !experimentalOfflineChatEnabled) {
-      error = 'Offline chat is selected, but experimental offline chat is off. Turn it on in Settings > AI, memory & models, then choose, download and load an on-device model. No online fallback was used.';
+      error = 'Offline chat is selected, but experimental offline chat is off. Turn it on in Settings > Chat & AI, then choose, download and load an on-device model. No online fallback was used.';
       notifyListeners();
       return;
     }

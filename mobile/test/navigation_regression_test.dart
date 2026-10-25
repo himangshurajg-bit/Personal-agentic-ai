@@ -82,6 +82,9 @@ void main() {
         if (chatUsesDrawer) {
           await tester.tap(find.byTooltip('Open navigation menu'));
           await tester.pumpAndSettle();
+          if (label == 'Memory' || label == 'Settings') {
+            await _scrollDrawerUntilVisible(tester, label);
+          }
           await tester.tap(find.text(label).last);
         } else {
           await tester.tap(find.text(label).last);
@@ -102,4 +105,23 @@ void main() {
       state.dispose();
     },
   );
+}
+
+Future<void> _scrollDrawerUntilVisible(
+  WidgetTester tester,
+  String label,
+) async {
+  final list = find.byKey(const Key('navigation-drawer-list'));
+  final item = find.descendant(of: list, matching: find.text(label));
+  final screenSize = tester.view.physicalSize / tester.view.devicePixelRatio;
+  final screen = Offset.zero & screenSize;
+  for (var attempt = 0; attempt < 12; attempt++) {
+    if (item.evaluate().isNotEmpty && screen.contains(tester.getCenter(item))) {
+      return;
+    }
+    await tester.drag(list, const Offset(0, -220));
+    await tester.pumpAndSettle();
+  }
+  expect(item, findsOneWidget);
+  expect(screen.contains(tester.getCenter(item)), isTrue);
 }

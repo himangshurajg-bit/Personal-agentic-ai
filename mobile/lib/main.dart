@@ -787,6 +787,7 @@ class _AssistantDrawer extends StatelessWidget {
             ),
             Expanded(
               child: ListView(
+                key: const Key('navigation-drawer-list'),
                 padding: const EdgeInsets.fromLTRB(12, 18, 12, 18),
                 children: [
                   const _SettingsSectionLabel('HOME'),
@@ -797,7 +798,7 @@ class _AssistantDrawer extends StatelessWidget {
                     onTap: () => _go(context, '/home'),
                   ),
                   const SizedBox(height: 18),
-                  const _SettingsSectionLabel('TOOLS'),
+                  const _SettingsSectionLabel('CHAT & STUDY'),
                   _DrawerRow(
                     icon: Icons.chat_bubble_outline_rounded,
                     label: 'Chat',
@@ -816,6 +817,8 @@ class _AssistantDrawer extends StatelessWidget {
                     selected: _selected('/whiteboard'),
                     onTap: () => _go(context, '/whiteboard'),
                   ),
+                  const SizedBox(height: 18),
+                  const _SettingsSectionLabel('TOOLS'),
                   _DrawerRow(
                     icon: Icons.bolt_rounded,
                     label: 'Actions',
@@ -835,6 +838,14 @@ class _AssistantDrawer extends StatelessWidget {
                     onTap: () => _go(context, '/drafts'),
                   ),
                   _DrawerRow(
+                    icon: Icons.image_outlined,
+                    label: 'Create image',
+                    selected: _selected('/images'),
+                    onTap: () => _go(context, '/images'),
+                  ),
+                  const SizedBox(height: 18),
+                  const _SettingsSectionLabel('YOUR LIBRARY'),
+                  _DrawerRow(
                     icon: Icons.psychology_alt_outlined,
                     label: 'Memory',
                     selected: _selected('/memory'),
@@ -853,7 +864,7 @@ class _AssistantDrawer extends StatelessWidget {
                     onTap: () => _go(context, '/files'),
                   ),
                   const SizedBox(height: 18),
-                  const _SettingsSectionLabel('PREFERENCES'),
+                  const _SettingsSectionLabel('SETTINGS'),
                   _DrawerRow(
                     icon: Icons.tune_rounded,
                     label: 'Settings',
@@ -4393,19 +4404,27 @@ class FuturisticThemePicker extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            for (var i = 0; i < FuturisticPalette.all.length; i++) ...[
-              if (i > 0) const SizedBox(width: 8),
-              Expanded(
-                child: _FuturisticThemeChoice(
-                  palette: FuturisticPalette.all[i],
-                  selected: state.visualTheme == FuturisticPalette.all[i].id,
-                  onTap: () => _choose(context, FuturisticPalette.all[i].id),
-                ),
-              ),
-            ],
-          ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final columns = constraints.maxWidth < 300 ? 2 : 3;
+            final itemWidth =
+                (constraints.maxWidth - (columns - 1) * 8) / columns;
+            return Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final palette in FuturisticPalette.all)
+                  SizedBox(
+                    width: itemWidth,
+                    child: _FuturisticThemeChoice(
+                      palette: palette,
+                      selected: state.visualTheme == palette.id,
+                      onTap: () => _choose(context, palette.id),
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
       ],
     );
@@ -5508,6 +5527,7 @@ class _SettingsState extends State<Settings> {
       ),
     ],
     child: ListView(
+      key: const Key('settings-list'),
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 118),
       children: [
         Padding(
@@ -5531,6 +5551,207 @@ class _SettingsState extends State<Settings> {
               ),
             ],
           ),
+        ),
+        _SettingsGroup(
+          title: 'Appearance & identity',
+          subtitle: 'Assistant name, app icon and color themes',
+          icon: Icons.palette_outlined,
+          children: [
+            Glass(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: name,
+                    maxLength: 40,
+                    decoration: const InputDecoration(
+                      labelText: 'Assistant display name',
+                    ),
+                  ),
+                  const Text('The name shown across your assistant app.'),
+                ],
+              ),
+            ),
+            Glass(
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.asset(
+                    AssistantState.launcherIconAssets[widget
+                        .state
+                        .launcherIconId]!,
+                    width: 48,
+                    height: 48,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                title: const Text('Home-screen app icon'),
+                subtitle: const Text(
+                  'Choose from 26 bundled designs for the Android launcher.',
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: _chooseLauncherIcon,
+              ),
+            ),
+            Glass(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  FuturisticThemePicker(state: widget.state),
+                  const SizedBox(height: 18),
+                  DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    initialValue: theme,
+                    decoration: const InputDecoration(
+                      labelText: 'Light or dark mode',
+                    ),
+                    items: [
+                      for (final mode in ['system', 'light', 'dark'])
+                        DropdownMenuItem(
+                          value: mode,
+                          child: Text(switch (mode) {
+                            'system' => 'Follow device',
+                            'light' => 'Light',
+                            'dark' => 'Dark',
+                            _ => 'Dark',
+                          }),
+                        ),
+                    ],
+                    onChanged: (value) =>
+                        setState(() => theme = value ?? 'system'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        _SettingsGroup(
+          title: 'Chat & AI',
+          subtitle: 'Chat routing, answer style and on-device models',
+          icon: Icons.psychology_alt_outlined,
+          children: [
+            Glass(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DropdownButtonFormField<String>(
+                    key: const Key('chat-mode-setting'),
+                    isExpanded: true,
+                    initialValue: chatMode,
+                    decoration: const InputDecoration(
+                      labelText: 'Chat connection',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'offline',
+                        child: Text('Offline · keep chat on this phone'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'online',
+                        child: Text('Online · selected AI provider'),
+                      ),
+                    ],
+                    onChanged: (mode) {
+                      if (mode != null) unawaited(_saveChatMode(mode));
+                    },
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Online sends each chat message to the selected provider. Offline keeps chat and its recent conversation history on this phone and uses the selected Qwen3 0.6B or Gemma 4 E2B model only after opt-in, download and load. If the model is unavailable, chat fails locally; it never falls back online. History and relevant memories are sent to online providers only when their separate Settings switches are on.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    key: const Key('ai-response-mode-setting'),
+                    isExpanded: true,
+                    initialValue: aiMode,
+                    decoration: const InputDecoration(
+                      labelText: 'AI response mode',
+                    ),
+                    items: [
+                      for (final entry in AssistantState.aiModeLabels.entries)
+                        DropdownMenuItem(
+                          value: entry.key,
+                          child: Text(entry.value),
+                        ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) unawaited(_saveAiMode(value));
+                    },
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Changes how replies are presented, not what actions are allowed. Existing confirmations and reviews still apply.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    key: const Key('response-style-setting'),
+                    isExpanded: true,
+                    initialValue: responseStyle,
+                    decoration: const InputDecoration(
+                      labelText: 'Answer style',
+                    ),
+                    items: [
+                      for (final entry
+                          in AssistantState.responseStyleLabels.entries)
+                        DropdownMenuItem(
+                          value: entry.key,
+                          child: Text(entry.value),
+                        ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) setState(() => responseStyle = value);
+                    },
+                  ),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Changes answer presentation only. It does not change safety, approvals or language.',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Glass(
+              child: ListTile(
+                leading: const Icon(Icons.compare_arrows_rounded),
+                title: const Text('Compare AIs'),
+                subtitle: const Text(
+                  'Choose the exact prompt and configured providers in Settings; each provider request needs review.',
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: _compareAisFromSettings,
+              ),
+            ),
+            Glass(
+              child: SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: widget.state.experimentalOfflineChatEnabled,
+                onChanged: (enabled) => _setExperimentalOfflineChat(enabled),
+                secondary: const _SettingsIconTile(icon: Icons.memory_rounded),
+                title: const Text(
+                  'Use an on-device model in chat · experimental',
+                ),
+                subtitle: const Text(
+                  'Explicit opt-in. First choose Offline in Chat connection above, then select Qwen3 0.6B or Gemma 4 E2B and download/load it below. Neither model is qualified for Redmi/HyperOS; replies may be inaccurate, slow or heat the phone. There is no online fallback.',
+                ),
+              ),
+            ),
+            Glass(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'The optional model is downloaded only when you start it. You can run fixed screening prompts or, after opting in above, use it for normal chat. Neither option means the model is qualified for your phone.',
+                  ),
+                  const SizedBox(height: 8),
+                  const OfflineModelPanel(),
+                ],
+              ),
+            ),
+          ],
         ),
         _SettingsGroup(
           title: 'Voice & conversation',
@@ -5626,13 +5847,6 @@ class _SettingsState extends State<Settings> {
                         ),
                       ),
                   ],
-                  TextField(
-                    controller: name,
-                    maxLength: 40,
-                    decoration: const InputDecoration(
-                      labelText: 'Assistant display name',
-                    ),
-                  ),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     value: widget.state.speakReplies,
@@ -5941,31 +6155,6 @@ class _SettingsState extends State<Settings> {
                     },
                   ),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    key: const Key('response-style-setting'),
-                    isExpanded: true,
-                    initialValue: responseStyle,
-                    decoration: const InputDecoration(
-                      labelText: 'Answer style',
-                    ),
-                    items: [
-                      for (final entry
-                          in AssistantState.responseStyleLabels.entries)
-                        DropdownMenuItem(
-                          value: entry.key,
-                          child: Text(entry.value),
-                        ),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) setState(() => responseStyle = value);
-                    },
-                  ),
-                  const Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Changes answer presentation only. It does not change safety, approvals or language.',
-                    ),
-                  ),
                   const SizedBox(height: 16),
                   const Text(
                     'Voice replies and recognition use your selected language where the device/provider supports it. English, Assamese, Hindi and Hinglish can be selected; this is not automatic language detection. Online providers may retain submitted content and charge your account; offline never falls back online.',
@@ -5975,49 +6164,6 @@ class _SettingsState extends State<Settings> {
                     'ElevenLabs expressive voice is on-demand per reply. It sends only that reply through your private service; each play asks first and may use your account credits. The ElevenLabs key and voice ID must be configured on the service host and are never stored in this APK. Audio tags guide delivery but do not guarantee an emotion. No provider key is bundled.',
                   ),
                   const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: () async {
-                      try {
-                        await widget.state.saveTheme(theme);
-                        await widget.state.setAssistantName(name.text);
-                        await widget.state.saveSpeechMode(speechMode);
-                        await widget.state.saveSpeechRate(speechRate);
-                        await widget.state.saveResponseStyle(responseStyle);
-                        await widget.state.saveSpeechVoice(
-                          name: selectedVoiceName,
-                          locale: selectedVoiceLocale,
-                        );
-                        await widget.state.saveAzureSpeechRegion(
-                          azureSpeechRegion.text,
-                        );
-                        if (azureSpeechSecret.text.trim().isNotEmpty) {
-                          await widget.state.saveCloudProviderKey(
-                            'azure_speech',
-                            azureSpeechSecret.text,
-                          );
-                        }
-                        azureSpeechSecret.clear();
-                        if (speechMode == 'deepgram') {
-                          await widget.state.saveCloudProviderKey(
-                            'deepgram',
-                            deepgramSecret.text,
-                          );
-                        }
-                        deepgramSecret.clear();
-                        await widget.state.saveEngine(
-                          widget.state.engine,
-                          widget.state.model,
-                          language,
-                        );
-                        if (context.mounted) {
-                          notice(context, 'Settings saved on this device.');
-                        }
-                      } catch (e) {
-                        if (context.mounted) notice(context, e);
-                      }
-                    },
-                    child: const Text('Save settings'),
-                  ),
                 ],
               ),
             ),
@@ -6050,164 +6196,10 @@ class _SettingsState extends State<Settings> {
           ],
         ),
         _SettingsGroup(
-          title: 'App updates',
-          subtitle: 'Check the official GitHub release',
-          icon: Icons.system_update_alt_rounded,
-          children: [Glass(child: const AppUpdatePanel())],
-        ),
-        _SettingsGroup(
-          title: 'Appearance',
-          subtitle: 'Themes and light or dark mode',
-          icon: Icons.palette_outlined,
+          title: 'Memory & data',
+          subtitle: 'Approved memories, conversation history and local backup',
+          icon: Icons.storage_outlined,
           children: [
-            Glass(
-              child: ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: Image.asset(
-                    AssistantState.launcherIconAssets[widget
-                        .state
-                        .launcherIconId]!,
-                    width: 48,
-                    height: 48,
-                    fit: BoxFit.cover,
-                  ),
-                ),
-                title: const Text('Home-screen app icon'),
-                subtitle: const Text(
-                  'Choose from 26 bundled designs for the Android launcher.',
-                ),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: _chooseLauncherIcon,
-              ),
-            ),
-            Glass(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  FuturisticThemePicker(state: widget.state),
-                  const SizedBox(height: 18),
-                  DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    initialValue: theme,
-                    decoration: const InputDecoration(
-                      labelText: 'Light or dark mode',
-                    ),
-                    items: [
-                      for (final mode in ['system', 'light', 'dark'])
-                        DropdownMenuItem(
-                          value: mode,
-                          child: Text(switch (mode) {
-                            'system' => 'Follow device',
-                            'light' => 'Light',
-                            'dark' => 'Dark',
-                            _ => 'Dark',
-                          }),
-                        ),
-                    ],
-                    onChanged: (value) =>
-                        setState(() => theme = value ?? 'system'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: () => Navigator.pushNamed(context, '/images'),
-                    icon: const Icon(Icons.image_outlined),
-                    label: const Text('Create an image (Cloudflare)'),
-                  ),
-                  const Text(
-                    'This sends only the prompt you type in the image screen—not chat history, saved memories or files. The private service must be explicitly configured.',
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        _SettingsGroup(
-          title: 'AI, memory & models',
-          subtitle:
-              'Provider selection, approved memory and offline experiments',
-          icon: Icons.psychology_alt_outlined,
-          children: [
-            Glass(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  DropdownButtonFormField<String>(
-                    key: const Key('chat-mode-setting'),
-                    isExpanded: true,
-                    initialValue: chatMode,
-                    decoration: const InputDecoration(
-                      labelText: 'Chat connection',
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'offline',
-                        child: Text('Offline · keep chat on this phone'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'online',
-                        child: Text('Online · selected AI provider'),
-                      ),
-                    ],
-                    onChanged: (mode) {
-                      if (mode != null) unawaited(_saveChatMode(mode));
-                    },
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Online sends each chat message to the selected provider. Offline keeps chat and its recent conversation history on this phone and uses the selected Qwen3 0.6B or Gemma 4 E2B model only after opt-in, download and load. If the model is unavailable, chat fails locally; it never falls back online. History and relevant memories are sent to online providers only when their separate Settings switches are on.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    key: const Key('ai-response-mode-setting'),
-                    isExpanded: true,
-                    initialValue: aiMode,
-                    decoration: const InputDecoration(
-                      labelText: 'AI response mode',
-                    ),
-                    items: [
-                      for (final entry in AssistantState.aiModeLabels.entries)
-                        DropdownMenuItem(
-                          value: entry.key,
-                          child: Text(entry.value),
-                        ),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) unawaited(_saveAiMode(value));
-                    },
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Changes how replies are presented, not what actions are allowed. Existing confirmations and reviews still apply.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ),
-            Glass(
-              child: ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.hub_outlined),
-                title: const Text('API & MCP connections'),
-                subtitle: Text(
-                  '${widget.state.config.description} · ${widget.state.customMcpServers.length} MCP server${widget.state.customMcpServers.length == 1 ? '' : 's'} saved',
-                ),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => Navigator.pushNamed(context, '/connections'),
-              ),
-            ),
-            Glass(
-              child: ListTile(
-                leading: const Icon(Icons.compare_arrows_rounded),
-                title: const Text('Compare AIs'),
-                subtitle: const Text(
-                  'Choose the exact prompt and configured providers in Settings; each provider request needs review.',
-                ),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: _compareAisFromSettings,
-              ),
-            ),
             Glass(
               child: ListTile(
                 contentPadding: EdgeInsets.zero,
@@ -6221,29 +6213,82 @@ class _SettingsState extends State<Settings> {
               ),
             ),
             Glass(
-              child: SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                value: widget.state.experimentalOfflineChatEnabled,
-                onChanged: (enabled) => _setExperimentalOfflineChat(enabled),
-                secondary: const _SettingsIconTile(icon: Icons.memory_rounded),
-                title: const Text(
-                  'Use an on-device model in chat · experimental',
-                ),
-                subtitle: const Text(
-                  'Explicit opt-in. First choose Offline in Chat connection above, then select Qwen3 0.6B or Gemma 4 E2B and download/load it below. Neither model is qualified for Redmi/HyperOS; replies may be inaccurate, slow or heat the phone. There is no online fallback.',
-                ),
+              child: ListTile(
+                leading: const Icon(Icons.history_rounded),
+                title: const Text('Conversation history'),
+                subtitle: const Text('Open a saved on-phone conversation.'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: _openConversationHistory,
+              ),
+            ),
+            Glass(
+              child: ListTile(
+                leading: const Icon(Icons.add_comment_outlined),
+                title: const Text('New conversation'),
+                subtitle: const Text('Start a fresh on-phone chat.'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: _startNewConversation,
               ),
             ),
             Glass(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'The optional model is downloaded only when you start it. You can run fixed screening prompts or, after opting in above, use it for normal chat. Neither option means the model is qualified for your phone.',
+                  Text(
+                    'Local backup',
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  const SizedBox(height: 8),
-                  const OfflineModelPanel(),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Export is manual and owner-confirmed. The JSON file is readable and unencrypted; save it somewhere private. Provider keys and service tokens are excluded. Import/restore is not implemented.',
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: _exportLocalBackup,
+                    icon: const Icon(Icons.download_outlined),
+                    label: const Text('Export local data'),
+                  ),
                 ],
+              ),
+            ),
+            Glass(
+              child: TextButton(
+                onPressed: () async {
+                  final yes = await showDialog<bool>(
+                    context: context,
+                    builder: (c) => AlertDialog(
+                      title: const Text('Delete current chat history?'),
+                      content: Text(
+                        'Delete on-phone history for ${widget.state.conversation}. Saved memories and any provider/service copies remain separate.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(c, false),
+                          child: const Text('Keep'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(c, true),
+                          child: const Text('Delete history'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (yes == true) {
+                    try {
+                      await widget.state.deleteHistory();
+                      widget.state.messages = [];
+                      if (context.mounted) {
+                        notice(
+                          context,
+                          'Current on-phone history deleted. Provider/service copies were not deleted.',
+                        );
+                      }
+                    } catch (e) {
+                      if (context.mounted) notice(context, e);
+                    }
+                  }
+                },
+                child: const Text('Delete current conversation history'),
               ),
             ),
           ],
@@ -6254,6 +6299,18 @@ class _SettingsState extends State<Settings> {
               'Connected services, drafts, reviewed actions and reminders',
           icon: Icons.hub_outlined,
           children: [
+            Glass(
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.hub_outlined),
+                title: const Text('API & MCP connections'),
+                subtitle: Text(
+                  '${widget.state.config.description} · ${widget.state.customMcpServers.length} MCP server${widget.state.customMcpServers.length == 1 ? '' : 's'} saved',
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.pushNamed(context, '/connections'),
+              ),
+            ),
             Glass(
               child: ListTile(
                 leading: const Icon(Icons.edit_note_rounded),
@@ -6378,90 +6435,69 @@ class _SettingsState extends State<Settings> {
           ],
         ),
         _SettingsGroup(
-          title: 'Data & conversation history',
-          subtitle: 'Export local data or delete the current chat',
-          icon: Icons.storage_outlined,
-          children: [
-            Glass(
-              child: ListTile(
-                leading: const Icon(Icons.history_rounded),
-                title: const Text('Conversation history'),
-                subtitle: const Text('Open a saved on-phone conversation.'),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: _openConversationHistory,
+          title: 'About & updates',
+          subtitle: 'Check the official GitHub release',
+          icon: Icons.system_update_alt_rounded,
+          children: [Glass(child: const AppUpdatePanel())],
+        ),
+        Glass(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Save changes',
+                style: Theme.of(context).textTheme.titleMedium,
               ),
-            ),
-            Glass(
-              child: ListTile(
-                leading: const Icon(Icons.add_comment_outlined),
-                title: const Text('New conversation'),
-                subtitle: const Text('Start a fresh on-phone chat.'),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: _startNewConversation,
+              const SizedBox(height: 4),
+              const Text(
+                'Applies your assistant name, light or dark mode, speech input, language and installed voice choices.',
               ),
-            ),
-            Glass(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Local backup',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Export is manual and owner-confirmed. The JSON file is readable and unencrypted; save it somewhere private. Provider keys and service tokens are excluded. Import/restore is not implemented.',
-                  ),
-                  const SizedBox(height: 10),
-                  OutlinedButton.icon(
-                    onPressed: _exportLocalBackup,
-                    icon: const Icon(Icons.download_outlined),
-                    label: const Text('Export local data'),
-                  ),
-                ],
-              ),
-            ),
-            Glass(
-              child: TextButton(
+              const SizedBox(height: 10),
+              FilledButton(
                 onPressed: () async {
-                  final yes = await showDialog<bool>(
-                    context: context,
-                    builder: (c) => AlertDialog(
-                      title: const Text('Delete current chat history?'),
-                      content: Text(
-                        'Delete on-phone history for ${widget.state.conversation}. Saved memories and any provider/service copies remain separate.',
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(c, false),
-                          child: const Text('Keep'),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(c, true),
-                          child: const Text('Delete history'),
-                        ),
-                      ],
-                    ),
-                  );
-                  if (yes == true) {
-                    try {
-                      await widget.state.deleteHistory();
-                      widget.state.messages = [];
-                      if (context.mounted) {
-                        notice(
-                          context,
-                          'Current on-phone history deleted. Provider/service copies were not deleted.',
-                        );
-                      }
-                    } catch (e) {
-                      if (context.mounted) notice(context, e);
+                  try {
+                    await widget.state.saveTheme(theme);
+                    await widget.state.setAssistantName(name.text);
+                    await widget.state.saveSpeechMode(speechMode);
+                    await widget.state.saveSpeechRate(speechRate);
+                    await widget.state.saveResponseStyle(responseStyle);
+                    await widget.state.saveSpeechVoice(
+                      name: selectedVoiceName,
+                      locale: selectedVoiceLocale,
+                    );
+                    await widget.state.saveAzureSpeechRegion(
+                      azureSpeechRegion.text,
+                    );
+                    if (azureSpeechSecret.text.trim().isNotEmpty) {
+                      await widget.state.saveCloudProviderKey(
+                        'azure_speech',
+                        azureSpeechSecret.text,
+                      );
                     }
+                    azureSpeechSecret.clear();
+                    if (speechMode == 'deepgram') {
+                      await widget.state.saveCloudProviderKey(
+                        'deepgram',
+                        deepgramSecret.text,
+                      );
+                    }
+                    deepgramSecret.clear();
+                    await widget.state.saveEngine(
+                      widget.state.engine,
+                      widget.state.model,
+                      language,
+                    );
+                    if (context.mounted) {
+                      notice(context, 'Settings saved on this device.');
+                    }
+                  } catch (e) {
+                    if (context.mounted) notice(context, e);
                   }
                 },
-                child: const Text('Delete current conversation history'),
+                child: const Text('Save settings'),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ],
     ),
@@ -6726,7 +6762,7 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
         ),
         const SizedBox(height: 6),
         const Text(
-          'Chat routing is chosen separately in Settings > AI, memory & models. Saving settings does not connect a server. Use Test connection to verify the selected endpoint. Provider credentials stay in Android secure storage and are never displayed again.',
+          'Chat routing is chosen separately in Settings > Chat & AI. Saving settings does not connect a server. Use Test connection to verify the selected endpoint. Provider credentials stay in Android secure storage and are never displayed again.',
         ),
         const SizedBox(height: 16),
         const _SettingsSectionLabel('AI PROVIDER'),
@@ -6961,7 +6997,7 @@ class _ApiMcpSettingsState extends State<ApiMcpSettings> {
                   ),
               ] else ...[
                 const Text(
-                  'Offline mode does not connect to a server. In Settings > AI, memory & models, enable experimental chat, select Qwen3 0.6B or Gemma 4 E2B, then download and load it on this phone. There is no online fallback.',
+                  'Offline mode does not connect to a server. In Settings > Chat & AI, enable experimental chat, select Qwen3 0.6B or Gemma 4 E2B, then download and load it on this phone. There is no online fallback.',
                 ),
               ],
               const SizedBox(height: 12),

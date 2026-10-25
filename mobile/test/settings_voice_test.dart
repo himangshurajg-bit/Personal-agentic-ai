@@ -43,6 +43,10 @@ void main() {
     expect(find.text('Read replies aloud'), findsOneWidget);
     expect(find.byKey(const Key('voice-conversation-mode')), findsOneWidget);
     expect(find.text('Push-to-talk · one turn'), findsOneWidget);
+    await tester.ensureVisible(
+      find.byKey(const Key('voice-conversation-mode')),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('voice-conversation-mode')));
     await tester.pumpAndSettle();
     expect(find.text('Hands-free · transcript review'), findsOneWidget);
@@ -54,22 +58,119 @@ void main() {
       findsOneWidget,
     );
     expect(find.textContaining('does not listen continuously'), findsOneWidget);
-    await tester.scrollUntilVisible(
-      find.text('AI, memory & models'),
-      250,
-      scrollable: find.byType(Scrollable).first,
+    await _scrollSettingsUntilVisible(
+      tester,
+      find.text('Chat & AI'),
+      direction: 1,
     );
-    expect(find.text('AI, memory & models'), findsOneWidget);
-    await tester.scrollUntilVisible(
+    expect(find.text('Chat & AI'), findsOneWidget);
+    await _scrollSettingsUntilVisible(
+      tester,
       find.text('Privacy & access'),
-      250,
-      scrollable: find.byType(Scrollable).first,
+      direction: -1,
     );
     expect(find.text('Privacy & access'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     state.dispose();
   });
+  testWidgets('settings place options in clear, purpose-based groups', (
+    tester,
+  ) async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(AssistantState.device, (call) async {
+          if (call.method == 'device_status') {
+            return <String, dynamic>{
+              'sdk': 36,
+              'microphone_granted': false,
+              'notifications_granted': false,
+              'on_device_recognizer': false,
+              'system_recognizer': false,
+            };
+          }
+          return <String, dynamic>{};
+        });
+    const tts = MethodChannel('flutter_tts');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(tts, (call) async => <dynamic>[]);
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(AssistantState.device, null);
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(tts, null);
+    });
+
+    final state = AssistantState();
+    await state.initialize();
+    await tester.pumpWidget(MaterialApp(home: Settings(state: state)));
+    await tester.pumpAndSettle();
+
+    final groupTitles = [
+      'Appearance & identity',
+      'Chat & AI',
+      'Voice & conversation',
+      'Memory & data',
+      'Connections & workflows',
+      'Privacy & access',
+      'About & updates',
+    ];
+    for (final title in groupTitles) {
+      final titleFinder = find.text(title);
+      await _scrollSettingsUntilVisible(tester, titleFinder, direction: -1);
+      expect(titleFinder, findsOneWidget);
+    }
+
+    await _scrollSettingsUntilVisible(
+      tester,
+      find.text('Appearance & identity'),
+      direction: 1,
+    );
+    await tester.tap(find.text('Appearance & identity'));
+    await tester.pumpAndSettle();
+    expect(find.text('Assistant display name'), findsOneWidget);
+    expect(find.byKey(const ValueKey('theme-choice-forest')), findsOneWidget);
+    expect(find.byKey(const ValueKey('theme-choice-crimson')), findsOneWidget);
+    expect(find.text('Create image'), findsNothing);
+
+    await _scrollSettingsUntilVisible(
+      tester,
+      find.text('Chat & AI'),
+      direction: -1,
+    );
+    await tester.tap(find.text('Chat & AI'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('response-style-setting')), findsOneWidget);
+    expect(find.text('API & MCP connections'), findsNothing);
+
+    await _scrollSettingsUntilVisible(
+      tester,
+      find.text('Memory & data'),
+      direction: -1,
+    );
+    await tester.tap(find.text('Memory & data'));
+    await tester.pumpAndSettle();
+    expect(find.text('Approved memories'), findsOneWidget);
+
+    await _scrollSettingsUntilVisible(
+      tester,
+      find.text('Connections & workflows'),
+      direction: -1,
+    );
+    await tester.tap(find.text('Connections & workflows'));
+    await tester.pumpAndSettle();
+    expect(find.text('API & MCP connections'), findsOneWidget);
+
+    await _scrollSettingsUntilVisible(
+      tester,
+      find.text('Save settings'),
+      direction: -1,
+    );
+    expect(find.text('Save settings'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    state.dispose();
+  });
+
   testWidgets('voice picker previews only an installed offline voice', (
     tester,
   ) async {
@@ -182,11 +283,7 @@ void main() {
     await tester.tap(find.text('Voice & conversation'));
     await tester.pumpAndSettle();
     final toggle = find.byKey(const Key('azure-speech-opt-in'));
-    await tester.scrollUntilVisible(
-      toggle,
-      250,
-      scrollable: find.byType(Scrollable).first,
-    );
+    await _scrollSettingsUntilVisible(tester, toggle, direction: -1);
     await tester.pumpAndSettle();
     await tester.tap(toggle);
     await tester.pumpAndSettle();
@@ -238,16 +335,17 @@ void main() {
     await state.initialize();
     await tester.pumpWidget(MaterialApp(home: Settings(state: state)));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.text('AI, memory & models'),
-      250,
-      scrollable: find.byType(Scrollable).first,
+    await _scrollSettingsUntilVisible(
+      tester,
+      find.text('Chat & AI'),
+      direction: -1,
     );
-    await tester.tap(find.text('AI, memory & models'));
+    await tester.tap(find.text('Chat & AI'));
     await tester.pumpAndSettle();
 
     final modePicker = find.byKey(const Key('ai-response-mode-setting'));
     expect(modePicker, findsOneWidget);
+    await _scrollSettingsUntilVisible(tester, modePicker, direction: -1);
     await tester.tap(modePicker);
     await tester.pumpAndSettle();
     for (final label in const [
@@ -267,4 +365,36 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     state.dispose();
   });
+}
+
+Future<void> _scrollSettingsUntilVisible(
+  WidgetTester tester,
+  Finder target, {
+  required double direction,
+}) async {
+  final list = find.byKey(const Key('settings-list'));
+  final viewport = tester.getRect(list);
+  final screenSize = tester.view.physicalSize / tester.view.devicePixelRatio;
+  final screen = Offset.zero & screenSize;
+  bool isVisible() {
+    if (target.evaluate().isEmpty) return false;
+    final center = tester.getCenter(target);
+    return screen.contains(center) && viewport.contains(center);
+  }
+
+  for (var attempt = 0; attempt < 20 && !isVisible(); attempt++) {
+    var dragDirection = direction;
+    if (target.evaluate().isNotEmpty) {
+      final targetRect = tester.getRect(target);
+      if (targetRect.bottom < screen.top) {
+        dragDirection = 1;
+      } else if (targetRect.top > screen.bottom) {
+        dragDirection = -1;
+      }
+    }
+    await tester.drag(list, Offset(0, dragDirection * 220));
+    await tester.pumpAndSettle();
+  }
+  expect(target, findsOneWidget);
+  expect(isVisible(), isTrue);
 }

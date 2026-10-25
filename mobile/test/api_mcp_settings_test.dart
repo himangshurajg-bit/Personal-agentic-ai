@@ -352,16 +352,26 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
-        find.text('AI, memory & models'),
+        find.text('Connections & workflows'),
         250,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const Key('settings-list')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
       );
-      await tester.tap(find.text('AI, memory & models'));
+      await tester.tap(find.text('Connections & workflows'));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.text('API & MCP connections'),
         250,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const Key('settings-list')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
       );
 
       expect(find.text('API & MCP connections'), findsOneWidget);
@@ -592,16 +602,26 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: Settings(state: state)));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
-      find.text('AI, memory & models'),
+      find.text('Chat & AI'),
       250,
-      scrollable: find.byType(Scrollable).first,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const Key('settings-list')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
     );
-    await tester.tap(find.text('AI, memory & models'));
+    await tester.tap(find.text('Chat & AI'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.byKey(const Key('chat-mode-setting')),
       250,
-      scrollable: find.byType(Scrollable).first,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const Key('settings-list')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
     );
     expect(
       find.textContaining('Online sends each chat message'),
