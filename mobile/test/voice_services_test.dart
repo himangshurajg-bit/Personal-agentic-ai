@@ -127,6 +127,113 @@ void main() {
   });
 
   test(
+    'Gemini expressive TTS sends verbatim text, style, voice and API key',
+    () async {
+      final wav = Uint8List.fromList([
+        ...ascii.encode('RIFF'),
+        ...List<int>.filled(4, 0),
+        ...ascii.encode('WAVE'),
+        ...List<int>.filled(32, 0),
+      ]);
+      late http.Request observed;
+      final service = GeminiExpressiveSpeechSynthesizer(
+        clientFactory: () => MockClient((request) async {
+          observed = request;
+          return http.Response(
+            jsonEncode({
+              'steps': [
+                {
+                  'content': [
+                    {'type': 'audio', 'data': base64Encode(wav)},
+                  ],
+                },
+              ],
+            }),
+            200,
+          );
+        }),
+      );
+      final output = await service.synthesize(
+        text: '  Hello <friend>  ',
+        apiKey: 'existing-gemini-key',
+        locale: 'as-IN',
+        style: GeminiExpressiveSpeechSynthesizer.styleFor('angry'),
+      );
+      expect(output, wav);
+      expect(
+        observed.url,
+        Uri.parse(GeminiExpressiveSpeechSynthesizer.endpoint),
+      );
+      expect(observed.headers['x-goog-api-key'], 'existing-gemini-key');
+      expect(observed.headers['content-type'], 'application/json');
+      final body = jsonDecode(observed.body) as Map<String, dynamic>;
+      expect(body['model'], GeminiExpressiveSpeechSynthesizer.model);
+      expect(body['response_format'], {
+        'type': 'audio',
+        'mime_type': 'audio/wav',
+      });
+      expect(body['generation_config'], {
+        'speech_config': [
+          {'voice': 'Kore'},
+        ],
+      });
+      final input = (body['input'] as List).single as Map<String, dynamic>;
+      expect(input['text'], 'Hello <friend>');
+      expect(input['annotations'], [
+        {
+          'type': 'speech_metadata',
+          'style': GeminiExpressiveSpeechSynthesizer.styleFor('angry'),
+        },
+      ]);
+    },
+  );
+
+  test('Gemini TTS rejects empty key, unsupported language and empty text before networking', () async {
+    var calls = 0;
+    final service = GeminiExpressiveSpeechSynthesizer(
+      clientFactory: () => MockClient((_) async {
+        calls++;
+        return http.Response('{}', 200);
+      }),
+    );
+    Future<Uint8List> run({
+      String key = 'key',
+      String locale = 'en-IN',
+      String text = 'Hello',
+    }) => service.synthesize(text: text, apiKey: key, locale: locale);
+    await expectLater(run(key: ''), throwsA(isA<ServiceException>()));
+    await expectLater(
+      run(locale: 'hi-Latn-IN'),
+      throwsA(isA<ServiceException>()),
+    );
+    await expectLater(run(text: '  '), throwsA(isA<ServiceException>()));
+    expect(calls, 0);
+  });
+
+  test('Gemini TTS provider failure is safe and never retried', () async {
+    var calls = 0;
+    final service = GeminiExpressiveSpeechSynthesizer(
+      clientFactory: () => MockClient((_) async {
+        calls++;
+        return http.Response('private response and key', 429);
+      }),
+    );
+    await expectLater(
+      service.synthesize(text: 'Hello', apiKey: 'private-key', locale: 'en-IN'),
+      throwsA(
+        predicate(
+          (error) =>
+              error is ServiceException &&
+              error.toString().contains('quota') &&
+              !error.toString().contains('private response') &&
+              !error.toString().contains('private-key'),
+        ),
+      ),
+    );
+    expect(calls, 1);
+  });
+
+  test(
     'refuses a missing key and unsupported locale before networking',
     () async {
       var calls = 0;

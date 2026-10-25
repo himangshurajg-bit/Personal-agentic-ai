@@ -22,6 +22,7 @@ import 'ui_motion.dart';
 import 'typing_indicator.dart';
 import 'visual_theme.dart';
 import 'voice_services.dart';
+import 'live_conversation.dart';
 
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
@@ -2936,9 +2937,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   late final AzureSpeechSynthesizer _azureSpeech = AzureSpeechSynthesizer(
     clientFactory: widget.state.clientFactory,
   );
+  late final GeminiExpressiveSpeechSynthesizer _geminiSpeech =
+      GeminiExpressiveSpeechSynthesizer(
+        clientFactory: widget.state.clientFactory,
+      );
   final tts = FlutterTts();
   final _deepgramRecorder = AudioRecorder();
   final _deepgram = DeepgramTranscriber();
+  DeepgramLiveSession? _liveDeepgram;
+  StreamSubscription<Uint8List>? _liveAudioSubscription;
+  final List<String> _liveTurnQueue = [];
+  bool _liveConversationActive = false;
+  bool _liveConversationStarting = false;
+  bool _liveTurnProcessing = false;
   StreamSubscription<Uint8List>? _deepgramSubscription;
   final List<Uint8List> _deepgramChunks = [];
   Timer? _deepgramLimit;
@@ -3019,6 +3030,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           level = 0;
         }
       });
+      if (kind == 'live_stop_requested') {
+        unawaited(_endLiveConversation());
+        return;
+      }
       if (kind == 'text') {
         final transcript = (event['value'] as String? ?? '').trim();
         if (transcript.isEmpty) {
@@ -3037,6 +3052,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed && _liveConversationActive) {
+      return;
+    }
     if (state != AppLifecycleState.resumed) {
       _handsFreeSessionActive = false;
       _handsFreeOnlineApproved = false;
@@ -3066,6 +3084,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> stopAll() async {
+    if (_liveConversationActive || _liveConversationStarting) {
+      await _endLiveConversation();
+    }
     _handsFreeSessionActive = false;
     _handsFreeOnlineApproved = false;
     if (listening && widget.state.speechMode == 'deepgram') {
@@ -3267,8 +3288,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> listen() async {
+    if (_liveConversationActive || _liveConversationStarting) {
+      await _endLiveConversation();
+      return;
+    }
     if (_handsFreeSessionActive) {
       await _endHandsFreeSession();
+      return;
+    }
+    if (widget.state.voiceConversationMode == 'live_conversation') {
+      await _startLiveConversation();
       return;
     }
     if (widget.state.voiceConversationMode == 'hands_free') {
@@ -3276,6 +3305,221 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return;
     }
     await _listenOnce();
+  }
+
+  Future<void> _startLiveConversation() async {
+    if (_liveConversationStarting || _liveConversationActive) return;
+    if (widget.state.chatMode != 'online' || widget.state.engine != 'gemini') {
+      notice(
+        context,
+        'Live Conversation needs Online chat with Gemini selected. No provider was contacted.',
+      );
+      return;
+    }
+    if (widget.state.speechMode != 'deepgram') {
+      notice(
+        context,
+        'Choose Deepgram as speech recognition in Settings before starting Live Conversation. No provider was contacted.',
+      );
+      return;
+    }
+    if (widget.state.geminiApiKey.isEmpty ||
+        widget.state.deepgramApiKey.isEmpty) {
+      notice(
+        context,
+        'Add your Gemini and Deepgram API keys in Settings before starting. No provider was contacted.',
+      );
+      return;
+    }
+    if (!DeepgramLiveSession.supportedLocales.contains(widget.state.language)) {
+      notice(
+        context,
+        'Deepgram Live Conversation supports English, Assamese and Hindi; choose one of those languages in Settings.',
+      );
+      return;
+    }
+    if (input.text.trim().isNotEmpty) {
+      notice(
+        context,
+        'Send or clear your current draft before starting Live Conversation.',
+      );
+      return;
+    }
+
+    final consent =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Start Live Conversation?'),
+            content: Text(
+              'The microphone will stream live audio to Deepgram for ${widget.state.language}; recognized speech will be sent to Google Gemini for replies. ${widget.state.geminiTtsEnabled ? 'Expressive cloud speech is enabled: the exact reply text will also be sent to Google Gemini TTS; usage may be charged, and Google may use content on unpaid quota to improve products. ' : 'Replies use the installed Android voice. '}The session can continue when you switch apps, until you tap Stop here or in the ongoing notification. Start only while you want the microphone active. Provider processing, limits, and any charges follow your Deepgram and Google plans. No device action is performed automatically.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Start live session'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!consent || !mounted) return;
+
+    _liveConversationStarting = true;
+    if (mounted) setState(() {});
+    var serviceStarted = false;
+    try {
+      if (!await _deepgramRecorder.hasPermission()) {
+        throw ServiceException(
+          'Allow Android microphone access before starting. No audio was sent.',
+        );
+      }
+      final notificationPermission = await AssistantState.device
+          .invokeMapMethod<String, dynamic>('request_access_permission', {
+            'permission': 'notifications',
+          });
+      if (notificationPermission?['granted'] != true) {
+        throw ServiceException(
+          'Allow notifications so the ongoing microphone session has a visible Stop control. No audio was sent.',
+        );
+      }
+      await LiveConversationService.start();
+      serviceStarted = true;
+      final session = DeepgramLiveSession(
+        apiKey: widget.state.deepgramApiKey,
+        locale: widget.state.language,
+        onUtterance: (utterance) => unawaited(_queueLiveUtterance(utterance)),
+        onError: (message) {
+          if (mounted) notice(context, message);
+          unawaited(_endLiveConversation());
+        },
+      );
+      await session.start();
+      _liveDeepgram = session;
+      final stream = await _deepgramRecorder.startStream(
+        const RecordConfig(
+          encoder: AudioEncoder.pcm16bits,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+      );
+      if (!mounted) {
+        await _deepgramRecorder.stop();
+        await session.close();
+        _liveDeepgram = null;
+        await LiveConversationService.stop();
+        return;
+      }
+      _liveAudioSubscription = stream.listen(
+        (frame) {
+          if (_liveConversationActive && !speaking && !widget.state.busy) {
+            _liveDeepgram?.addAudio(frame);
+          }
+        },
+        onError: (_) {
+          if (mounted) {
+            notice(
+              context,
+              'Microphone stream stopped. Live Conversation ended.',
+            );
+          }
+          unawaited(_endLiveConversation());
+        },
+        cancelOnError: true,
+      );
+      _liveConversationActive = true;
+      _liveTurnQueue.clear();
+      setState(() {
+        listening = true;
+        level = 0;
+      });
+      notice(
+        context,
+        'Live Conversation is on. Audio streams to Deepgram until you tap Stop.',
+      );
+    } catch (error) {
+      if (serviceStarted) await LiveConversationService.stop();
+      if (mounted) notice(context, error);
+    } finally {
+      _liveConversationStarting = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _queueLiveUtterance(String utterance) async {
+    final text = utterance.trim();
+    if (!_liveConversationActive || text.isEmpty) return;
+    if (_liveTurnQueue.length >= 3) {
+      notice(
+        context,
+        'Live reply queue is full; pause and try again after the current reply.',
+      );
+      return;
+    }
+    _liveTurnQueue.add(text);
+    if (_liveTurnProcessing) return;
+    _liveTurnProcessing = true;
+    try {
+      while (_liveConversationActive && _liveTurnQueue.isNotEmpty) {
+        final turn = _liveTurnQueue.removeAt(0);
+        await widget.state.send(
+          turn,
+          shareMemories: widget.state.shareMemories,
+          shareHistory: widget.state.shareHistory,
+          spokenConversation: true,
+        );
+        if (!mounted || !_liveConversationActive) break;
+        if (widget.state.error.isNotEmpty) {
+          notice(context, widget.state.error);
+          continue;
+        }
+        if (widget.state.messages.isNotEmpty) {
+          final last = widget.state.messages.last;
+          if (last['role'] == 'assistant' && last['state'] == 'complete') {
+            await playReplyVoice(
+              last['text'] as String,
+              forceLocal: !widget.state.geminiTtsEnabled,
+            );
+          }
+        }
+      }
+    } finally {
+      _liveTurnProcessing = false;
+    }
+  }
+
+  Future<void> _endLiveConversation() async {
+    final wasActive = _liveConversationActive || _liveConversationStarting;
+    _liveConversationActive = false;
+    _liveConversationStarting = false;
+    _liveTurnQueue.clear();
+    await _liveAudioSubscription?.cancel();
+    _liveAudioSubscription = null;
+    try {
+      await _deepgramRecorder.stop();
+    } catch (_) {
+      // No active stream or the Android recorder already stopped.
+    }
+    final session = _liveDeepgram;
+    _liveDeepgram = null;
+    await session?.close();
+    await LiveConversationService.stop();
+    if (wasActive) widget.state.stop();
+    try {
+      await tts.stop();
+    } catch (_) {}
+    if (mounted) {
+      setState(() {
+        listening = false;
+        speaking = false;
+        level = 0;
+      });
+      if (wasActive) notice(context, 'Live Conversation stopped.');
+    }
   }
 
   Future<void> _startHandsFreeSession() async {
@@ -3428,13 +3672,38 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<bool> playReplyVoice(String text) async {
+  Future<bool> playReplyVoice(String text, {bool forceLocal = false}) async {
     if (speaking) {
       await stopAll();
       return false;
     }
     String? onlineFailure;
-    if (widget.state.azureSpeechEnabled && widget.state.engine != 'offline') {
+    if (!forceLocal && widget.state.geminiTtsEnabled) {
+      if (widget.state.geminiApiKey.trim().isEmpty) {
+        onlineFailure = 'Gemini API key is missing.';
+      } else {
+        try {
+          final audio = await _geminiSpeech.synthesize(
+            text: text,
+            apiKey: widget.state.geminiApiKey,
+            locale: widget.state.language,
+            style: GeminiExpressiveSpeechSynthesizer.styleFor(
+              widget.state.geminiTtsExpression,
+            ),
+          );
+          if (!mounted) return false;
+          setState(() => speaking = true);
+          await _playAssistantAudio(audio);
+          return true; // Native completion event resets speaking after playback.
+        } catch (error) {
+          onlineFailure = error.toString();
+        }
+      }
+    }
+    if (!forceLocal &&
+        onlineFailure == null &&
+        widget.state.azureSpeechEnabled &&
+        widget.state.engine != 'offline') {
       if (widget.state.azureSpeechApiKey.isEmpty ||
           widget.state.azureSpeechRegion.isEmpty) {
         onlineFailure = 'Azure key or region is missing.';
@@ -3583,6 +3852,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       shareMemories: widget.state.shareMemories,
       shareHistory: widget.state.shareHistory,
       retryLastMessage: retry != null,
+      spokenConversation: speakThisReply,
     );
     final lessonId = widget.state.lastStudyLessonId;
     if (studyModeForRequest && lessonId != null && mounted) {
@@ -3623,6 +3893,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (_liveConversationActive || _liveConversationStarting) {
+      unawaited(_endLiveConversation());
+    }
     widget.state.removeListener(_chatStateChanged);
     _assistantAudioPlaying.removeListener(_audioPlaybackChanged);
     _chatScrollController.dispose();
@@ -3895,10 +4168,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     ActivityHalo(
-                      active: listening || _handsFreeSessionActive,
+                      active:
+                          listening ||
+                          _handsFreeSessionActive ||
+                          _liveConversationActive ||
+                          _liveConversationStarting,
                       color: Theme.of(context).colorScheme.primary,
                       child: IconButton.filledTonal(
-                        tooltip: _handsFreeSessionActive
+                        tooltip:
+                            _liveConversationActive || _liveConversationStarting
+                            ? 'Stop Live Conversation'
+                            : _handsFreeSessionActive
                             ? 'End hands-free session'
                             : widget.state.voiceConversationMode == 'hands_free'
                             ? 'Start hands-free session'
@@ -3922,12 +4202,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 ),
                               ),
                           child: Icon(
-                            _handsFreeSessionActive
+                            _liveConversationActive ||
+                                    _liveConversationStarting ||
+                                    _handsFreeSessionActive
                                 ? Icons.stop_circle_rounded
                                 : listening
                                 ? Icons.mic_rounded
                                 : Icons.mic_none_rounded,
-                            key: ValueKey((listening, _handsFreeSessionActive)),
+                            key: ValueKey((
+                              listening,
+                              _handsFreeSessionActive,
+                              _liveConversationActive,
+                              _liveConversationStarting,
+                            )),
                           ),
                         ),
                       ),
@@ -4737,6 +5024,46 @@ class _SettingsState extends State<Settings> {
     }
   }
 
+  Future<void> _setGeminiCloudSpeech(bool enabled) async {
+    if (!enabled) {
+      try {
+        await widget.state.saveGeminiTtsEnabled(false);
+      } catch (error) {
+        if (mounted) notice(context, error);
+      }
+      return;
+    }
+    if (widget.state.geminiApiKey.trim().isEmpty) {
+      notice(context, 'Save a Gemini API key in API settings first.');
+      return;
+    }
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Enable Gemini expressive speech?'),
+        content: const Text(
+          'When spoken replies are played, this sends their exact text to Google Gemini TTS and receives audio. Your saved Gemini API key is used. API usage may incur charges; check your Google account’s quota and billing. Google’s current terms say unpaid Gemini API quota content and responses may be used to improve Google products; paid-quota prompts and responses are not used for that purpose. This setting is off by default and can be turned off anytime. No request is made until you enable it and ask for a spoken reply.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Enable cloud speech'),
+          ),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+    try {
+      await widget.state.saveGeminiTtsEnabled(true);
+    } catch (error) {
+      if (mounted) notice(context, error);
+    }
+  }
+
   Future<void> _generateLatestExpressiveVoice() async {
     final latest = widget.state.messages.reversed
         .where(
@@ -5226,7 +5553,11 @@ class _SettingsState extends State<Settings> {
                       ),
                       DropdownMenuItem(
                         value: 'hands_free',
-                        child: Text('Hands-free · session until Stop'),
+                        child: Text('Hands-free · transcript review'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'live_conversation',
+                        child: Text('Live Conversation · background mic'),
                       ),
                     ],
                     onChanged: (mode) {
@@ -5235,7 +5566,7 @@ class _SettingsState extends State<Settings> {
                     },
                   ),
                   const Text(
-                    'Hands-free starts only when you tap the microphone, stays in the foreground, reviews each transcript before sending, speaks the reply, then listens for the next turn. Tap Stop to end. Android recognition only; Deepgram remains manual start/stop.',
+                    'Hands-free starts only when you tap the microphone, stays in the foreground, reviews each transcript before sending, speaks the reply, then listens for the next turn. Live Conversation is a separate opt-in: it streams Deepgram audio and Gemini text turns, uses the installed Android voice, and can continue when you switch apps. Start requires microphone and notification permissions; stop in chat or from its persistent notification. No background auto-start, action execution, or provider fallback.',
                   ),
                   if (speechMode == 'deepgram') ...[
                     const Align(
@@ -5257,7 +5588,7 @@ class _SettingsState extends State<Settings> {
                       ),
                     ),
                     const Text(
-                      'Deepgram transcription is user-started, foreground-only, and currently supports English and Hindi. Audio is sent only after you tap Stop; transcript stays in the draft until you press Send.',
+                      'For one-shot dictation, Deepgram audio is sent only after you tap Stop; its transcript stays in the draft. Live Conversation instead streams audio while the explicitly started session is active and supports English, Assamese and Hindi; it requires online Gemini chat and a visible Android foreground-service notification.',
                     ),
                     if (widget.state.deepgramApiKey.isNotEmpty)
                       Align(
@@ -5290,7 +5621,63 @@ class _SettingsState extends State<Settings> {
                     secondary: const Icon(Icons.volume_up_rounded),
                     title: const Text('Read replies aloud'),
                     subtitle: const Text(
-                      'Off by default. Uses an installed Android voice unless Azure online speech is explicitly enabled; then spoken reply text is sent to Azure.',
+                      'Off by default. Uses an installed Android voice unless an online speech option below is enabled.',
+                    ),
+                  ),
+                  SwitchListTile(
+                    key: const Key('gemini-expressive-tts-toggle'),
+                    contentPadding: EdgeInsets.zero,
+                    value: widget.state.geminiTtsEnabled,
+                    onChanged: _setGeminiCloudSpeech,
+                    secondary: const Icon(Icons.graphic_eq_rounded),
+                    title: const Text('Gemini expressive cloud speech'),
+                    subtitle: const Text(
+                      'Off by default. For spoken replies, sends the reply text to Google Gemini TTS for expressive English, Assamese or Hindi audio. Review data use and possible charges before enabling. Android voice is the fallback.',
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 56, bottom: 8),
+                    child: DropdownButtonFormField<String>(
+                      key: const Key('gemini-tts-expression'),
+                      initialValue: widget.state.geminiTtsExpression,
+                      decoration: const InputDecoration(
+                        labelText: 'Speech expression',
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'natural',
+                          child: Text('Match the words'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'cheerful',
+                          child: Text('Cheerful'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'curious',
+                          child: Text('Curious'),
+                        ),
+                        DropdownMenuItem(value: 'calm', child: Text('Calm')),
+                        DropdownMenuItem(
+                          value: 'serious',
+                          child: Text('Serious'),
+                        ),
+                        DropdownMenuItem(value: 'angry', child: Text('Angry')),
+                        DropdownMenuItem(
+                          value: 'laughing',
+                          child: Text('Laughing'),
+                        ),
+                      ],
+                      onChanged: (expression) async {
+                        if (expression == null) return;
+                        try {
+                          await widget.state.saveGeminiTtsExpression(
+                            expression,
+                          );
+                        } catch (error) {
+                          if (!context.mounted) return;
+                          notice(context, error);
+                        }
+                      },
                     ),
                   ),
                   ListTile(

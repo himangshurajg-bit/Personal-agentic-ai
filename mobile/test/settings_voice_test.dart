@@ -45,10 +45,10 @@ void main() {
     expect(find.text('Push-to-talk · one turn'), findsOneWidget);
     await tester.tap(find.byKey(const Key('voice-conversation-mode')));
     await tester.pumpAndSettle();
-    expect(find.text('Hands-free · session until Stop'), findsOneWidget);
-    await tester.tap(find.text('Hands-free · session until Stop').last);
+    expect(find.text('Hands-free · transcript review'), findsOneWidget);
+    await tester.tap(find.text('Live Conversation · background mic').last);
     await tester.pumpAndSettle();
-    expect(state.voiceConversationMode, 'hands_free');
+    expect(state.voiceConversationMode, 'live_conversation');
     expect(
       find.textContaining('not automatic language detection'),
       findsOneWidget,

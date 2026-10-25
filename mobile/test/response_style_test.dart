@@ -68,6 +68,47 @@ void main() {
     },
   );
 
+  test(
+    'spoken conversation prompting is brief without weakening guardrails',
+    () async {
+      final instructions = <String>[];
+      final client = MockClient.streaming((request, body) async {
+        final payload = jsonDecode(utf8.decode(await body.toBytes())) as Map;
+        final prompt =
+            jsonDecode(payload['text'] as String) as Map<String, dynamic>;
+        instructions.add(prompt['instruction'] as String);
+        return http.StreamedResponse(
+          Stream.value(
+            utf8.encode(
+              '{"type":"start"}\n{"type":"delta","text":"Reply"}\n{"type":"done"}\n',
+            ),
+          ),
+          200,
+        );
+      });
+      final state = AssistantState(clientFactory: () => client);
+      await state.initialize();
+      state.engine = 'private_service';
+      await state.saveChatMode('online');
+      state.privateServiceToken = 'test-only-token';
+
+      await state.send('Say hello naturally', spokenConversation: true);
+      final spoken = instructions.last;
+      expect(spoken, contains('answer naturally and briefly'));
+      expect(spoken, contains('usually in one or two short sentences'));
+      expect(spoken, contains('factual caution, safety boundaries'));
+      expect(spoken, contains('approval requirements'));
+
+      await state.send('Explain this in detail');
+      expect(
+        instructions.last,
+        isNot(contains('For this spoken conversation')),
+      );
+      state.dispose();
+      client.close();
+    },
+  );
+
   test('AI response modes persist and reject unsupported mode names', () async {
     final first = AssistantState();
     await first.initialize();

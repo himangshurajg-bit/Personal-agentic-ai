@@ -148,6 +148,7 @@ class MainActivity : FlutterFragmentActivity() {
     private var accessPermissionResult: MethodChannel.Result? = null
     private var accessPermissionKind: String? = null
     private var voiceArgs: Map<*,*>? = null
+    private var liveStopReceiver: BroadcastReceiver? = null
     private fun voiceEvent(kind:String, value:Any? = null) { voiceChannel?.invokeMethod("voice_event",mapOf("kind" to kind,"value" to value)) }
     private fun stopVoice() { voice?.cancel();voice?.destroy();voice=null;voiceEvent("stopped") }
     private fun stopAudio() {
@@ -296,6 +297,10 @@ class MainActivity : FlutterFragmentActivity() {
     override fun onDestroy() {
         stopVoice()
         stopAudio()
+        liveStopReceiver?.let { receiver ->
+            try { unregisterReceiver(receiver) } catch (_: Exception) {}
+        }
+        liveStopReceiver = null
         offlineModelCoordinator?.shutdown()
         offlineModelCoordinator = null
         super.onDestroy()
@@ -305,6 +310,53 @@ class MainActivity : FlutterFragmentActivity() {
     private var offlineModelEventSink: EventChannel.EventSink? = null
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
+        val stopReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == LiveConversationService.ACTION_STOP_REQUESTED) {
+                    voiceEvent("live_stop_requested")
+                }
+            }
+        }
+        liveStopReceiver = stopReceiver
+        val stopFilter = android.content.IntentFilter(LiveConversationService.ACTION_STOP_REQUESTED)
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(stopReceiver, stopFilter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(stopReceiver, stopFilter)
+        }
+        MethodChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/live_conversation")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "start" -> {
+                        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                            result.error("permission", "Allow microphone access before starting live conversation.", null)
+                            return@setMethodCallHandler
+                        }
+                        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                            result.error("notification_permission", "Allow notifications so the ongoing microphone session has a visible Stop control.", null)
+                            return@setMethodCallHandler
+                        }
+                        try {
+                            val service = Intent(this, LiveConversationService::class.java).setAction(LiveConversationService.ACTION_START)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(service)
+                            else startService(service)
+                            result.success(true)
+                        } catch (error: Exception) {
+                            result.error("service_start_failed", error.message ?: "Android could not start the microphone service.", null)
+                        }
+                    }
+                    "stop" -> {
+                        try {
+                            stopService(Intent(this, LiveConversationService::class.java))
+                            result.success(true)
+                        } catch (error: Exception) {
+                            result.error("service_stop_failed", error.message ?: "Android could not stop the microphone service.", null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         offlineModelCoordinator = Gemma4OfflineCoordinator(applicationContext) { event ->
             offlineModelEventSink?.success(event)
         }
