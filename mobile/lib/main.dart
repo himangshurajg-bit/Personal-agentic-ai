@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 
 import 'app_update.dart';
 import 'assistant_state.dart';
+import 'assistant_task_tracker.dart';
 import 'mcp_servers.dart';
 import 'wajo_oauth.dart';
 import 'offline_model.dart';
@@ -28,6 +29,11 @@ const MethodChannel _assistantAudioChannel = MethodChannel(
   'personal_assistant/audio',
 );
 final ValueNotifier<bool> _assistantAudioPlaying = ValueNotifier(false);
+final GlobalKey<NavigatorState> _assistantNavigatorKey =
+    GlobalKey<NavigatorState>();
+const MethodChannel _assistantTaskChannel = MethodChannel(
+  MethodChannelAssistantTaskNotificationPort.channelName,
+);
 
 Future<void> _playAssistantAudio(Object bytes) async {
   _assistantAudioPlaying.value = true;
@@ -63,11 +69,67 @@ class AssistantApp extends StatefulWidget {
 class _AssistantAppState extends State<AssistantApp>
     with WidgetsBindingObserver {
   bool _leftForeground = false;
+  bool _pendingTaskVoiceCommand = false;
+
+  void _assistantStateChanged() {
+    if (_pendingTaskVoiceCommand && widget.state.ready) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _openTaskVoiceCommand(),
+      );
+    }
+  }
+
+  void _queueTaskVoiceCommand() {
+    _pendingTaskVoiceCommand = true;
+    _openTaskVoiceCommand();
+  }
+
+  void _openTaskVoiceCommand() {
+    if (!mounted || !_pendingTaskVoiceCommand || !widget.state.ready) return;
+    final navigator = _assistantNavigatorKey.currentState;
+    if (navigator == null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _openTaskVoiceCommand(),
+      );
+      return;
+    }
+    _pendingTaskVoiceCommand = false;
+    navigator.pushNamed(
+      taskVoiceEntryRoute(
+        ready: widget.state.ready,
+        locked: widget.state.appLocked,
+      ),
+    );
+  }
+
+  Future<void> _consumeTaskVoiceCommand() async {
+    try {
+      final requested = await _assistantTaskChannel.invokeMethod<bool>(
+        'consume_voice_command_request',
+      );
+      if (requested == true) _queueTaskVoiceCommand();
+    } on PlatformException {
+      // Older builds and notification permission failures keep ordinary chat usable.
+    } on MissingPluginException {
+      // The Android notification bridge is optional on non-Android platforms.
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.state.addListener(_assistantStateChanged);
+    _assistantTaskChannel.setMethodCallHandler((call) async {
+      if (call.method == 'voice_command_requested') {
+        _queueTaskVoiceCommand();
+        return true;
+      }
+      return null;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_consumeTaskVoiceCommand());
+    });
     _assistantAudioChannel.setMethodCallHandler((call) async {
       if (call.method != 'audio_event') return;
       final event = Map<String, dynamic>.from(call.arguments);
@@ -80,6 +142,8 @@ class _AssistantAppState extends State<AssistantApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.state.removeListener(_assistantStateChanged);
+    _assistantTaskChannel.setMethodCallHandler(null);
     _assistantAudioChannel.setMethodCallHandler(null);
     super.dispose();
   }
@@ -134,6 +198,7 @@ class _AssistantAppState extends State<AssistantApp>
             : widget.state.theme == 'light'
             ? ThemeMode.light
             : ThemeMode.system,
+        navigatorKey: _assistantNavigatorKey,
         builder: (context, child) => _AppLockGate(
           state: widget.state,
           child: child ?? const SizedBox.shrink(),
@@ -154,6 +219,8 @@ class _AssistantAppState extends State<AssistantApp>
           },
           '/voice': (_) =>
               ChatScreen(state: widget.state, startWithVoice: true),
+          '/task-voice': (_) =>
+              ChatScreen(state: widget.state, startWithVoiceCommand: true),
           '/settings': (_) => Settings(state: widget.state),
           '/connections': (_) => ApiMcpSettings(state: widget.state),
           '/memory': (_) => Memories(state: widget.state),
@@ -2793,11 +2860,13 @@ class ChatScreen extends StatefulWidget {
   final AssistantState state;
   final String? initialDraft;
   final bool startWithVoice;
+  final bool startWithVoiceCommand;
   const ChatScreen({
     super.key,
     required this.state,
     this.initialDraft,
     this.startWithVoice = false,
+    this.startWithVoiceCommand = false,
   });
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -2878,10 +2947,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       input.text = widget.initialDraft!;
       _draftApplied = true;
     }
-    if (widget.startWithVoice && !_initialVoiceStarted) {
+    if ((widget.startWithVoice || widget.startWithVoiceCommand) &&
+        !_initialVoiceStarted) {
       _initialVoiceStarted = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) listen();
+        if (!mounted) return;
+        if (widget.startWithVoiceCommand) {
+          // Notification action is an explicit, one-shot request. It never opts
+          // into hands-free listening or sends the recognized transcript.
+          unawaited(_listenOnce());
+        } else {
+          listen();
+        }
       });
     }
   }

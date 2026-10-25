@@ -15,6 +15,7 @@ import 'gemini_models.dart';
 import 'mcp_servers.dart';
 import 'wajo_oauth.dart';
 import 'visual_theme.dart';
+import 'assistant_task_tracker.dart';
 
 class LaunchableApp {
   final String packageName;
@@ -169,12 +170,17 @@ class AssistantState extends ChangeNotifier {
   final FlutterSecureStorage storage;
   final http.Client Function() clientFactory;
   final DeviceAuthenticator authenticator;
+  final AssistantTaskTracker taskTracker;
   AssistantState({
     this.storage = const FlutterSecureStorage(),
     http.Client Function()? clientFactory,
     DeviceAuthenticator? authenticator,
+    AssistantTaskTracker? taskTracker,
   }) : clientFactory = clientFactory ?? http.Client.new,
-       authenticator = authenticator ?? LocalAuthDeviceAuthenticator();
+       authenticator = authenticator ?? LocalAuthDeviceAuthenticator(),
+       taskTracker =
+           taskTracker ??
+           AssistantTaskTracker(MethodChannelAssistantTaskNotificationPort());
   late final PhoneData local = PhoneData(storage);
   late final McpServerStore mcpStore = McpServerStore(storage, clientFactory);
   late final WajoOAuthFlow mcpOAuth = WajoOAuthFlow(
@@ -1848,6 +1854,8 @@ class AssistantState extends ChangeNotifier {
     partial = '';
     busy = true;
     final generation = ++_generation;
+    final taskId = 'chat-$generation';
+    await taskTracker.start(id: taskId, title: trimmedText);
     if (!retryLastMessage) {
       messages.add({'role': 'user', 'text': lastPrompt, 'state': 'complete'});
     }
@@ -1873,6 +1881,7 @@ class AssistantState extends ChangeNotifier {
       await persistChat();
       if (generation != _generation) return;
       if (selectedEngine == 'offline') {
+        await taskTracker.update(taskId, AssistantTaskStatus.workingOffline);
         _localInferenceActive = true;
         final answer = await offlineModel.invokeMethod<String>('run_chat', {
           'prompt': prompt,
@@ -1893,6 +1902,7 @@ class AssistantState extends ChangeNotifier {
           partial = '';
         }
       } else {
+        await taskTracker.update(taskId, AssistantTaskStatus.waitingForReply);
         final req = selectedConfig!.request(conversation, prompt);
         final res = await client!
             .send(req)
@@ -1922,12 +1932,20 @@ class AssistantState extends ChangeNotifier {
           throw ServiceException(describeStatus(res.statusCode));
         }
         var done = false;
+        var announcedReply = false;
         await for (final event
             in selectedConfig
                 .events(res.stream)
                 .timeout(const Duration(seconds: 65))) {
           if (generation != _generation) break;
           if (event['type'] == 'delta') {
+            if (!announcedReply) {
+              announcedReply = true;
+              await taskTracker.update(
+                taskId,
+                AssistantTaskStatus.receivingReply,
+              );
+            }
             partial += event['text'] as String;
             notifyListeners();
           }
@@ -1984,6 +2002,7 @@ class AssistantState extends ChangeNotifier {
         }
       }
     } finally {
+      await taskTracker.finish(taskId);
       client?.close();
       _localInferenceActive = false;
       if (generation == _generation) {
@@ -2000,6 +2019,8 @@ class AssistantState extends ChangeNotifier {
   }
 
   void stop({bool notify = true}) {
+    final activeTaskId = taskTracker.active?.id;
+    if (activeTaskId != null) unawaited(taskTracker.finish(activeTaskId));
     _generation++;
     _stream?.close();
     _stream = null;

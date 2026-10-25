@@ -34,7 +34,42 @@ import java.io.ByteArrayOutputStream
 internal fun isValidTextSharePayload(title: String?, text: String?): Boolean =
     !title.isNullOrBlank() && title.length <= 80 && !text.isNullOrBlank() && text.length <= 10000
 
+internal fun canPostAssistantTaskNotification(sdk: Int, notificationsGranted: Boolean): Boolean =
+    sdk < 33 || notificationsGranted
+
+internal fun assistantTaskStatusLabel(status: String): String? = when (status) {
+    "preparing" -> "Preparing your request"
+    "waitingForReply" -> "Waiting for the selected AI"
+    "workingOffline" -> "Running the on-device model"
+    "receivingReply" -> "Receiving the reply"
+    else -> null
+}
+
 class MainActivity : FlutterFragmentActivity() {
+    companion object {
+        private const val ACTION_TASK_VOICE_COMMAND = "dev.personalagent.personal_assistant.TASK_VOICE_COMMAND"
+        private const val TASK_NOTIFICATION_CHANNEL = "assistant_task_progress"
+        private const val TASK_NOTIFICATION_ID = 6107
+    }
+
+    private var pendingTaskVoiceCommand = false
+    private var taskTrackerChannel: MethodChannel? = null
+    private var activeTaskNotificationId: String? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        if (intent?.action == ACTION_TASK_VOICE_COMMAND) pendingTaskVoiceCommand = true
+        super.onCreate(savedInstanceState)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == ACTION_TASK_VOICE_COMMAND) {
+            pendingTaskVoiceCommand = true
+            taskTrackerChannel?.invokeMethod("voice_command_requested", null)
+        }
+    }
+
     // Activity context is not attached during construction. Defer packageName and
     // ComponentName lookups until the first MethodChannel request after attachment.
     private val launcherIconAliases: Map<String, ComponentName> by lazy {
@@ -198,6 +233,60 @@ class MainActivity : FlutterFragmentActivity() {
             } else {recognizer.startListening(intent);result.success(mapOf("started" to true,"mode" to "online"))}
         } catch(_:Exception) {stopVoice();result.error("unavailable","Speech could not start; typing remains available",null)}
     }
+    private fun showAssistantTaskNotification(title: String, status: String) {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (!canPostAssistantTaskNotification(
+                Build.VERSION.SDK_INT,
+                Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED,
+            )) {
+            return // No unsolicited permission prompt; the in-app busy state remains visible.
+        }
+        manager.createNotificationChannel(
+            NotificationChannel(
+                TASK_NOTIFICATION_CHANNEL,
+                "Assistant task progress",
+                NotificationManager.IMPORTANCE_LOW,
+            ),
+        )
+        val openChat = PendingIntent.getActivity(
+            this,
+            TASK_NOTIFICATION_ID,
+            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val openVoice = PendingIntent.getActivity(
+            this,
+            TASK_NOTIFICATION_ID + 1,
+            Intent(this, MainActivity::class.java)
+                .setAction(ACTION_TASK_VOICE_COMMAND)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val privateTitle = title.replace(Regex("[\\r\\n\\t]+"), " ").trim().take(100)
+        val notification = android.app.Notification.Builder(this, TASK_NOTIFICATION_CHANNEL)
+            .setSmallIcon(android.R.drawable.ic_popup_sync)
+            .setContentTitle(if (privateTitle.isBlank()) "Assistant task" else privateTitle)
+            .setContentText(status)
+            .setStyle(android.app.Notification.BigTextStyle().bigText(status))
+            .setPublicVersion(
+                android.app.Notification.Builder(this, TASK_NOTIFICATION_CHANNEL)
+                    .setSmallIcon(android.R.drawable.ic_popup_sync)
+                    .setContentTitle("Personal AI")
+                    .setContentText("An assistant task is in progress")
+                    .build(),
+            )
+            .setVisibility(android.app.Notification.VISIBILITY_PRIVATE)
+            .setCategory(android.app.Notification.CATEGORY_PROGRESS)
+            .setOnlyAlertOnce(true)
+            .setOngoing(true)
+            .setProgress(0, 0, true)
+            .setTimeoutAfter(5 * 60 * 1000L)
+            .setContentIntent(openChat)
+            .addAction(android.app.Notification.Action.Builder(android.R.drawable.ic_btn_speak_now, "Voice command", openVoice).build())
+            .build()
+        manager.notify(TASK_NOTIFICATION_ID, notification)
+    }
+
     override fun onPause() {
         stopVoice()
         stopAudio()
@@ -301,6 +390,47 @@ class MainActivity : FlutterFragmentActivity() {
                 "play_audio" -> playAudio(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "stop_audio" -> { stopAudio(); result.success(true) }
                 else -> result.notImplemented()
+            }
+        }
+        taskTrackerChannel = MethodChannel(
+            engine.dartExecutor.binaryMessenger,
+            "personal_assistant/task_tracker",
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
+                when (call.method) {
+                    "consume_voice_command_request" -> {
+                        val requested = pendingTaskVoiceCommand
+                        pendingTaskVoiceCommand = false
+                        result.success(requested)
+                    }
+                    "show_task", "update_task" -> {
+                        val id = args["id"] as? String
+                        val title = args["title"] as? String
+                        val status = args["status"] as? String
+                        val label = status?.let(::assistantTaskStatusLabel)
+                        if (id.isNullOrBlank() || title.isNullOrBlank() || label == null) {
+                            result.error("invalid_task", "Task progress details are invalid.", null)
+                        } else if (call.method == "update_task" && activeTaskNotificationId != id) {
+                            // A late status callback from a cancelled request cannot replace a newer task.
+                            result.success(null)
+                        } else {
+                            activeTaskNotificationId = id
+                            showAssistantTaskNotification(title, label)
+                            result.success(null)
+                        }
+                    }
+                    "dismiss_task" -> {
+                        val id = args["id"] as? String
+                        if (id != null && activeTaskNotificationId == id) {
+                            activeTaskNotificationId = null
+                            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                                .cancel(TASK_NOTIFICATION_ID)
+                        }
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
             }
         }
         MethodChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/app_update").setMethodCallHandler { call, result ->
