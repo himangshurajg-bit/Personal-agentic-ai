@@ -398,6 +398,7 @@ void main() {
         (chatCalls.first.arguments as Map)['prompt'] as String,
       );
       expect(firstPrompt['quoted_history'], isEmpty);
+      expect(firstPrompt['instruction'], contains('Himangshu sir made me.'));
       final prompt = jsonDecode(
         (chatCalls.last.arguments as Map)['prompt'] as String,
       );
@@ -522,6 +523,7 @@ void main() {
         messages.single['content'] as String,
       ) as Map<String, dynamic>;
       expect(prompt['instruction'], contains(entry.value));
+      expect(prompt['instruction'], contains('Himangshu sir made me.'));
       expect(s.error, isEmpty);
       s.dispose();
     });
