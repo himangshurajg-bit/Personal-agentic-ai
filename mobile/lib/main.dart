@@ -24,6 +24,7 @@ import 'typing_indicator.dart';
 import 'visual_theme.dart';
 import 'voice_services.dart';
 import 'live_conversation.dart';
+import 'readable_math.dart';
 
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
@@ -4043,7 +4044,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 ),
                                 const SizedBox(height: 6),
                                 MarkdownBody(
-                                  data: m['text'] as String,
+                                  data: ReadableMath.formatMarkdown(
+                                    m['text'] as String,
+                                  ),
                                   selectable: true,
                                   imageBuilder: (_, _, _) => const Text(
                                     '[Remote image blocked — no automatic network fetch]',
@@ -4072,7 +4075,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           child: Glass(
                             padding: const EdgeInsets.all(12),
                             bottomSpacing: 8,
-                            child: SelectableText(state.partial),
+                            child: SelectableText(
+                              ReadableMath.formatMarkdown(state.partial),
+                            ),
                           ),
                         ),
                       ),

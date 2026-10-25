@@ -7,6 +7,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
+import 'readable_math.dart';
+
 import 'assistant_state.dart';
 import 'phone_data.dart';
 import 'google_tasks.dart';
@@ -3026,7 +3028,9 @@ class _StudyWhiteboardScreenState extends State<StudyWhiteboardScreen> {
             const SizedBox(height: 12),
             Glass(
               child: MarkdownBody(
-                data: lesson['explanation'] as String? ?? '',
+                data: ReadableMath.formatMarkdown(
+                  lesson['explanation'] as String? ?? '',
+                ),
                 selectable: true,
                 imageBuilder: (_, _, _) => const Text(
                   '[Remote image blocked — no automatic network fetch]',

@@ -399,7 +399,10 @@ void main() {
         (chatCalls.first.arguments as Map)['prompt'] as String,
       );
       expect(firstPrompt['quoted_history'], isEmpty);
-      expect(firstPrompt['instruction'], contains('Himangshu sir made me.'));
+      expect(
+        firstPrompt['instruction'],
+        isNot(contains('If asked who created or made this AI')),
+      );
       final prompt = jsonDecode(
         (chatCalls.last.arguments as Map)['prompt'] as String,
       );
@@ -524,7 +527,10 @@ void main() {
         messages.single['content'] as String,
       ) as Map<String, dynamic>;
       expect(prompt['instruction'], contains(entry.value));
-      expect(prompt['instruction'], contains('Himangshu sir made me.'));
+      expect(
+        prompt['instruction'],
+        isNot(contains('If asked who created or made this AI')),
+      );
       expect(s.error, isEmpty);
       s.dispose();
     });
