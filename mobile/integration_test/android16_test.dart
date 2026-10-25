@@ -158,7 +158,10 @@ void main() {
         await tester.tap(find.byTooltip('Open navigation menu'));
         await pumpRouteFrames(tester);
         phase('navigation tap started: $label');
-        await tester.tap(find.text(label).last);
+        final destination = find.text(label).last;
+        await tester.ensureVisible(destination);
+        await pumpRouteFrames(tester);
+        await tester.tap(destination);
         phase('navigation tap completed: $label');
         await pumpRouteFrames(tester);
         phase('navigation settled: $label');
