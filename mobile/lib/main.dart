@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui';
 
@@ -19,6 +20,7 @@ import 'phone_screens.dart';
 import 'safe_workflows.dart';
 import 'image_generation_screen.dart';
 import 'assistant_features_screen.dart';
+import 'feature_services.dart';
 import 'ui_motion.dart';
 import 'typing_indicator.dart';
 import 'visual_theme.dart';
@@ -27,6 +29,7 @@ import 'live_conversation.dart';
 import 'readable_math.dart';
 
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 const MethodChannel _assistantAudioChannel = MethodChannel(
   'personal_assistant/audio',
@@ -2913,6 +2916,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   int _lastObservedMessageCount = -1;
   String? _lastObservedConversation;
   String _lastObservedPartial = '';
+  Uint8List? _chatAttachmentBytes;
+  String _chatAttachmentName = '';
+  String _chatAttachmentMime = '';
+  bool _chatWebSearch = false;
+  bool _chatFeatureBusy = false;
+  String _chatFeatureError = '';
 
   void _chatStateChanged() {
     final state = widget.state;
@@ -3848,7 +3857,188 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _pickChatAttachment() async {
+    if (_chatFeatureBusy) return;
+    try {
+      final result = await AssistantState.device
+          .invokeMapMethod<String, dynamic>('pick_file', {'ai_document': true});
+      if (result == null || !mounted) return;
+      final mime = result['mime'];
+      final encoded = result['content_base64'];
+      final name = result['name'];
+      if (mime is! String || encoded is! String || name is! String) {
+        throw FeatureServiceException(
+          (result['unsupported'] as String?) ??
+              'Choose a PDF or PNG, JPEG or WebP image.',
+        );
+      }
+      final bytes = base64Decode(encoded);
+      if (!supportedAiDocumentMimes.contains(mime) ||
+          bytes.isEmpty ||
+          bytes.lengthInBytes > maxAiDocumentBytes) {
+        bytes.fillRange(0, bytes.length, 0);
+        throw const FeatureServiceException(
+          'Choose a non-empty PDF or PNG, JPEG or WebP image under 12 MB.',
+        );
+      }
+      _chatAttachmentBytes?.fillRange(0, _chatAttachmentBytes!.length, 0);
+      setState(() {
+        _chatAttachmentBytes = bytes;
+        _chatAttachmentName = name;
+        _chatAttachmentMime = mime;
+        _chatWebSearch = false;
+        _chatFeatureError = '';
+      });
+    } on PlatformException catch (error) {
+      if (mounted && error.code != 'cancelled') {
+        setState(
+          () => _chatFeatureError =
+              error.message ?? 'Could not open the file picker.',
+        );
+      }
+    } catch (error) {
+      if (mounted) setState(() => _chatFeatureError = error.toString());
+    }
+  }
+
+  void _removeChatAttachment() {
+    _chatAttachmentBytes?.fillRange(0, _chatAttachmentBytes!.length, 0);
+    setState(() {
+      _chatAttachmentBytes = null;
+      _chatAttachmentName = '';
+      _chatAttachmentMime = '';
+      _chatFeatureError = '';
+    });
+  }
+
+  GeminiFeatureClient? _chatFeatureClient() {
+    final state = widget.state;
+    if (state.chatMode != 'online' || state.engine != 'gemini') {
+      setState(
+        () => _chatFeatureError = 'Chat attachments and web search need Online chat with Gemini. Nothing was sent; change the provider in Settings.',
+      );
+      return null;
+    }
+    if (state.geminiApiKey.trim().isEmpty) {
+      setState(
+        () => _chatFeatureError = 'Add a Gemini API key in Settings before using this online feature. Nothing was sent.',
+      );
+      return null;
+    }
+    return GeminiFeatureClient(
+      model: state.geminiModelSelection,
+      apiKey: state.geminiApiKey,
+      clientFactory: state.clientFactory,
+    );
+  }
+
+  Future<void> _sendChatFeature() async {
+    if (_chatFeatureBusy) return;
+    final text = input.text.trim();
+    final attachment = _chatAttachmentBytes;
+    if (attachment == null && text.isEmpty) {
+      setState(
+        () => _chatFeatureError =
+            'Enter a question or topic before starting web research.',
+      );
+      return;
+    }
+    final client = _chatFeatureClient();
+    if (client == null) return;
+    final isResearch = _chatWebSearch;
+    final prompt = text.isNotEmpty
+        ? text
+        : 'Explain this ${_chatAttachmentMime == 'application/pdf' ? 'document' : 'image'} clearly and summarize the important details.';
+    final disclosure = isResearch
+        ? '''Your exact question will be sent online to Google Gemini with Google Search grounding. Google handles it under its service terms; usage may incur charges. Web pages and search results are treated as untrusted source material, not instructions. Continue?
+
+“$prompt”'''
+        : '''“$_chatAttachmentName” and your question will be sent online to Google Gemini (${client.model}) for analysis. Google handles the content under its service terms; usage may incur charges. The file stays temporarily in this chat composer and is not saved in chat history. Continue?
+
+“$prompt”''';
+    final approved =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Text(
+              isResearch
+                  ? 'Search the web with Gemini?'
+                  : 'Send this file to Gemini?',
+            ),
+            content: Text(disclosure),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Send to Gemini'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!approved || !mounted) return;
+    setState(() {
+      _chatFeatureBusy = true;
+      _chatFeatureError = '';
+    });
+    try {
+      final answer = isResearch
+          ? await client.research(prompt)
+          : await client.askDocument(
+              mimeType: _chatAttachmentMime,
+              bytes: attachment!,
+              prompt: prompt,
+            );
+      if (!mounted) return;
+      final sources = answer.sources
+          .map(
+            (source) => {
+              'title': source.title,
+              'url': source.uri.toString(),
+              'supportingText': source.supportingText,
+            },
+          )
+          .toList(growable: false);
+      final nowState = widget.state;
+      await nowState.addFeatureExchange(
+        userText: prompt,
+        answerText: answer.text,
+        feature: isResearch ? 'web_research' : 'file_analysis',
+        sources: isResearch ? sources : const [],
+        attachmentName: isResearch ? null : _chatAttachmentName,
+      );
+      nowState.lastPrompt = prompt;
+      input.clear();
+      if (!isResearch) _removeChatAttachment();
+      if (isResearch) setState(() => _chatWebSearch = false);
+    } catch (error) {
+      if (mounted) setState(() => _chatFeatureError = error.toString());
+    } finally {
+      if (mounted) setState(() => _chatFeatureBusy = false);
+    }
+  }
+
+  Future<void> _openResearchSource(String rawUrl, String title) async {
+    final uri = Uri.tryParse(rawUrl);
+    if (uri == null || uri.scheme != 'https' || uri.host.isEmpty) {
+      notice(context, 'This source link is not a valid HTTPS address.');
+      return;
+    }
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => _ChatResearchSourcePage(uri: uri, title: title),
+      ),
+    );
+  }
+
   Future<void> send([String? retry]) async {
+    if (retry == null && (_chatAttachmentBytes != null || _chatWebSearch)) {
+      await _sendChatFeature();
+      return;
+    }
     final text = retry ?? input.text;
     if (text.trim().isEmpty) {
       return;
@@ -3913,6 +4103,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _chatAttachmentBytes?.fillRange(0, _chatAttachmentBytes!.length, 0);
     WidgetsBinding.instance.removeObserver(this);
     if (_liveConversationActive || _liveConversationStarting) {
       unawaited(_endLiveConversation());
@@ -4042,6 +4233,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                       : state.assistantName,
                                   style: Theme.of(context).textTheme.labelSmall,
                                 ),
+                                if (m['feature'] == 'web_research')
+                                  const _ChatFeatureBadge(
+                                    label: 'WEB RESEARCH',
+                                  ),
+                                if (m['feature'] == 'file_analysis')
+                                  const _ChatFeatureBadge(
+                                    label: 'FILE ANALYSIS',
+                                  ),
+                                if (m['attachmentName'] is String)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 5),
+                                    child: Text(
+                                      'Attached: ${m['attachmentName']}',
+                                    ),
+                                  ),
                                 const SizedBox(height: 6),
                                 MarkdownBody(
                                   data: ReadableMath.formatMarkdown(
@@ -4056,6 +4262,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                     'Links are not opened automatically. Review and copy the destination if needed.',
                                   ),
                                 ),
+                                if (m['feature'] == 'web_research' &&
+                                    m['role'] == 'assistant')
+                                  _ChatResearchSources(
+                                    sources: (m['sources'] as List? ?? const [])
+                                        .whereType<Map>()
+                                        .map(
+                                          (source) =>
+                                              Map<String, dynamic>.from(source),
+                                        )
+                                        .toList(growable: false),
+                                    onOpen: _openResearchSource,
+                                  ),
+                                if (m['feature'] == 'web_research' &&
+                                    m['role'] == 'assistant' &&
+                                    (m['sources'] as List? ?? const []).isEmpty)
+                                  const Text(
+                                    'No source citations were returned. Treat this as an uncited model response, not verified web research.',
+                                  ),
                                 if (m['state'] != 'complete')
                                   const Text(
                                     'Interrupted • not a completed reply',
@@ -4184,6 +4408,94 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   : const SizedBox(key: ValueKey('not-listening')),
             ),
             Padding(
+              padding: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_chatAttachmentBytes != null)
+                    Card(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      child: ListTile(
+                        dense: true,
+                        leading: _chatAttachmentMime.startsWith('image/')
+                            ? ClipRRect(
+                                borderRadius: BorderRadius.circular(6),
+                                child: Image.memory(
+                                  _chatAttachmentBytes!,
+                                  width: 42,
+                                  height: 42,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) =>
+                                      const Icon(Icons.broken_image_outlined),
+                                ),
+                              )
+                            : const Icon(Icons.picture_as_pdf_outlined),
+                        title: Text(
+                          _chatAttachmentName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          '$_chatAttachmentMime · ${(_chatAttachmentBytes!.lengthInBytes / 1024 / 1024).toStringAsFixed(1)} MB',
+                        ),
+                        trailing: IconButton(
+                          tooltip: 'Remove attachment',
+                          onPressed: _chatFeatureBusy
+                              ? null
+                              : _removeChatAttachment,
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ),
+                    ),
+                  Wrap(
+                    spacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      ActionChip(
+                        avatar: const Icon(Icons.attach_file_rounded, size: 18),
+                        label: const Text('Attach image or file'),
+                        onPressed: _chatFeatureBusy
+                            ? null
+                            : _pickChatAttachment,
+                      ),
+                      FilterChip(
+                        avatar: const Icon(
+                          Icons.travel_explore_rounded,
+                          size: 18,
+                        ),
+                        label: const Text('Search web'),
+                        selected: _chatWebSearch,
+                        onSelected:
+                            _chatFeatureBusy || _chatAttachmentBytes != null
+                            ? null
+                            : (selected) => setState(() {
+                                _chatWebSearch = selected;
+                                _chatFeatureError = '';
+                              }),
+                      ),
+                      if (_chatFeatureBusy)
+                        const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                    ],
+                  ),
+                  if (_chatFeatureError.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        _chatFeatureError,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Padding(
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
               child: Glass(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
@@ -4275,7 +4587,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         tooltip: state.busy || speaking
                             ? 'Stop response'
                             : 'Send message',
-                        onPressed: state.busy || speaking ? stopAll : send,
+                        onPressed: state.busy || speaking || _chatFeatureBusy
+                            ? stopAll
+                            : send,
                         style: IconButton.styleFrom(
                           fixedSize: const Size(48, 48),
                           backgroundColor: Theme.of(context)
@@ -4317,6 +4631,98 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       );
     },
+  );
+}
+
+class _ChatFeatureBadge extends StatelessWidget {
+  final String label;
+  const _ChatFeatureBadge({required this.label});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 4),
+    child: Chip(
+      visualDensity: VisualDensity.compact,
+      avatar: const Icon(Icons.verified_outlined, size: 16),
+      label: Text(label),
+    ),
+  );
+}
+
+class _ChatResearchSources extends StatelessWidget {
+  final List<Map<String, dynamic>> sources;
+  final Future<void> Function(String, String) onOpen;
+  const _ChatResearchSources({required this.sources, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    if (sources.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(top: 10, bottom: 4),
+          child: Text('Sources returned by Google Search'),
+        ),
+        for (final source in sources)
+          Builder(
+            builder: (context) {
+              final title = source['title'] as String? ?? 'Source';
+              final url = source['url'] as String? ?? '';
+              final uri = Uri.tryParse(url);
+              if (uri == null || uri.scheme != 'https' || uri.host.isEmpty) {
+                return const SizedBox.shrink();
+              }
+              final excerpt = source['supportingText'] as String? ?? '';
+              return TextButton.icon(
+                onPressed: () => onOpen(url, title),
+                icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                label: Text(
+                  excerpt.isEmpty
+                      ? '$title · ${uri.host}'
+                      : '$title · ${uri.host}\n$excerpt',
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              );
+            },
+          ),
+      ],
+    );
+  }
+}
+
+class _ChatResearchSourcePage extends StatefulWidget {
+  final Uri uri;
+  final String title;
+  const _ChatResearchSourcePage({required this.uri, required this.title});
+
+  @override
+  State<_ChatResearchSourcePage> createState() =>
+      _ChatResearchSourcePageState();
+}
+
+class _ChatResearchSourcePageState extends State<_ChatResearchSourcePage> {
+  late final WebViewController _controller = WebViewController()
+    ..setJavaScriptMode(JavaScriptMode.disabled)
+    ..setNavigationDelegate(
+      NavigationDelegate(
+        onNavigationRequest: (request) {
+          final uri = Uri.tryParse(request.url);
+          return uri != null && uri.scheme == 'https' && uri.host.isNotEmpty
+              ? NavigationDecision.navigate
+              : NavigationDecision.prevent;
+        },
+      ),
+    )
+    ..loadRequest(widget.uri);
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+    ),
+    body: WebViewWidget(controller: _controller),
   );
 }
 
