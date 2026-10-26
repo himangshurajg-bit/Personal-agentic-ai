@@ -1006,26 +1006,34 @@ class _AssistantDock extends StatelessWidget {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final motionDuration = reduceMotion
         ? Duration.zero
-        : const Duration(milliseconds: 240);
-    final home =
-        currentRoute == null || currentRoute == '/' || currentRoute == '/home';
-    final chat = currentRoute == '/chat' || currentRoute == '/voice';
+        : const Duration(milliseconds: 360);
+    final chat = currentRoute == '/chat';
+    final voice = currentRoute == '/voice' || currentRoute == '/task-voice';
     final memory =
         currentRoute == '/memory' ||
         currentRoute == '/library' ||
         currentRoute == '/files';
-    final settings = currentRoute == '/settings';
-    final dockSelectionAlignment = home
-        ? const Alignment(-.8, 0)
+    final settings =
+        currentRoute == '/settings' || currentRoute == '/connections';
+    // Secondary screens stay grouped with their parent dock destination.
+    // Slot order: Home, Chat, Voice, Memory, Settings.
+    final home = !chat && !voice && !memory && !settings;
+    final selectionIndex = home
+        ? 0
         : chat
-        ? const Alignment(-.4, 0)
+        ? 1
+        : voice
+        ? 2
         : memory
-        ? const Alignment(.4, 0)
-        : const Alignment(.8, 0);
+        ? 3
+        : 4;
+    final dockSelectionAlignment = Alignment(-1 + selectionIndex * .5, 0);
     final dockSelectionTint = home
         ? colors.primary
         : chat
         ? colors.secondary
+        : voice
+        ? colors.primary
         : memory
         ? colors.tertiary
         : colors.primaryContainer;
@@ -1161,104 +1169,112 @@ class _AssistantDock extends StatelessWidget {
                         ),
                       ),
                     ),
-                    AnimatedAlign(
-                      key: const ValueKey('dock-liquid-glass'),
-                      alignment: dockSelectionAlignment,
-                      duration: motionDuration,
-                      curve: Curves.easeInOutCubic,
-                      child: Hero(
-                        key: const ValueKey('dock-liquid-glass-hero'),
-                        tag: reduceMotion
-                            ? 'assistant-dock-liquid-glass-${currentRoute ?? '/home'}'
-                            : 'assistant-dock-liquid-glass-selection',
-                        child: FractionallySizedBox(
-                          widthFactor: .2,
-                          heightFactor: .84,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 5,
-                              vertical: 3,
-                            ),
-                            child: IgnorePointer(
-                              child: ExcludeSemantics(
-                                child: AnimatedContainer(
-                                  key: const ValueKey(
-                                    'dock-liquid-glass-surface',
-                                  ),
-                                  duration: motionDuration,
-                                  curve: Curves.easeInOutCubic,
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(22),
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                      colors: [
-                                        Colors.white.withValues(
-                                          alpha: dark ? .16 : .34,
-                                        ),
-                                        dockSelectionTint.withValues(
-                                          alpha: dark ? .20 : .11,
-                                        ),
-                                        colors.surface.withValues(
-                                          alpha: dark ? .28 : .25,
-                                        ),
-                                      ],
-                                    ),
-                                    border: Border.all(
-                                      color: Colors.white.withValues(
-                                        alpha: dark ? .34 : .62,
+                    Positioned.fill(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 5,
+                        ),
+                        child: AnimatedAlign(
+                          key: const ValueKey('dock-liquid-glass'),
+                          alignment: dockSelectionAlignment,
+                          duration: motionDuration,
+                          curve: Curves.easeInOutCubicEmphasized,
+                          child: Hero(
+                            key: const ValueKey('dock-liquid-glass-hero'),
+                            tag: reduceMotion
+                                ? 'assistant-dock-liquid-glass-${currentRoute ?? '/home'}'
+                                : 'assistant-dock-liquid-glass-selection',
+                            child: FractionallySizedBox(
+                              widthFactor: .2,
+                              heightFactor: 1,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 3,
+                                ),
+                                child: IgnorePointer(
+                                  child: ExcludeSemantics(
+                                    child: AnimatedContainer(
+                                      key: const ValueKey(
+                                        'dock-liquid-glass-surface',
                                       ),
-                                      width: 1,
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: dockSelectionTint.withValues(
-                                          alpha: dark ? .24 : .16,
+                                      duration: motionDuration,
+                                      curve: Curves.easeInOutCubicEmphasized,
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(22),
+                                        gradient: LinearGradient(
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                          colors: [
+                                            Colors.white.withValues(
+                                              alpha: dark ? .16 : .34,
+                                            ),
+                                            dockSelectionTint.withValues(
+                                              alpha: dark ? .20 : .11,
+                                            ),
+                                            colors.surface.withValues(
+                                              alpha: dark ? .28 : .25,
+                                            ),
+                                          ],
                                         ),
-                                        blurRadius: 14,
-                                        spreadRadius: -3,
-                                        offset: const Offset(0, 4),
-                                      ),
-                                      BoxShadow(
-                                        color: Colors.white.withValues(
-                                          alpha: dark ? .12 : .32,
+                                        border: Border.all(
+                                          color: Colors.white.withValues(
+                                            alpha: dark ? .34 : .62,
+                                          ),
+                                          width: 1,
                                         ),
-                                        blurRadius: 6,
-                                        spreadRadius: -4,
-                                        offset: const Offset(0, -2),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: dockSelectionTint.withValues(
+                                              alpha: dark ? .24 : .16,
+                                            ),
+                                            blurRadius: 14,
+                                            spreadRadius: -3,
+                                            offset: const Offset(0, 4),
+                                          ),
+                                          BoxShadow(
+                                            color: Colors.white.withValues(
+                                              alpha: dark ? .12 : .32,
+                                            ),
+                                            blurRadius: 6,
+                                            spreadRadius: -4,
+                                            offset: const Offset(0, -2),
+                                          ),
+                                        ],
                                       ),
-                                    ],
-                                  ),
-                                  child: Stack(
-                                    fit: StackFit.expand,
-                                    children: [
-                                      Align(
-                                        alignment: Alignment.topCenter,
-                                        child: FractionallySizedBox(
-                                          widthFactor: .66,
-                                          heightFactor: .12,
-                                          child: DecoratedBox(
-                                            decoration: BoxDecoration(
-                                              borderRadius:
-                                                  BorderRadius.circular(99),
-                                              gradient: LinearGradient(
-                                                colors: [
-                                                  Colors.white.withValues(
-                                                    alpha: 0,
+                                      child: Stack(
+                                        fit: StackFit.expand,
+                                        children: [
+                                          Align(
+                                            alignment: Alignment.topCenter,
+                                            child: FractionallySizedBox(
+                                              widthFactor: .66,
+                                              heightFactor: .12,
+                                              child: DecoratedBox(
+                                                decoration: BoxDecoration(
+                                                  borderRadius:
+                                                      BorderRadius.circular(99),
+                                                  gradient: LinearGradient(
+                                                    colors: [
+                                                      Colors.white.withValues(
+                                                        alpha: 0,
+                                                      ),
+                                                      Colors.white.withValues(
+                                                        alpha: dark ? .56 : .84,
+                                                      ),
+                                                      Colors.white.withValues(
+                                                        alpha: 0,
+                                                      ),
+                                                    ],
                                                   ),
-                                                  Colors.white.withValues(
-                                                    alpha: dark ? .56 : .84,
-                                                  ),
-                                                  Colors.white.withValues(
-                                                    alpha: 0,
-                                                  ),
-                                                ],
+                                                ),
                                               ),
                                             ),
                                           ),
-                                        ),
+                                        ],
                                       ),
-                                    ],
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1291,107 +1307,151 @@ class _AssistantDock extends StatelessWidget {
                             onTap: () => _navigate(context, '/chat'),
                           ),
                           Expanded(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Tooltip(
-                                  message: 'Start a voice conversation',
-                                  child: TapMotion(
-                                    depth: .7,
-                                    child: Material(
-                                      color: Colors.transparent,
-                                      child: InkWell(
-                                        customBorder: const CircleBorder(),
-                                        onTap: () =>
-                                            _navigate(context, '/voice'),
-                                        child: Container(
-                                          width: 47,
-                                          height: 47,
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            gradient: LinearGradient(
-                                              begin: Alignment.topLeft,
-                                              end: Alignment.bottomRight,
-                                              colors: [
-                                                Color.alphaBlend(
-                                                  Colors.white.withValues(
-                                                    alpha: dark ? .16 : .22,
+                            child: Semantics(
+                              key: const ValueKey('dock-item-voice'),
+                              container: true,
+                              button: true,
+                              label: 'Voice',
+                              selected: voice,
+                              onTap: () => _navigate(context, '/voice'),
+                              child: ExcludeSemantics(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Tooltip(
+                                      message: 'Start a voice conversation',
+                                      child: TapMotion(
+                                        depth: .7,
+                                        child: Material(
+                                          color: Colors.transparent,
+                                          child: InkWell(
+                                            customBorder: const CircleBorder(),
+                                            onTap: () =>
+                                                _navigate(context, '/voice'),
+                                            child: AnimatedScale(
+                                              key: const ValueKey(
+                                                'dock-voice-scale',
+                                              ),
+                                              scale: voice ? 1.08 : 1,
+                                              duration: motionDuration,
+                                              curve: Curves.easeOutBack,
+                                              child: AnimatedContainer(
+                                                duration: motionDuration,
+                                                curve: Curves.easeOutCubic,
+                                                width: voice ? 51 : 47,
+                                                height: voice ? 51 : 47,
+                                                decoration: BoxDecoration(
+                                                  shape: BoxShape.circle,
+                                                  gradient: LinearGradient(
+                                                    begin: Alignment.topLeft,
+                                                    end: Alignment.bottomRight,
+                                                    colors: [
+                                                      Color.alphaBlend(
+                                                        Colors.white.withValues(
+                                                          alpha: dark
+                                                              ? .16
+                                                              : .22,
+                                                        ),
+                                                        colors.primary,
+                                                      ),
+                                                      colors.secondary,
+                                                    ],
                                                   ),
-                                                  colors.primary,
-                                                ),
-                                                colors.secondary,
-                                              ],
-                                            ),
-                                            border: Border.all(
-                                              color: Colors.white.withValues(
-                                                alpha: dark ? .48 : .78,
-                                              ),
-                                              width: 1.2,
-                                            ),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: colors.primary
-                                                    .withValues(alpha: .32),
-                                                blurRadius: 17,
-                                                offset: const Offset(0, 5),
-                                              ),
-                                              BoxShadow(
-                                                color: Colors.white.withValues(
-                                                  alpha: dark ? .10 : .25,
-                                                ),
-                                                blurRadius: 7,
-                                                spreadRadius: -4,
-                                                offset: const Offset(0, -2),
-                                              ),
-                                            ],
-                                          ),
-                                          child: Stack(
-                                            alignment: Alignment.center,
-                                            children: [
-                                              Icon(
-                                                Icons.mic_rounded,
-                                                color: colors.onPrimary,
-                                                size: 23,
-                                              ),
-                                              Positioned(
-                                                top: 5,
-                                                child: IgnorePointer(
-                                                  child: Container(
-                                                    width: 20,
-                                                    height: 4,
-                                                    decoration: BoxDecoration(
+                                                  border: Border.all(
+                                                    color: Colors.white
+                                                        .withValues(
+                                                          alpha: dark
+                                                              ? .48
+                                                              : .78,
+                                                        ),
+                                                    width: 1.2,
+                                                  ),
+                                                  boxShadow: [
+                                                    BoxShadow(
+                                                      color: colors.primary
+                                                          .withValues(
+                                                            alpha: .32,
+                                                          ),
+                                                      blurRadius: 17,
+                                                      offset: const Offset(
+                                                        0,
+                                                        5,
+                                                      ),
+                                                    ),
+                                                    BoxShadow(
                                                       color: Colors.white
                                                           .withValues(
                                                             alpha: dark
-                                                                ? .38
-                                                                : .56,
+                                                                ? .10
+                                                                : .25,
                                                           ),
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            99,
-                                                          ),
+                                                      blurRadius: 7,
+                                                      spreadRadius: -4,
+                                                      offset: const Offset(
+                                                        0,
+                                                        -2,
+                                                      ),
                                                     ),
-                                                  ),
+                                                  ],
+                                                ),
+                                                child: Stack(
+                                                  alignment: Alignment.center,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.mic_rounded,
+                                                      color: colors.onPrimary,
+                                                      size: 23,
+                                                    ),
+                                                    Positioned(
+                                                      top: 5,
+                                                      child: IgnorePointer(
+                                                        child: Container(
+                                                          width: 20,
+                                                          height: 4,
+                                                          decoration: BoxDecoration(
+                                                            color: Colors.white
+                                                                .withValues(
+                                                                  alpha: dark
+                                                                      ? .38
+                                                                      : .56,
+                                                                ),
+                                                            borderRadius:
+                                                                BorderRadius.circular(
+                                                                  99,
+                                                                ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ),
                                               ),
-                                            ],
+                                            ),
                                           ),
                                         ),
                                       ),
                                     ),
-                                  ),
+                                    const SizedBox(height: 1),
+                                    AnimatedDefaultTextStyle(
+                                      duration: motionDuration,
+                                      curve: Curves.easeOutCubic,
+                                      style:
+                                          theme.textTheme.labelSmall?.copyWith(
+                                            fontSize: 9,
+                                            height: 1.1,
+                                            fontWeight: voice
+                                                ? FontWeight.w700
+                                                : FontWeight.w600,
+                                            color: voice
+                                                ? colors.primary
+                                                : colors.onSurfaceVariant,
+                                          ) ??
+                                          const TextStyle(),
+                                      child: const Text('Voice'),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(height: 1),
-                                Text(
-                                  'Voice',
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    fontSize: 9,
-                                    height: 1.1,
-                                    fontWeight: FontWeight.w600,
-                                    color: colors.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
                           ),
                           _DockItem(

@@ -1,6 +1,6 @@
-# Personal Agentic AI for Android — 1.23.07.01
+# Personal Agentic AI for Android — 1.27.54.01
 
-This is the stable, direct-install ARM64 release; its Android `versionName` is exactly `1.23.07.01`, and the release workflow assigns the next monotonically increasing integer `versionCode`. It is signed with the owner's configured Android release key, not a development certificate, and is not a Google Play Store listing. Android 16 / API 36 is the automated qualification target; `minSdk 26` is a package setting, not a promise of tested older-device compatibility. The Redmi 24090RA29I has not been physically verified with this release. The existing Python/CLI/web and older Android projects are separate and unchanged.
+This is the stable, direct-install ARM64 release; its Android `versionName` is exactly `1.27.54.01`, and the release workflow assigns the next monotonically increasing integer `versionCode`. It is signed with the owner's configured Android release key, not a development certificate, and is not a Google Play Store listing. Android 16 / API 36 is the automated qualification target; `minSdk 26` is a package setting, not a promise of tested older-device compatibility. The Redmi 24090RA29I has not been physically verified with this release. The existing Python/CLI/web and older Android projects are separate and unchanged.
 
 ## Install on a phone (no computer required for local tools)
 
