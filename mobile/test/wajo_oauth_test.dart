@@ -380,7 +380,7 @@ void main() {
   );
 
   test(
-    'OAuth access token is used only for bounded tools/list discovery',
+    'OAuth access token is used only for explicit bounded MCP requests',
     () async {
       final storage = const FlutterSecureStorage();
       const server = McpServer(

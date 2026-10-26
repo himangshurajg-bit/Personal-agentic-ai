@@ -1108,6 +1108,26 @@ class AssistantState extends ChangeNotifier {
     return mcpStore.discoverTools(server, oauthAccessToken: accessToken);
   }
 
+  Future<Map<String, dynamic>> callMcpTool(
+    String id,
+    McpToolInfo tool,
+    Map<String, dynamic> arguments,
+  ) async {
+    final server = customMcpServers.where((s) => s.id == id).firstOrNull;
+    if (server == null) {
+      throw const McpException('MCP server is no longer configured.');
+    }
+    final accessToken = server.authMode == McpAuthMode.wajoOAuth
+        ? await mcpOAuth.accessTokenForDiscovery(server)
+        : null;
+    return mcpStore.callTool(
+      server,
+      tool,
+      arguments,
+      oauthAccessToken: accessToken,
+    );
+  }
+
   Future<void> saveNote(String value) async {
     await storage.write(key: 'note', value: value);
     note = value;
