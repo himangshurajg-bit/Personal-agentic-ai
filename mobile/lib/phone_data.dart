@@ -16,6 +16,7 @@ class PhoneData {
     'flashcards': [],
     'study_reviews': [],
     'study_lessons': [],
+    'study_practice_attempts': [],
   };
   bool _loadFailed = false;
   Future<void> _tail = Future.value();
@@ -39,10 +40,12 @@ class PhoneData {
         parsed.putIfAbsent('flashcards', () => <dynamic>[]);
         parsed.putIfAbsent('study_reviews', () => <dynamic>[]);
         parsed.putIfAbsent('study_lessons', () => <dynamic>[]);
+        parsed.putIfAbsent('study_practice_attempts', () => <dynamic>[]);
         if (parsed['study_decks'] is! List ||
             parsed['flashcards'] is! List ||
             parsed['study_reviews'] is! List ||
-            parsed['study_lessons'] is! List) {
+            parsed['study_lessons'] is! List ||
+            parsed['study_practice_attempts'] is! List) {
           throw const FormatException('Invalid local study data');
         }
         _data = parsed;
@@ -281,7 +284,37 @@ class PhoneData {
       throw StateError('Study lesson no longer exists.');
     }
     lessons.removeWhere((lesson) => lesson['id'] == lessonId);
+    (d['study_practice_attempts'] as List).removeWhere(
+      (attempt) => attempt['lesson_id'] == lessonId,
+    );
   });
+
+  Future<void> saveStudyPracticeAttempt({
+    required String lessonId,
+    required int questionNumber,
+    required String answer,
+    required String selfAssessment,
+  }) async {
+    if (answer.length > 4000 ||
+        !['still_learning', 'understood'].contains(selfAssessment)) {
+      throw ArgumentError('Invalid local practice response.');
+    }
+    await change((d) {
+      if (!(d['study_lessons'] as List).any(
+        (lesson) => lesson['id'] == lessonId,
+      )) {
+        throw StateError('Study lesson no longer exists.');
+      }
+      (d['study_practice_attempts'] as List).add({
+        'id': id(),
+        'lesson_id': lessonId,
+        'question_number': questionNumber,
+        'answer': answer.trim(),
+        'self_assessment': selfAssessment,
+        'at': DateTime.now().toUtc().toIso8601String(),
+      });
+    });
+  }
 
   List<Map<String, dynamic>> get studyDecks => rows('study_decks');
 
