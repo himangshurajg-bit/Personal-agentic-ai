@@ -1444,6 +1444,7 @@ class AssistantState extends ChangeNotifier {
     required String answerText,
     required String feature,
     List<Map<String, dynamic>> sources = const [],
+    List<String> searchQueries = const [],
     String? attachmentName,
   }) async {
     if (!['web_research', 'file_analysis'].contains(feature) ||
@@ -1466,6 +1467,7 @@ class AssistantState extends ChangeNotifier {
       'state': 'complete',
       'feature': feature,
       if (feature == 'web_research') 'sources': sources,
+      if (feature == 'web_research') 'searchQueries': searchQueries,
     });
     try {
       await persistChat();

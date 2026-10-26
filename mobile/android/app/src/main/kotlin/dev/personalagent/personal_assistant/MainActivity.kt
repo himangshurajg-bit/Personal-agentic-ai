@@ -37,6 +37,8 @@ internal fun isValidTextSharePayload(title: String?, text: String?): Boolean =
 internal fun canPostAssistantTaskNotification(sdk: Int, notificationsGranted: Boolean): Boolean =
     sdk < 33 || notificationsGranted
 
+internal const val GOOGLE_AI_MODE_URL = "https://www.google.com/ai"
+
 internal fun assistantTaskStatusLabel(status: String): String? = when (status) {
     "preparing" -> "Preparing your request"
     "waitingForReply" -> "Waiting for the selected AI"
@@ -490,6 +492,26 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             }
         }
+        MethodChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/web_search")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "open_google_ai_mode" -> {
+                        try {
+                            startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(GOOGLE_AI_MODE_URL)),
+                            )
+                            result.success(true)
+                        } catch (_: Exception) {
+                            result.error(
+                                "browser_unavailable",
+                                "No browser or Google app can open Google AI Mode.",
+                                null,
+                            )
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/app_update").setMethodCallHandler { call, result ->
             when (call.method) {
                 "get_installed_version" -> {

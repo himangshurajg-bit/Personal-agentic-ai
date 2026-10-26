@@ -34,6 +34,9 @@ import 'package:webview_flutter/webview_flutter.dart';
 const MethodChannel _assistantAudioChannel = MethodChannel(
   'personal_assistant/audio',
 );
+const MethodChannel _assistantWebSearchChannel = MethodChannel(
+  'personal_assistant/web_search',
+);
 final ValueNotifier<bool> _assistantAudioPlaying = ValueNotifier(false);
 final GlobalKey<NavigatorState> _assistantNavigatorKey =
     GlobalKey<NavigatorState>();
@@ -4019,6 +4022,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         answerText: answer.text,
         feature: isResearch ? 'web_research' : 'file_analysis',
         sources: isResearch ? sources : const [],
+        searchQueries: isResearch ? answer.searchQueries : const [],
         attachmentName: isResearch ? null : _chatAttachmentName,
       );
       nowState.lastPrompt = prompt;
@@ -4029,6 +4033,35 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (mounted) setState(() => _chatFeatureError = error.toString());
     } finally {
       if (mounted) setState(() => _chatFeatureBusy = false);
+    }
+  }
+
+  Future<void> _openGoogleAiMode() async {
+    if (_chatFeatureBusy) return;
+    try {
+      await _assistantWebSearchChannel.invokeMethod<void>(
+        'open_google_ai_mode',
+      );
+      if (mounted) {
+        notice(
+          context,
+          'Google AI Mode opened outside the app. Your draft was not sent; enter the question there. Its answer will not appear in this chat.',
+        );
+      }
+    } on PlatformException catch (error) {
+      if (mounted) {
+        setState(
+          () => _chatFeatureError =
+              error.message ?? 'Google AI Mode could not be opened.',
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _chatFeatureError =
+              'Google AI Mode is available only on Android in this app.',
+        );
+      }
     }
   }
 
@@ -4284,6 +4317,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                         )
                                         .toList(growable: false),
                                     onOpen: _openResearchSource,
+                                    searchQueries:
+                                        (m['searchQueries'] as List? ??
+                                                const [])
+                                            .whereType<String>()
+                                            .toList(growable: false),
                                   ),
                                 if (m['feature'] == 'web_research' &&
                                     m['role'] == 'assistant' &&
@@ -4485,6 +4523,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 _chatFeatureError = '';
                               }),
                       ),
+                      ActionChip(
+                        avatar: const Icon(Icons.open_in_new_rounded, size: 18),
+                        label: const Text('Google AI Mode'),
+                        onPressed: _chatFeatureBusy ? null : _openGoogleAiMode,
+                      ),
                       if (_chatFeatureBusy)
                         const SizedBox(
                           width: 18,
@@ -4662,19 +4705,39 @@ class _ChatFeatureBadge extends StatelessWidget {
 
 class _ChatResearchSources extends StatelessWidget {
   final List<Map<String, dynamic>> sources;
+  final List<String> searchQueries;
   final Future<void> Function(String, String) onOpen;
-  const _ChatResearchSources({required this.sources, required this.onOpen});
+  const _ChatResearchSources({
+    required this.sources,
+    required this.searchQueries,
+    required this.onOpen,
+  });
 
   @override
   Widget build(BuildContext context) {
-    if (sources.isEmpty) return const SizedBox.shrink();
+    if (sources.isEmpty && searchQueries.isEmpty) {
+      return const SizedBox.shrink();
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Padding(
-          padding: EdgeInsets.only(top: 10, bottom: 4),
-          child: Text('Sources returned by Google Search'),
-        ),
+        if (searchQueries.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.only(top: 10, bottom: 4),
+            child: Text('Google Search queries used'),
+          ),
+          for (final query in searchQueries)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 3),
+              child: Text('· $query'),
+            ),
+        ],
+        if (sources.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.only(top: 10, bottom: 4),
+            child: Text('Sources returned by Google Search'),
+          ),
+        ],
         for (final source in sources)
           Builder(
             builder: (context) {

@@ -15,6 +15,11 @@ class AssistantTaskNotificationTest {
     }
 
     @Test
+    fun googleAiModeOpensOnlyTheOfficialConsumerEntryPoint() {
+        assertEquals("https://www.google.com/ai", GOOGLE_AI_MODE_URL)
+    }
+
+    @Test
     fun onlyKnownTaskStatusesAreShown() {
         assertEquals("Preparing your request", assistantTaskStatusLabel("preparing"))
         assertEquals("Running the on-device model", assistantTaskStatusLabel("workingOffline"))

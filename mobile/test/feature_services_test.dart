@@ -78,6 +78,15 @@ void main() {
           expect(body['tools'], [
             {'google_search': <String, dynamic>{}},
           ]);
+          final prompt =
+              (((body['contents'] as List).single as Map)['parts'] as List)
+                      .single
+                  as Map;
+          expect(prompt['text'], contains('broadly using Google Search'));
+          expect(
+            prompt['text'],
+            contains('Do not claim the search is exhaustive'),
+          );
           expect(request.headers['x-goog-api-key'], 'test-key');
           return httpResponse({
             'candidates': [
@@ -105,6 +114,13 @@ void main() {
                       'groundingChunkIndices': [0],
                     },
                   ],
+                  'webSearchQueries': [
+                    'test definition',
+                    'test definition',
+                    'testing standards',
+                    '',
+                    42,
+                  ],
                 },
               },
             ],
@@ -113,6 +129,7 @@ void main() {
       );
       final result = await client.research('What is a test?');
       expect(result.text, 'A grounded answer.');
+      expect(result.searchQueries, ['test definition', 'testing standards']);
       expect(result.sources, hasLength(1));
       expect(
         result.sources.single.uri.toString(),

@@ -15,6 +15,7 @@ void main() {
   late Map<String, dynamic> pickedFile;
   late List<http.Request> requests;
   late AssistantState state;
+  late List<MethodCall> webSearchCalls;
 
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});
@@ -24,6 +25,7 @@ void main() {
       'content_base64': base64Encode([1, 2, 3, 4]),
     };
     requests = [];
+    webSearchCalls = [];
     state = AssistantState(
       clientFactory: () => MockClient((request) async {
         requests.add(request);
@@ -51,6 +53,10 @@ void main() {
                       'groundingChunkIndices': [0],
                     },
                   ],
+                  'webSearchQueries': [
+                    'latest battery research',
+                    'battery safety standards',
+                  ],
                 },
               },
             ],
@@ -69,6 +75,13 @@ void main() {
       if (call.method == 'pick_file') return pickedFile;
       return null;
     });
+    messenger.setMockMethodCallHandler(
+      const MethodChannel('personal_assistant/web_search'),
+      (call) async {
+        webSearchCalls.add(call);
+        return true;
+      },
+    );
   });
 
   tearDown(() {
@@ -79,6 +92,10 @@ void main() {
       null,
     );
     messenger.setMockMethodCallHandler(AssistantState.device, null);
+    messenger.setMockMethodCallHandler(
+      const MethodChannel('personal_assistant/web_search'),
+      null,
+    );
   });
 
   Future<void> pumpChat(WidgetTester tester) async {
@@ -138,11 +155,43 @@ void main() {
       ]);
       expect(find.text('WEB RESEARCH'), findsNWidgets(2));
       expect(find.textContaining('Example source'), findsOneWidget);
+      expect(find.text('Google Search queries used'), findsOneWidget);
+      expect(find.textContaining('latest battery research'), findsOneWidget);
       expect(state.messages.last['sources'], hasLength(1));
+      expect(state.messages.last['searchQueries'], [
+        'latest battery research',
+        'battery safety standards',
+      ]);
       expect(
         state.local.chat(state.conversation).last['sources'],
         hasLength(1),
       );
+      expect(state.local.chat(state.conversation).last['searchQueries'], [
+        'latest battery research',
+        'battery safety standards',
+      ]);
+      await cleanUp(tester);
+    },
+  );
+
+  testWidgets(
+    'Google AI Mode opens externally without sending or clearing the chat draft',
+    (tester) async {
+      await pumpChat(tester);
+      await tester.enterText(
+        find.byType(TextField).last,
+        'Compare current phones',
+      );
+      await tester.tap(find.text('Google AI Mode'));
+      await tester.pumpAndSettle();
+
+      expect(webSearchCalls, hasLength(1));
+      expect(webSearchCalls.single.method, 'open_google_ai_mode');
+      expect(webSearchCalls.single.arguments, isNull);
+      expect(requests, isEmpty);
+      expect(state.messages, isEmpty);
+      expect(find.text('Compare current phones'), findsOneWidget);
+      expect(find.textContaining('Your draft was not sent'), findsOneWidget);
       await cleanUp(tester);
     },
   );
