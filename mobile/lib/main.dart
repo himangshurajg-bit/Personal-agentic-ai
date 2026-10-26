@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 
 import 'app_update.dart';
 import 'assistant_state.dart';
+import 'jee_question_request.dart';
 import 'assistant_task_tracker.dart';
 import 'mcp_servers.dart';
 import 'wajo_oauth.dart';
@@ -3224,6 +3225,7 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final input = TextEditingController();
+  final _inputFocus = FocusNode();
   final ScrollController _chatScrollController = ScrollController();
   int _lastObservedMessageCount = -1;
   String? _lastObservedConversation;
@@ -4377,13 +4379,63 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> send([String? retry]) async {
+    final text = retry ?? input.text;
+    final jeeRequest = JeeQuestionRequest.fromMessage(text);
+    if (jeeRequest != null &&
+        (_chatAttachmentBytes != null || _chatWebSearch)) {
+      notice(
+        context,
+        'Clear the attachment or web-search option before starting JEE practice.',
+      );
+      return;
+    }
     if (retry == null && (_chatAttachmentBytes != null || _chatWebSearch)) {
       await _sendChatFeature();
       return;
     }
-    final text = retry ?? input.text;
     if (text.trim().isEmpty) {
       return;
+    }
+    final generatedPrompt = jeeRequest?.buildPrompt();
+    if (generatedPrompt != null) {
+      if (generatedPrompt.length > 5000) {
+        notice(
+          context,
+          'Shorten the topic so the reviewed practice prompt stays within the safe prompt-size limit.',
+        );
+        return;
+      }
+      final approved =
+          await showDialog<bool>(
+            context: context,
+            builder: (dialogContext) => AlertDialog(
+              title: const Text('Review JEE practice prompt'),
+              scrollable: true,
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'This generated prompt will be sent to your selected online provider (${widget.state.engine}, ${widget.state.model}). Provider services may retain it or charge your account. It will not include chat history or saved memories. The questions are newly generated practice, not verified past-year questions.',
+                  ),
+                  const SizedBox(height: 12),
+                  SelectableText(generatedPrompt),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  child: const Text('Send reviewed prompt'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+      if (!approved || !mounted) return;
     }
     await AssistantState.device.invokeMethod('voice_cancel');
     await tts.stop();
@@ -4402,8 +4454,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final studyModeForRequest = widget.state.studyModeEnabled;
     await widget.state.send(
       text,
-      shareMemories: widget.state.shareMemories,
-      shareHistory: widget.state.shareHistory,
+      providerMessageOverride: generatedPrompt,
+      shareMemories: jeeRequest == null && widget.state.shareMemories,
+      shareHistory: jeeRequest == null && widget.state.shareHistory,
       retryLastMessage: retry != null,
       spokenConversation: speakThisReply,
     );
@@ -4463,6 +4516,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     tts.stop();
     widget.state.stop(notify: false);
     input.dispose();
+    _inputFocus.dispose();
     super.dispose();
   }
 
@@ -4822,6 +4876,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                               }),
                       ),
                       ActionChip(
+                        avatar: const Icon(Icons.school_rounded, size: 18),
+                        label: const Text('JEE practice'),
+                        onPressed: _chatFeatureBusy
+                            ? null
+                            : () {
+                                input.value = const TextEditingValue(
+                                  text: '/jee ',
+                                  selection: TextSelection.collapsed(offset: 5),
+                                );
+                                _inputFocus.requestFocus();
+                              },
+                      ),
+                      ActionChip(
                         avatar: const Icon(Icons.open_in_new_rounded, size: 18),
                         label: const Text('Google AI Mode'),
                         onPressed: _chatFeatureBusy ? null : _openGoogleAiMode,
@@ -4912,6 +4979,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     Expanded(
                       child: TextField(
                         controller: input,
+                        focusNode: _inputFocus,
                         minLines: 1,
                         maxLines: 5,
                         maxLength: 8000,

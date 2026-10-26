@@ -218,6 +218,63 @@ void main() {
       state.dispose();
     },
   );
+  test('generated JEE prompt override stays separate from visible command and shared context', () async {
+    Map<String, dynamic>? requestBody;
+    final state = stateWith(
+      MockClient.streaming((request, body) async {
+        requestBody = jsonDecode(
+          utf8.decode(await body.toBytes()),
+        ) as Map<String, dynamic>;
+        return http.StreamedResponse(
+          Stream.value(
+            utf8.encode(
+              '{"type":"delta","text":"practice set"}\n{"type":"done"}\n',
+            ),
+          ),
+          200,
+        );
+      }),
+    );
+
+    await state.send(
+      '/jee electrostatics',
+      providerMessageOverride: 'GENERATED REVIEWED PRACTICE PROMPT',
+      shareMemories: false,
+      shareHistory: false,
+    );
+
+    final sentPrompt =
+        jsonDecode(requestBody!['text'] as String) as Map<String, dynamic>;
+    expect(sentPrompt['user_message'], 'GENERATED REVIEWED PRACTICE PROMPT');
+    expect(sentPrompt.containsKey('approved_memory_data'), isFalse);
+    expect(sentPrompt.containsKey('quoted_history'), isFalse);
+    expect(state.messages.first['text'], '/jee electrostatics');
+    state.dispose();
+  });
+
+  test('generated JEE prompt cannot use an unqualified offline model or fall back online', () async {
+    var calls = 0;
+    final state =
+        stateWith(
+            MockClient((_) async {
+              calls++;
+              return http.Response('{}', 200);
+            }),
+          )
+          ..chatMode = 'offline'
+          ..experimentalOfflineChatEnabled = true;
+
+    await state.send(
+      '/jee electrostatics',
+      providerMessageOverride: 'generated',
+    );
+
+    expect(calls, 0);
+    expect(state.error, contains('no online fallback was used'));
+    expect(state.messages, isEmpty);
+    state.dispose();
+  });
+
   test(
     'broken response preserves partial as interrupted, no automatic retry',
     () async {

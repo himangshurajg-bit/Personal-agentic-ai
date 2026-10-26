@@ -1925,6 +1925,7 @@ class AssistantState extends ChangeNotifier {
     bool shareHistory = false,
     bool retryLastMessage = false,
     bool spokenConversation = false,
+    String? providerMessageOverride,
   }) async {
     if (busy || text.trim().isEmpty) {
       return;
@@ -1950,6 +1951,11 @@ class AssistantState extends ChangeNotifier {
     }
     error = '';
     final selectedEngine = chatMode == 'offline' ? 'offline' : engine;
+    if (selectedEngine == 'offline' && providerMessageOverride != null) {
+      error = 'Generated JEE practice needs a configured online model. The current local model is not qualified for question generation; no message was sent and no online fallback was used.';
+      notifyListeners();
+      return;
+    }
     final selectedConfig = selectedEngine == 'offline' ? null : config;
     final selectedModel = selectedConfig?.model ?? model;
     final prior = messages
@@ -1997,7 +2003,7 @@ class AssistantState extends ChangeNotifier {
           'quoted_history': _boundedOfflineHistory(prior)
         else if (shareHistory)
           'quoted_history': prior,
-        'user_message': lastPrompt,
+        'user_message': providerMessageOverride ?? lastPrompt,
       });
       await persistChat();
       if (generation != _generation) return;
