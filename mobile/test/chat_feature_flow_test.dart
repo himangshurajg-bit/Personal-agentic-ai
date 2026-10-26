@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -129,6 +130,48 @@ void main() {
   }
 
   testWidgets(
+    'chat feature actions are compact icon buttons with accessible labels',
+    (tester) async {
+      await pumpChat(tester);
+      final labels = [
+        'Attach image or file',
+        'Search web',
+        'JEE practice',
+        'Google AI Mode',
+      ];
+
+      for (final label in labels) {
+        final button = find.byTooltip(label);
+        expect(button, findsOneWidget);
+        expect(tester.getSemantics(button).getSemanticsData().tooltip, label);
+      }
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('chat-feature-actions')))
+            .height,
+        48,
+      );
+
+      await tester.tap(find.byTooltip('Search web'));
+      await tester.pump();
+      expect(
+        tester
+                .getSemantics(find.byTooltip('Search web'))
+                .getSemanticsData()
+                .flagsCollection
+                .isSelected ==
+            Tristate.isTrue,
+        isTrue,
+      );
+
+      await tester.tap(find.byTooltip('JEE practice'));
+      await tester.pump();
+      expect(find.text('/jee '), findsOneWidget);
+      await cleanUp(tester);
+    },
+  );
+
+  testWidgets(
     'web research asks permission, uses Google Search and saves citations',
     (tester) async {
       enableGemini();
@@ -138,7 +181,7 @@ void main() {
         find.byType(TextField).last,
         'Latest battery research',
       );
-      await tester.tap(find.text('Search web'));
+      await tester.tap(find.byTooltip('Search web'));
       await tester.pump();
       await tester.tap(find.byTooltip('Send message'));
       await tester.pump();
@@ -182,7 +225,7 @@ void main() {
         find.byType(TextField).last,
         'Compare current phones',
       );
-      await tester.tap(find.text('Google AI Mode'));
+      await tester.tap(find.byTooltip('Google AI Mode'));
       await tester.pumpAndSettle();
 
       expect(webSearchCalls, hasLength(1));
@@ -204,7 +247,7 @@ void main() {
         find.byType(TextField).last,
         'Explain a new topic',
       );
-      await tester.tap(find.text('Search web'));
+      await tester.tap(find.byTooltip('Search web'));
       await tester.pump();
       await tester.tap(find.byTooltip('Send message'));
       await tester.pump();
@@ -225,7 +268,7 @@ void main() {
     (tester) async {
       enableGemini();
       await pumpChat(tester);
-      await tester.tap(find.text('Attach image or file'));
+      await tester.tap(find.byTooltip('Attach image or file'));
       await tester.pump();
       expect(find.text('lesson.pdf'), findsOneWidget);
       await tester.enterText(
@@ -266,7 +309,7 @@ void main() {
     (tester) async {
       enableGemini();
       await pumpChat(tester);
-      await tester.tap(find.text('Attach image or file'));
+      await tester.tap(find.byTooltip('Attach image or file'));
       await tester.pump();
       await tester.enterText(find.byType(TextField).last, 'What is this?');
       await tester.tap(find.byTooltip('Send message'));

@@ -4849,35 +4849,46 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ),
                       ),
                     ),
-                  Wrap(
-                    spacing: 8,
-                    crossAxisAlignment: WrapCrossAlignment.center,
+                  Row(
+                    key: const ValueKey('chat-feature-actions'),
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      ActionChip(
-                        avatar: const Icon(Icons.attach_file_rounded, size: 18),
-                        label: const Text('Attach image or file'),
+                      IconButton.filledTonal(
+                        tooltip: 'Attach image or file',
+                        constraints: const BoxConstraints.tightFor(
+                          width: 48,
+                          height: 48,
+                        ),
                         onPressed: _chatFeatureBusy
                             ? null
                             : _pickChatAttachment,
+                        icon: const Icon(Icons.attach_file_rounded),
                       ),
-                      FilterChip(
-                        avatar: const Icon(
-                          Icons.travel_explore_rounded,
-                          size: 18,
+                      const SizedBox(width: 4),
+                      IconButton.filledTonal(
+                        tooltip: 'Search web',
+                        isSelected: _chatWebSearch,
+                        selectedIcon: const Icon(Icons.travel_explore_rounded),
+                        constraints: const BoxConstraints.tightFor(
+                          width: 48,
+                          height: 48,
                         ),
-                        label: const Text('Search web'),
-                        selected: _chatWebSearch,
-                        onSelected:
+                        onPressed:
                             _chatFeatureBusy || _chatAttachmentBytes != null
                             ? null
-                            : (selected) => setState(() {
-                                _chatWebSearch = selected;
+                            : () => setState(() {
+                                _chatWebSearch = !_chatWebSearch;
                                 _chatFeatureError = '';
                               }),
+                        icon: const Icon(Icons.travel_explore_rounded),
                       ),
-                      ActionChip(
-                        avatar: const Icon(Icons.school_rounded, size: 18),
-                        label: const Text('JEE practice'),
+                      const SizedBox(width: 4),
+                      IconButton.filledTonal(
+                        tooltip: 'JEE practice',
+                        constraints: const BoxConstraints.tightFor(
+                          width: 48,
+                          height: 48,
+                        ),
                         onPressed: _chatFeatureBusy
                             ? null
                             : () {
@@ -4887,18 +4898,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 );
                                 _inputFocus.requestFocus();
                               },
+                        icon: const Icon(Icons.school_rounded),
                       ),
-                      ActionChip(
-                        avatar: const Icon(Icons.open_in_new_rounded, size: 18),
-                        label: const Text('Google AI Mode'),
+                      const SizedBox(width: 4),
+                      IconButton.filledTonal(
+                        tooltip: 'Google AI Mode',
+                        constraints: const BoxConstraints.tightFor(
+                          width: 48,
+                          height: 48,
+                        ),
                         onPressed: _chatFeatureBusy ? null : _openGoogleAiMode,
+                        icon: const Icon(Icons.open_in_new_rounded),
                       ),
-                      if (_chatFeatureBusy)
+                      if (_chatFeatureBusy) ...[
+                        const SizedBox(width: 8),
                         const SizedBox(
                           width: 18,
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         ),
+                      ],
                     ],
                   ),
                   if (_chatFeatureError.isNotEmpty)
