@@ -71,6 +71,22 @@ void main() {
       expect(home.getSemanticsData().hasAction(SemanticsAction.tap), isTrue);
       expect(
         tester
+            .widget<AnimatedAlign>(
+              find.byKey(const ValueKey('dock-liquid-glass')),
+            )
+            .duration,
+        const Duration(milliseconds: 240),
+      );
+      expect(
+        tester
+            .widget<AnimatedContainer>(
+              find.byKey(const ValueKey('dock-liquid-glass-surface')),
+            )
+            .duration,
+        const Duration(milliseconds: 240),
+      );
+      expect(
+        tester
             .widget<AnimatedContainer>(
               find.byKey(const ValueKey('dock-selection-home')),
             )
@@ -89,6 +105,34 @@ void main() {
         const Duration(milliseconds: 240),
       );
       expect(tester.takeException(), isNull);
+
+      final startCenter = tester.getCenter(
+        find.byKey(const ValueKey('dock-liquid-glass-surface')),
+      );
+      await tester.tap(find.byKey(const ValueKey('dock-item-memory')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      final middleCenter = tester.getCenter(
+        find.byKey(const ValueKey('dock-liquid-glass-surface')),
+      );
+      expect(middleCenter.dx, isNot(startCenter.dx));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(
+        tester
+            .widget<AnimatedAlign>(
+              find.byKey(const ValueKey('dock-liquid-glass')),
+            )
+            .alignment,
+        const Alignment(.4, 0),
+      );
+      expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('dock-item-memory')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected,
+        ui.Tristate.isTrue,
+      );
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
@@ -114,6 +158,26 @@ void main() {
     await state.local.load();
     await tester.pumpWidget(AssistantApp(state: state));
 
+    expect(
+      tester
+          .widget<AnimatedAlign>(
+            find.byKey(const ValueKey('dock-liquid-glass')),
+          )
+          .duration,
+      Duration.zero,
+    );
+    expect(
+      tester
+          .widget<AnimatedContainer>(
+            find.byKey(const ValueKey('dock-liquid-glass-surface')),
+          )
+          .duration,
+      Duration.zero,
+    );
+    final glassHero = tester.widget<Hero>(
+      find.byKey(const ValueKey('dock-liquid-glass-hero')),
+    );
+    expect(glassHero.tag, isNot('assistant-dock-liquid-glass-selection'));
     expect(
       tester
           .widget<AnimatedContainer>(
