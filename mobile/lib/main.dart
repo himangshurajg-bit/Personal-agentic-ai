@@ -1002,128 +1002,298 @@ class _AssistantDock extends StatelessWidget {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final dark = theme.brightness == Brightness.dark;
-    final home = currentRoute == null || currentRoute == '/home';
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final motionDuration = reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 240);
+    final home =
+        currentRoute == null || currentRoute == '/' || currentRoute == '/home';
     final chat = currentRoute == '/chat' || currentRoute == '/voice';
     final memory =
         currentRoute == '/memory' ||
         currentRoute == '/library' ||
         currentRoute == '/files';
     final settings = currentRoute == '/settings';
+    final radius = BorderRadius.circular(28);
+
     return SafeArea(
       top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(28),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-            child: Container(
-              height: 78,
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-              decoration: BoxDecoration(
-                color: colors.surface.withValues(alpha: dark ? .76 : .72),
-                borderRadius: BorderRadius.circular(28),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: dark ? .16 : .78),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: colors.primary.withValues(alpha: dark ? .12 : .10),
-                    blurRadius: 28,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: radius,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: dark ? .25 : .12),
+                blurRadius: 24,
+                spreadRadius: -5,
+                offset: const Offset(0, 10),
               ),
-              child: Row(
-                children: [
-                  _DockItem(
-                    icon: Icons.home_outlined,
-                    selectedIcon: Icons.home_rounded,
-                    label: 'Home',
-                    selected: home,
-                    onTap: () => _navigate(context, '/home'),
-                  ),
-                  _DockItem(
-                    icon: Icons.chat_bubble_outline_rounded,
-                    selectedIcon: Icons.chat_bubble_rounded,
-                    label: 'Chat',
-                    selected: chat,
-                    onTap: () => _navigate(context, '/chat'),
-                  ),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Tooltip(
-                          message: 'Start a voice conversation',
-                          child: TapMotion(
-                            depth: .7,
-                            child: Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                customBorder: const CircleBorder(),
-                                onTap: () => _navigate(context, '/voice'),
-                                child: Container(
-                                  width: 47,
-                                  height: 47,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                      colors: [
-                                        colors.primary,
-                                        colors.secondary,
-                                      ],
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: colors.primary.withValues(
-                                          alpha: .32,
-                                        ),
-                                        blurRadius: 17,
-                                        offset: const Offset(0, 5),
-                                      ),
-                                    ],
-                                  ),
-                                  child: Icon(
-                                    Icons.mic_rounded,
-                                    color: colors.onPrimary,
-                                    size: 23,
-                                  ),
+              BoxShadow(
+                color: colors.primary.withValues(alpha: dark ? .16 : .11),
+                blurRadius: 28,
+                spreadRadius: -7,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: radius,
+            child: BackdropFilter(
+              key: const ValueKey('assistant-dock-backdrop'),
+              filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+              child: SizedBox(
+                key: const ValueKey('assistant-dock-glass'),
+                height: 80,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            colors.surface.withValues(alpha: dark ? .72 : .76),
+                            colors.surfaceContainerHighest.withValues(
+                              alpha: dark ? .78 : .70,
+                            ),
+                            colors.surface.withValues(alpha: dark ? .84 : .82),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              stops: const [0, .42, 1],
+                              colors: [
+                                Colors.white.withValues(
+                                  alpha: dark ? .14 : .28,
                                 ),
-                              ),
+                                colors.primary.withValues(
+                                  alpha: dark ? .035 : .025,
+                                ),
+                                colors.tertiary.withValues(
+                                  alpha: dark ? .09 : .055,
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                        const SizedBox(height: 1),
-                        Text(
-                          'Voice',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            fontSize: 9,
-                            height: 1.1,
-                            fontWeight: FontWeight.w600,
-                            color: colors.onSurfaceVariant,
+                      ),
+                    ),
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: radius,
+                            border: Border.all(
+                              color: Colors.white.withValues(
+                                alpha: dark ? .20 : .72,
+                              ),
+                              width: 1,
+                            ),
                           ),
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                  _DockItem(
-                    icon: Icons.psychology_alt_outlined,
-                    selectedIcon: Icons.psychology_alt_rounded,
-                    label: 'Memory',
-                    selected: memory,
-                    onTap: () => _navigate(context, '/memory'),
-                  ),
-                  _DockItem(
-                    icon: Icons.tune_rounded,
-                    selectedIcon: Icons.tune_rounded,
-                    label: 'Settings',
-                    selected: settings,
-                    onTap: () => _navigate(context, '/settings'),
-                  ),
-                ],
+                    Positioned(
+                      top: 1,
+                      left: 28,
+                      right: 28,
+                      height: 1.2,
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                Colors.white.withValues(alpha: 0),
+                                Colors.white.withValues(
+                                  alpha: dark ? .62 : .88,
+                                ),
+                                Colors.white.withValues(alpha: 0),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      bottom: 0,
+                      left: 38,
+                      right: 38,
+                      height: 12,
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [
+                                colors.primary.withValues(
+                                  alpha: dark ? .13 : .07,
+                                ),
+                                colors.primary.withValues(alpha: 0),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 5,
+                      ),
+                      child: Row(
+                        children: [
+                          _DockItem(
+                            icon: Icons.home_outlined,
+                            selectedIcon: Icons.home_rounded,
+                            label: 'Home',
+                            selected: home,
+                            motionDuration: motionDuration,
+                            onTap: () => _navigate(context, '/home'),
+                          ),
+                          _DockItem(
+                            icon: Icons.chat_bubble_outline_rounded,
+                            selectedIcon: Icons.chat_bubble_rounded,
+                            label: 'Chat',
+                            selected: chat,
+                            motionDuration: motionDuration,
+                            onTap: () => _navigate(context, '/chat'),
+                          ),
+                          Expanded(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Tooltip(
+                                  message: 'Start a voice conversation',
+                                  child: TapMotion(
+                                    depth: .7,
+                                    child: Material(
+                                      color: Colors.transparent,
+                                      child: InkWell(
+                                        customBorder: const CircleBorder(),
+                                        onTap: () =>
+                                            _navigate(context, '/voice'),
+                                        child: Container(
+                                          width: 47,
+                                          height: 47,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            gradient: LinearGradient(
+                                              begin: Alignment.topLeft,
+                                              end: Alignment.bottomRight,
+                                              colors: [
+                                                Color.alphaBlend(
+                                                  Colors.white.withValues(
+                                                    alpha: dark ? .16 : .22,
+                                                  ),
+                                                  colors.primary,
+                                                ),
+                                                colors.secondary,
+                                              ],
+                                            ),
+                                            border: Border.all(
+                                              color: Colors.white.withValues(
+                                                alpha: dark ? .48 : .78,
+                                              ),
+                                              width: 1.2,
+                                            ),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: colors.primary
+                                                    .withValues(alpha: .32),
+                                                blurRadius: 17,
+                                                offset: const Offset(0, 5),
+                                              ),
+                                              BoxShadow(
+                                                color: Colors.white.withValues(
+                                                  alpha: dark ? .10 : .25,
+                                                ),
+                                                blurRadius: 7,
+                                                spreadRadius: -4,
+                                                offset: const Offset(0, -2),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Stack(
+                                            alignment: Alignment.center,
+                                            children: [
+                                              Icon(
+                                                Icons.mic_rounded,
+                                                color: colors.onPrimary,
+                                                size: 23,
+                                              ),
+                                              Positioned(
+                                                top: 5,
+                                                child: IgnorePointer(
+                                                  child: Container(
+                                                    width: 20,
+                                                    height: 4,
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.white
+                                                          .withValues(
+                                                            alpha: dark
+                                                                ? .38
+                                                                : .56,
+                                                          ),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            99,
+                                                          ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 1),
+                                Text(
+                                  'Voice',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    fontSize: 9,
+                                    height: 1.1,
+                                    fontWeight: FontWeight.w600,
+                                    color: colors.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          _DockItem(
+                            icon: Icons.psychology_alt_outlined,
+                            selectedIcon: Icons.psychology_alt_rounded,
+                            label: 'Memory',
+                            selected: memory,
+                            motionDuration: motionDuration,
+                            onTap: () => _navigate(context, '/memory'),
+                          ),
+                          _DockItem(
+                            icon: Icons.tune_rounded,
+                            selectedIcon: Icons.tune_rounded,
+                            label: 'Settings',
+                            selected: settings,
+                            motionDuration: motionDuration,
+                            onTap: () => _navigate(context, '/settings'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1149,11 +1319,13 @@ class _DockItem extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final Duration motionDuration;
   const _DockItem({
     required this.icon,
     required this.selectedIcon,
     required this.label,
     required this.selected,
+    required this.motionDuration,
     required this.onTap,
   });
 
@@ -1163,65 +1335,91 @@ class _DockItem extends StatelessWidget {
     final colors = theme.colorScheme;
     final dark = theme.brightness == Brightness.dark;
     return Expanded(
-      child: TapMotion(
-        depth: .24,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(18),
-            onTap: onTap,
-            child: AnimatedContainer(
-              duration: MediaQuery.disableAnimationsOf(context)
-                  ? Duration.zero
-                  : const Duration(milliseconds: 200),
-              curve: Curves.easeOutCubic,
-              margin: const EdgeInsets.symmetric(horizontal: 1),
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              decoration: BoxDecoration(
+      child: Semantics(
+        key: ValueKey('dock-item-${label.toLowerCase()}'),
+        container: true,
+        button: true,
+        label: label,
+        selected: selected,
+        onTap: onTap,
+        child: ExcludeSemantics(
+          child: TapMotion(
+            depth: .24,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
                 borderRadius: BorderRadius.circular(18),
-                color: selected
-                    ? colors.primary.withValues(alpha: .12)
-                    : colors.surface.withValues(alpha: .04),
-                border: Border.all(
-                  color: selected
-                      ? colors.primary.withValues(alpha: .42)
-                      : colors.outlineVariant.withValues(
-                          alpha: dark ? .42 : .58,
-                        ),
-                ),
-                boxShadow: selected
-                    ? [
-                        BoxShadow(
-                          color: colors.primary.withValues(alpha: .14),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                      ]
-                    : null,
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    selected ? selectedIcon : icon,
-                    size: 21,
-                    color: selected ? colors.primary : colors.onSurfaceVariant,
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.fade,
-                    softWrap: false,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      fontSize: 9,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                onTap: onTap,
+                child: AnimatedContainer(
+                  key: ValueKey('dock-selection-${label.toLowerCase()}'),
+                  duration: motionDuration,
+                  curve: Curves.easeOutCubic,
+                  margin: const EdgeInsets.symmetric(horizontal: 1),
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(18),
+                    color: selected
+                        ? colors.primary.withValues(alpha: .12)
+                        : colors.surface.withValues(alpha: .04),
+                    border: Border.all(
                       color: selected
-                          ? colors.primary
-                          : colors.onSurfaceVariant,
+                          ? colors.primary.withValues(alpha: .42)
+                          : colors.outlineVariant.withValues(
+                              alpha: dark ? .42 : .58,
+                            ),
                     ),
+                    boxShadow: selected
+                        ? [
+                            BoxShadow(
+                              color: colors.primary.withValues(alpha: .14),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ]
+                        : null,
                   ),
-                ],
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      AnimatedSwitcher(
+                        duration: motionDuration,
+                        switchInCurve: Curves.easeOutBack,
+                        switchOutCurve: Curves.easeInCubic,
+                        transitionBuilder: (child, animation) => FadeTransition(
+                          opacity: animation,
+                          child: ScaleTransition(
+                            scale: animation,
+                            child: child,
+                          ),
+                        ),
+                        child: Icon(
+                          selected ? selectedIcon : icon,
+                          key: ValueKey(selected ? 'active' : 'idle'),
+                          size: 21,
+                          color: selected
+                              ? colors.primary
+                              : colors.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.fade,
+                        softWrap: false,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontSize: 9,
+                          fontWeight: selected
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                          color: selected
+                              ? colors.primary
+                              : colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
