@@ -680,7 +680,7 @@ class _ResearchFeatureState extends State<_ResearchFeature> {
     children: [
       const _FeatureNotice(
         icon: Icons.link_rounded,
-        text: 'Ask a question for a web-grounded summary. Source links come only from Gemini’s returned citation metadata; if it returns none, the app will say so rather than invent links.',
+        text: 'Ask a question for a broad, web-grounded summary. Gemini can run several related searches, but no web search is exhaustive. Source links and search queries appear only when Google returns them; if citations are missing, the app says so rather than inventing links.',
       ),
       const SizedBox(height: 14),
       TextField(
@@ -714,6 +714,23 @@ class _ResearchFeatureState extends State<_ResearchFeature> {
             child: MarkdownBody(data: _answer!.text),
           ),
         ),
+        if (_answer!.searchQueries.isNotEmpty)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Google Search queries used'),
+                  for (final query in _answer!.searchQueries)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text('· $query'),
+                    ),
+                ],
+              ),
+            ),
+          ),
         if (_answer!.sources.isNotEmpty)
           _SourceList(sources: _answer!.sources)
         else

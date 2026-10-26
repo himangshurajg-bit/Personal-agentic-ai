@@ -31,8 +31,13 @@ class FeatureSource {
 class FeatureAnswer {
   final String text;
   final List<FeatureSource> sources;
+  final List<String> searchQueries;
 
-  const FeatureAnswer({required this.text, this.sources = const []});
+  const FeatureAnswer({
+    required this.text,
+    this.sources = const [],
+    this.searchQueries = const [],
+  });
 
   static FeatureAnswer fromGenerateContent(Map<String, dynamic> json) {
     final candidates = json['candidates'];
@@ -59,6 +64,20 @@ class FeatureAnswer {
     final metadata = candidate['groundingMetadata'];
     final chunks = metadata is Map ? metadata['groundingChunks'] : null;
     final supports = metadata is Map ? metadata['groundingSupports'] : null;
+    final rawQueries = metadata is Map ? metadata['webSearchQueries'] : null;
+    final searchQueries = <String>[];
+    final seenQueries = <String>{};
+    if (rawQueries is List) {
+      for (final rawQuery in rawQueries) {
+        if (rawQuery is! String) continue;
+        final query = rawQuery.trim();
+        if (query.isEmpty || query.length > 300 || !seenQueries.add(query)) {
+          continue;
+        }
+        searchQueries.add(query);
+        if (searchQueries.length == 8) break;
+      }
+    }
     final sourceTexts = <int, List<String>>{};
     if (supports is List) {
       for (final support in supports.whereType<Map>()) {
@@ -129,7 +148,11 @@ class FeatureAnswer {
         }
       }
     }
-    return FeatureAnswer(text: text, sources: List.unmodifiable(sources));
+    return FeatureAnswer(
+      text: text,
+      sources: List.unmodifiable(sources),
+      searchQueries: List.unmodifiable(searchQueries),
+    );
   }
 }
 
@@ -235,7 +258,7 @@ class GeminiFeatureClient {
             'parts': [
               {
                 'text':
-                    'Research this question using Google Search. Give a concise, balanced answer, distinguish verified facts from uncertainty, and ground factual claims in the returned sources. Question: $prompt',
+                    'Research this question broadly using Google Search. Search relevant angles and useful variations rather than relying on one narrow query. Give a clear, useful summary, prioritize authoritative and primary sources, distinguish verified facts from uncertainty or disagreement, and ground factual claims in returned sources. Do not claim the search is exhaustive. Question: $prompt',
               },
             ],
           },

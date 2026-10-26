@@ -1,17 +1,14 @@
+import 'study_tutor.dart';
+
 /// Prompting contract for lessons rendered and saved to the Study Whiteboard.
 /// It deliberately distinguishes generated exam-style work from verified PYQs.
 class StudyWhiteboard {
   static bool isLessonResponse(String response) =>
       response.trimLeft().startsWith('## Topic explanation');
 
-  static const String generationInstruction = '''
-STUDY WHITEBOARD MODE: Treat the student's latest message as a topic or learning question. Give a clear, accurate concept explanation, a short worked example when useful, then an automatically generated progressive practice set. For a learning topic, start the reply immediately with this exact Markdown heading (no preamble); for non-topic messages, do not use it. Use these Markdown headings in order:
-## Topic explanation
-## Worked example
-## Basic foundations
-## JEE Main practice
-## JEE Advanced practice
-## Answers and reasoning
-Make eight topic-specific questions: two foundational, three JEE Main level (easy to hard), and three JEE Advanced level (multi-step / very challenging). Include the complete answer and a concise, checkable step-by-step reason for every question, with units and assumptions where relevant. Keep question numbering stable so each solution clearly matches its question.
-IMPORTANT SOURCE ACCURACY: Unless the user included a verifiable past-paper question/source in the prompt, these must be clearly identified as original JEE-style practice, not exact previous-year questions. Never invent an exam year, paper, question number, source, or claim that original generated text is an official PYQ. At the end state briefly that no verified PYQ source was supplied, if applicable. If the message is not a learning topic, answer it briefly without manufacturing a quiz. Do not claim an answer was independently checked.''';
+  static const String generationInstruction =
+      '''
+${StudyTutor.generationInstruction}
+
+STUDY WHITEBOARD PRESENTATION: For a new topic or a request for a full lesson, begin the answer immediately with the exact Markdown heading "## Topic explanation" (no preamble) so the lesson can be saved. Use the following headings when they fit the request, in this order: ## Topic explanation; ## Foundations; ## Build it step by step; ## Worked example; ## Advanced connection; ## Check your understanding; ## Answers and reasoning. Keep the explanation proportional to the learner's request; do not pad a short answer with empty sections. For every full lesson that can be saved, include a compact original practice set of three progressively harder numbered questions under ## Check your understanding, each with a separately numbered hint; provide matching numbered worked explanations under ## Answers and reasoning. Keep it brief and proportional, but never omit the set from a full lesson. Label it original practice, not verified exam questions. If the learner explicitly asks for JEE practice, include suitable foundational, JEE Main, and JEE Advanced-style questions as appropriate, with solutions clearly matched by number. For a follow-up about one part of a saved lesson, answer that point directly without regenerating the full lesson or quiz; use the heading only when the learner asks for a new or rebuilt lesson. Never present generated questions as official PYQs without a verified source. If no source was supplied for an exam-style set, label it original practice, not exact previous-year questions.''';
 }
