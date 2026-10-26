@@ -147,14 +147,62 @@ void main() {
       expect(state.local.studyLessons, hasLength(1));
       final instruction =
           requestHeadersAndPrompt.single['instruction'] as String;
-      expect(instruction, contains('Make eight topic-specific questions'));
-      expect(instruction, contains('## JEE Main practice'));
-      expect(instruction, contains('## JEE Advanced practice'));
-      expect(instruction, contains('Never invent an exam year'));
+      expect(instruction, contains('the smallest useful prerequisite'));
+      expect(
+        instruction,
+        contains('Define important vocabulary and every symbol'),
+      );
+      expect(instruction, contains('answer the exact point asked first'));
+      expect(instruction, contains('Do not restart the entire lesson'));
+      expect(instruction, contains('## Advanced connection'));
+      expect(instruction, contains('Never invent a PYQ year'));
+      expect(
+        instruction,
+        isNot(contains('Make eight topic-specific questions')),
+      );
       expect(
         requestHeadersAndPrompt.single['user_message'],
         'Newton’s second law',
       );
+      state.dispose();
+    },
+  );
+
+  test(
+    'study follow-ups get tutoring guidance without bypassing history sharing',
+    () async {
+      requestHeadersAndPrompt.clear();
+      final state = await buildOnlineState(studyMode: true);
+      await state.send('Newton’s second law');
+      await state.send('Why do we divide force by mass?');
+
+      final followUp = requestHeadersAndPrompt.last;
+      expect(
+        followUp['instruction'],
+        contains('answer the exact point asked first'),
+      );
+      expect(followUp, isNot(contains('quoted_history')));
+      expect(followUp['user_message'], 'Why do we divide force by mass?');
+
+      requestHeadersAndPrompt.clear();
+      await state.send('Why do we divide force by mass?', shareHistory: true);
+      expect(requestHeadersAndPrompt.single['quoted_history'], isNotEmpty);
+      state.dispose();
+    },
+  );
+
+  test(
+    'Ask tutor receives study guidance even when Whiteboard mode is off',
+    () async {
+      requestHeadersAndPrompt.clear();
+      final state = await buildOnlineState(studyMode: false);
+      state.specialist = 'study';
+      await state.send('Explain why acceleration is force divided by mass.');
+      final instruction =
+          requestHeadersAndPrompt.single['instruction'] as String;
+      expect(instruction, contains('STUDY TUTORING'));
+      expect(instruction, contains('explain why each step follows'));
+      expect(instruction, isNot(contains('STUDY WHITEBOARD PRESENTATION')));
       state.dispose();
     },
   );

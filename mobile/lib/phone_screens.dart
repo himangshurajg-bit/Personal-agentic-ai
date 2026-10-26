@@ -1,4 +1,5 @@
 import 'study_quiz.dart';
+import 'study_tutor.dart';
 import 'selected_text_search.dart';
 
 import 'dart:async';
@@ -2458,8 +2459,11 @@ class _StudyScreenState extends State<StudyScreen> {
           onPressed: () async {
             final state = widget.state;
             state.specialist = 'study';
-            final text =
-                '$style. Topic: ${topic.text}. Problem: ${problem.text}. Show assumptions and units. If generating a quiz, include an answer key and explanations. Flag uncertainty; do not call an answer verified without independent checking.';
+            final text = StudyTutor.request(
+              style: style,
+              topic: topic.text,
+              question: problem.text,
+            );
             await state.send(
               text,
               shareHistory: state.shareHistory,
