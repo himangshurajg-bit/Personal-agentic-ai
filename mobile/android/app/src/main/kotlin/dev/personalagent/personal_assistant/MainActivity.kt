@@ -617,8 +617,8 @@ class MainActivity : FlutterFragmentActivity() {
                 }
                 "open_local_media" -> {
                     val kind = call.argument<String>("kind")
-                    if (kind !in setOf("pdf", "video")) {
-                        result.error("invalid_argument", "Choose PDF or video", null)
+                    if (kind !in setOf("pdf", "video", "audio")) {
+                        result.error("invalid_argument", "Choose PDF, video, or audio", null)
                     } else if (localMediaResult != null) {
                         result.error("busy", "A local file selection is already open", null)
                     } else {
@@ -627,7 +627,12 @@ class MainActivity : FlutterFragmentActivity() {
                         try {
                             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                                 addCategory(Intent.CATEGORY_OPENABLE)
-                                type = if (kind == "pdf") "application/pdf" else "video/*"
+                                type = when (kind) {
+                                    "pdf" -> "application/pdf"
+                                    "video" -> "video/*"
+                                    else -> "audio/*"
+                                }
+                                if (kind == "audio") putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
                             }, 44)
                         } catch (_: Exception) {
                             localMediaResult = null
@@ -1178,23 +1183,55 @@ class MainActivity : FlutterFragmentActivity() {
         if(requestCode==44) {
             val result = localMediaResult; localMediaResult = null
             val kind = localMediaKind; localMediaKind = null
-            val uri = data?.data
-            if(resultCode != RESULT_OK || uri == null || kind == null) {
+            if(resultCode != RESULT_OK || data == null || kind == null) {
                 result?.error("cancelled", "No local file selected", null)
                 return
             }
             try {
-                val mime = contentResolver.getType(uri) ?: "application/octet-stream"
-                val valid = if(kind == "pdf") mime == "application/pdf" else mime.startsWith("video/")
-                if(!valid) throw IllegalArgumentException(if(kind == "pdf") "Choose a PDF file" else "Choose a video file")
-                val viewer = Intent(this, LocalMediaActivity::class.java).apply {
-                    setDataAndType(uri, mime)
-                    putExtra(LocalMediaActivity.EXTRA_KIND, kind)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    clipData = ClipData.newUri(contentResolver, "Local media", uri)
+                if (kind == "audio") {
+                    val selected = linkedSetOf<Uri>()
+                    data.clipData?.let { clip ->
+                        for (index in 0 until clip.itemCount) clip.getItemAt(index).uri?.let(selected::add)
+                    }
+                    data.data?.let(selected::add)
+                    val incoming = selected.mapIndexedNotNull { index, uri ->
+                        val mime = contentResolver.getType(uri)?.lowercase(java.util.Locale.ROOT)
+                            ?: return@mapIndexedNotNull null
+                        if (!mime.startsWith("audio/")) return@mapIndexedNotNull null
+                        val name = runCatching {
+                            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                                if (cursor.moveToFirst()) cursor.getString(0) else null
+                            }
+                        }.getOrNull()?.takeIf { it.isNotBlank() } ?: "Audio file ${index + 1}"
+                        LocalAudioQueueEntry(uri.toString(), name, mime)
+                    }
+                    val update = LocalAudioQueue.add(emptyList(), incoming)
+                    if (update.entries.isEmpty()) throw IllegalArgumentException("Choose one or more supported audio files")
+                    val audioUris = update.entries.map { Uri.parse(it.uriKey) }
+                    val viewer = Intent(this, LocalAudioQueueActivity::class.java).apply {
+                        putStringArrayListExtra(LocalAudioQueueActivity.EXTRA_URIS, ArrayList(audioUris.map(Uri::toString)))
+                        putExtra(LocalAudioQueueActivity.EXTRA_IGNORED_COUNT, selected.size - incoming.size + update.ignoredCount)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        val clip = ClipData.newUri(contentResolver, "Local audio", audioUris.first())
+                        audioUris.drop(1).forEach { clip.addItem(ClipData.Item(it)) }
+                        clipData = clip
+                    }
+                    startActivity(viewer)
+                    result?.success(mapOf("viewer_opened" to true, "shared_online" to false))
+                } else {
+                    val uri = data.data ?: throw IllegalArgumentException("No local file selected")
+                    val mime = contentResolver.getType(uri) ?: "application/octet-stream"
+                    val valid = if(kind == "pdf") mime == "application/pdf" else mime.startsWith("video/")
+                    if(!valid) throw IllegalArgumentException(if(kind == "pdf") "Choose a PDF file" else "Choose a video file")
+                    val viewer = Intent(this, LocalMediaActivity::class.java).apply {
+                        setDataAndType(uri, mime)
+                        putExtra(LocalMediaActivity.EXTRA_KIND, kind)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        clipData = ClipData.newUri(contentResolver, "Local media", uri)
+                    }
+                    startActivity(viewer)
+                    result?.success(mapOf("viewer_opened" to true, "shared_online" to false))
                 }
-                startActivity(viewer)
-                result?.success(mapOf("viewer_opened" to true, "shared_online" to false))
             } catch(e: Exception) {
                 result?.error("viewer_unavailable", e.message ?: "No local viewer could be opened", null)
             }

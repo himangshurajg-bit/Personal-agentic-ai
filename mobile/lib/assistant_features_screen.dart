@@ -419,12 +419,17 @@ class _DocumentFeatureState extends State<_DocumentFeature> {
             icon: const Icon(Icons.video_library_outlined),
             label: const Text('Open video locally'),
           ),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : () => _openLocalMedia('audio'),
+            icon: const Icon(Icons.queue_music_rounded),
+            label: const Text('Local audio queue'),
+          ),
         ],
       ),
       const Padding(
         padding: EdgeInsets.only(top: 6),
         child: Text(
-          'Choose a local viewer or player; page navigation and seeking depend on that app. These files are not sent to Gemini.',
+          'PDFs and videos open in local viewers with page and playback controls. Audio files can be queued temporarily (up to 25) and play only when you tap Play. Selected media stays on this device; nothing is sent to Gemini.',
         ),
       ),
       const SizedBox(height: 12),

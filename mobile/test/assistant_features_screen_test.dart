@@ -43,16 +43,28 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Open video locally'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Local audio queue'));
+    await tester.pumpAndSettle();
 
     expect(calls.map((call) => call.method), [
+      'open_local_media',
       'open_local_media',
       'open_local_media',
     ]);
     expect(calls.map((call) => call.arguments), [
       {'kind': 'pdf'},
       {'kind': 'video'},
+      {'kind': 'audio'},
     ]);
-    expect(find.textContaining('not sent to Gemini'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.textContaining('nothing is sent to Gemini'),
+      250,
+      scrollable: find.descendant(
+        of: find.byType(ListView).first,
+        matching: find.byType(Scrollable),
+      ),
+    );
+    expect(find.textContaining('nothing is sent to Gemini'), findsOneWidget);
   });
   testWidgets('camera photo is selected locally without sending it', (
     tester,
@@ -76,6 +88,14 @@ void main() {
     );
     await tester.tap(find.text('Take a photo'));
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Camera photo'),
+      250,
+      scrollable: find.descendant(
+        of: find.byType(ListView).first,
+        matching: find.byType(Scrollable),
+      ),
+    );
 
     expect(calls.single.method, 'capture_photo');
     expect(find.text('Camera photo'), findsOneWidget);
@@ -110,6 +130,14 @@ void main() {
     );
     await tester.tap(find.text('Take a photo'));
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Camera photo'),
+      250,
+      scrollable: find.descendant(
+        of: find.byType(ListView).first,
+        matching: find.byType(Scrollable),
+      ),
+    );
     expect(find.text('Camera photo'), findsOneWidget);
     expect(calls.single.method, 'capture_photo');
     await tester.scrollUntilVisible(

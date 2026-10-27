@@ -37,6 +37,11 @@
             android:label="Local media"
             android:theme="@style/NormalTheme" />
         <activity
+            android:name=".LocalAudioQueueActivity"
+            android:exported="false"
+            android:label="Local audio queue"
+            android:theme="@style/NormalTheme" />
+        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
