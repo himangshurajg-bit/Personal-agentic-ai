@@ -1,0 +1,72 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <queries>
+        <package android:name="com.google.android.calculator" />
+        <package android:name="com.android.camera" />
+        <package android:name="com.android.chrome" />
+        <package android:name="com.google.android.deskclock" />
+        <package android:name="com.google.android.apps.nbu.files" />
+        <package android:name="com.google.android.gm" />
+        <package android:name="com.google.android.apps.maps" />
+        <package android:name="com.android.settings" />
+        <package android:name="com.spotify.music" />
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
+        <package android:name="com.instagram.android" />
+        <package android:name="com.google.android.apps.youtube.music" />
+        <package android:name="com.google.android.apps.photos" />
+        <package android:name="com.google.android.apps.messaging" />
+        <package android:name="org.telegram.messenger" />
+        <package android:name="com.google.android.calendar" />
+        <package android:name="com.google.android.apps.docs" />
+        <package android:name="com.android.vending" />
+        <package android:name="com.google.android.dialer" />
+        <package android:name="com.google.android.contacts" />
+        <package android:name="com.facebook.katana" />
+        <package android:name="com.linkedin.android" />
+        <package android:name="in.amazon.mShop.android.shopping" />
+        <package android:name="com.openai.chatgpt" />
+        <package android:name="com.flipkart.android" />
+        <package android:name="com.google.android.apps.bard" />
+        <package android:name="com.google.android.apps.tachyon" />
+        <package android:name="com.facebook.orca" />
+        <package android:name="com.netflix.mediaclient" />
+        <package android:name="com.olacabs.customer" />
+        <package android:name="com.snapchat.android" />
+        <package android:name="in.swiggy.android" />
+        <package android:name="com.ubercab" />
+        <package android:name="com.twitter.android" />
+        <package android:name="com.application.zomato" />
+        <package android:name="us.zoom.videomeet" />
+    </queries>
+    <application
+        android:allowBackup="false"
+        android:label="MYRA Ultra Native Preview"
+        android:theme="@style/AppTheme">
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.camera-files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/camera_file_paths" />
+        </provider>
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

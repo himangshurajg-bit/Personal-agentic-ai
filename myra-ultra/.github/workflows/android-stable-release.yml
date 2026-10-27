@@ -1,0 +1,87 @@
+name: Android stable release
+
+on:
+  push:
+    tags:
+      - 'android-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Check tag matches the app version
+        run: |
+          version="${GITHUB_REF_NAME#android-v}"
+          grep -Fq "versionName '${version}'" native-android/app/build.gradle
+      - name: Restore private release key
+        env:
+          KEYSTORE_B64: ${{ secrets.MYRA_ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.MYRA_ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_B64"
+          test -n "$KEYSTORE_PASSWORD"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/myra-release.jks"
+          chmod 600 "$RUNNER_TEMP/myra-release.jks"
+          keytool -list -keystore "$RUNNER_TEMP/myra-release.jks" -storepass "$KEYSTORE_PASSWORD" -alias myra-ultra-release >/dev/null
+      - name: Build, instrument, and install the signed release APK
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          MYRA_RELEASE_STORE_FILE: ${{ runner.temp }}/myra-release.jks
+          MYRA_RELEASE_STORE_PASSWORD: ${{ secrets.MYRA_ANDROID_KEYSTORE_PASSWORD }}
+          MYRA_RELEASE_KEY_ALIAS: myra-ultra-release
+          MYRA_RELEASE_KEY_PASSWORD: ${{ secrets.MYRA_ANDROID_KEYSTORE_PASSWORD }}
+        with:
+          api-level: 36
+          target: default
+          arch: x86_64
+          profile: pixel_2
+          cores: 2
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          pre-emulator-launch-script: cd native-android && ./gradlew --no-daemon testDebugUnitTest
+          script: |
+            cd native-android
+            ./gradlew --no-daemon connectedDebugAndroidTest assembleRelease
+            apk="app/build/outputs/apk/release/app-release.apk"
+            apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+            test -n "$apksigner"
+            "$apksigner" verify --verbose "$apk"
+            adb uninstall com.myra.ultra.nativeapp || true
+            adb install "$apk"
+            adb shell monkey -p com.myra.ultra.nativeapp 1
+            sleep 10
+            adb shell pidof com.myra.ultra.nativeapp
+      - name: Scan source and signed APK for secrets
+        run: |
+          version=8.30.1
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz" -o "$RUNNER_TEMP/gitleaks.tar.gz"
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_checksums.txt" -o "$RUNNER_TEMP/gitleaks_checksums.txt"
+          (cd "$RUNNER_TEMP" && grep " gitleaks_${version}_linux_x64.tar.gz$" gitleaks_checksums.txt | sha256sum -c -)
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" dir --redact --no-banner --exit-code 1 .
+          apk='native-android/app/build/outputs/apk/release/app-release.apk'
+          mkdir -p "$RUNNER_TEMP/myra-release-apk"
+          unzip -q "$apk" -d "$RUNNER_TEMP/myra-release-apk"
+          "$RUNNER_TEMP/gitleaks" dir --redact --no-banner --exit-code 1 "$RUNNER_TEMP/myra-release-apk"
+          sha256sum "$apk"
+      - name: Publish private GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apk='native-android/app/build/outputs/apk/release/app-release.apk'
+          version="${GITHUB_REF_NAME#android-v}"
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          Signed stable Android APK for MYRA Ultra ${version}.
+
+          Built and instrumented on Android API 36; signature and source/APK secret scans passed.
+          The Redmi 24090RA29I has not been device-tested, so this release does not claim compatibility on that phone. The prototype does not define dashboard/agent orchestration or multi-turn document-chat behavior; these are not represented as implemented features.
+          EOF
+          gh release create "$GITHUB_REF_NAME" "$apk" --repo "$GITHUB_REPOSITORY" --title "MYRA Ultra Android ${version}" --notes-file "$RUNNER_TEMP/release-notes.md" --latest

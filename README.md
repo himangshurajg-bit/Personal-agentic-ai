@@ -277,3 +277,7 @@ A separate standalone native Android offline app now lives in [`android/`](andro
 ## Flutter + FastAPI private preview
 
 The requested new phone client is in [`mobile/`](mobile/README.md), with its authenticated streaming backend in [`service/`](service/README.md). It adds typed/voice chat UI, explicit scoped memory management, themes, an offline notebook, and reviewed Android reminders/allowlisted app-opening. It is separate from the old `android/` package and preserves the CLI/web notebook. Chat can use a separately configured local Ollama model or an explicitly selected server-side Groq API; provider keys stay on the service computer, and the app keeps its per-send online review and no-fallback behavior. Speech recognition may use the Android provider's network service. See [actual verification and remaining limits](docs/FLUTTER_TEST_STATUS.md), including signing and missing physical-device qualification and the limited local-model smoke test. Existing release assets have not been replaced.
+
+## MYRA Ultra source snapshot
+
+The available MYRA Ultra Android/source snapshot is preserved in [`myra-ultra/`](myra-ultra/), with scope, redistribution authorization, and known gaps described in [`docs/MYRA_TRANSFER.md`](docs/MYRA_TRANSFER.md). This is a source transfer, not an integration of every MYRA feature into the Personal AI app; the original desktop/PyQt source is unavailable.
