@@ -8451,8 +8451,9 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
       final tools = await widget.state.discoverMcpTools(server.id);
       if (!mounted) return;
       setState(() {
+        busy = false;
         _serverStatus[server.id] =
-            'Reachable · server returned ${tools.length} tool${tools.length == 1 ? '' : 's'}. This app can inspect tools but cannot run them.';
+            'Reachable · server returned ${tools.length} tool${tools.length == 1 ? '' : 's'}. Choose Review & run for a separate confirmation before any tool call.';
       });
       await showDialog<void>(
         context: context,
@@ -8479,11 +8480,22 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
                                 ),
                                 if (tool.description.isNotEmpty)
                                   Text(tool.description),
+                                const SizedBox(height: 6),
+                                OutlinedButton.icon(
+                                  onPressed: busy
+                                      ? null
+                                      : () async {
+                                          Navigator.pop(context);
+                                          await _reviewAndRunTool(server, tool);
+                                        },
+                                  icon: const Icon(Icons.play_arrow),
+                                  label: const Text('Review & run'),
+                                ),
                               ],
                             ),
                           ),
                         const Text(
-                          'Discovery only. Tools cannot be invoked by this app yet.',
+                          'No tool runs until you review and confirm its exact server, tool, and JSON arguments.',
                         ),
                       ],
                     ),
@@ -8502,6 +8514,165 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
         setState(() => _serverStatus[server.id] = 'Not reachable · $e');
         notice(context, e);
       }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> _reviewAndRunTool(McpServer server, McpToolInfo tool) async {
+    final argumentsController = TextEditingController(text: '{}');
+    final enteredArguments = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Prepare ${tool.name}'),
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${server.name} · ${server.endpoint}'),
+                if (tool.description.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(tool.description),
+                ],
+                const SizedBox(height: 12),
+                const Text('Server-provided input schema (untrusted):'),
+                const SizedBox(height: 4),
+                SelectableText(
+                  const JsonEncoder.withIndent('  ').convert(tool.inputSchema),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: argumentsController,
+                  minLines: 5,
+                  maxLines: 10,
+                  maxLength: maxMcpToolArgumentsBytes,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  keyboardType: TextInputType.multiline,
+                  decoration: const InputDecoration(
+                    labelText: 'Tool arguments (JSON object)',
+                    hintText: '{"key": "value"}',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, argumentsController.text),
+            child: const Text('Review exact call'),
+          ),
+        ],
+      ),
+    );
+    argumentsController.dispose();
+    if (enteredArguments == null || !mounted) return;
+
+    late final Map<String, dynamic> arguments;
+    try {
+      arguments = validateMcpToolArguments(enteredArguments);
+    } catch (e) {
+      notice(context, e);
+      return;
+    }
+
+    final prettyArguments = const JsonEncoder.withIndent('  ')
+        .convert(arguments);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Run this MCP tool?'),
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Server: ${server.name}'),
+                SelectableText(server.endpoint),
+                const SizedBox(height: 8),
+                Text('Tool: ${tool.name}'),
+                const SizedBox(height: 8),
+                const Text('Exact arguments:'),
+                const SizedBox(height: 4),
+                SelectableText(prettyArguments),
+                const SizedBox(height: 12),
+                const Text(
+                  'This server may use the tool to change data, send messages, make purchases, or take other actions. Only run it if you trust this server and these exact arguments. The app cannot undo the tool’s effects.',
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Run this tool'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final current = widget.state.customMcpServers
+        .where((item) => item.id == server.id)
+        .firstOrNull;
+    if (current == null ||
+        current.name != server.name ||
+        current.endpoint != server.endpoint ||
+        current.authMode != server.authMode) {
+      notice(
+        context,
+        'This MCP server changed or was removed. Discover it again before running a tool.',
+      );
+      return;
+    }
+
+    setState(() => busy = true);
+    try {
+      final result = await widget.state.callMcpTool(server.id, tool, arguments);
+      if (!mounted) return;
+      final rendered = const JsonEncoder.withIndent('  ').convert(result);
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(
+            result['isError'] == true
+                ? 'Tool returned an error'
+                : 'Tool result · ${tool.name}',
+          ),
+          content: SizedBox(
+            width: 520,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 420),
+              child: SingleChildScrollView(child: SelectableText(rendered)),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) notice(context, e);
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -8549,7 +8720,7 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
         ),
         const SizedBox(height: 6),
         const Text(
-          'Add a remote Model Context Protocol server and inspect its advertised tools. Endpoints must use HTTPS (loopback HTTP is allowed for local testing). Treat servers and tool descriptions as untrusted.',
+          'Add a remote Model Context Protocol server, inspect its tools, and run a selected tool only after reviewing and confirming the exact server, tool, and arguments. Endpoints must use HTTPS (loopback HTTP is allowed for local testing). Treat servers and tool descriptions as untrusted.',
         ),
         if (widget.state.mcpLoadError.isNotEmpty)
           Padding(
@@ -8627,7 +8798,7 @@ class _CustomMcpPanelState extends State<CustomMcpPanel> {
         ),
         const SizedBox(height: 4),
         const Text(
-          'No tool is automatically invoked. MCP tool execution and per-action approval integration are not implemented in this version.',
+          'Tools are never auto-run. Each invocation requires a separate review of the server, tool, and exact arguments; a tool may cause external effects that this app cannot undo.',
         ),
         const SizedBox(height: 4),
         const Text(
