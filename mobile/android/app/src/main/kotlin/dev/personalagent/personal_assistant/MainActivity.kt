@@ -584,6 +584,32 @@ class MainActivity : FlutterFragmentActivity() {
                         }
                     }
                 }
+                "set_system_timer" -> {
+                    val request = SystemClockTimerRequestParser.parse(
+                        call.argument<Any>("seconds"),
+                        call.argument<Any>("label"),
+                    )
+                    if (request == null) {
+                        result.error("invalid_argument", "Use 1–86,400 whole seconds and a label up to 40 characters", null)
+                    } else {
+                        val intent = Intent(android.provider.AlarmClock.ACTION_SET_TIMER).apply {
+                            putExtra(android.provider.AlarmClock.EXTRA_LENGTH, request.seconds)
+                            if (request.label.isNotEmpty()) {
+                                putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, request.label)
+                            }
+                            // Keep the Clock UI visible; the user explicitly starts it there.
+                            putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, false)
+                        }
+                        try {
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (_: android.content.ActivityNotFoundException) {
+                            result.error("unavailable", "No Android Clock app can handle timer requests", null)
+                        } catch (_: Exception) {
+                            result.error("unavailable", "Android could not open the Clock timer screen", null)
+                        }
+                    }
+                }
                 "read_system_metrics" -> result.success(readSystemMonitorMetrics())
                 "extract_image_text_locally" -> extractImageTextLocally(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "extract_pdf_text_locally" -> extractPdfTextLocally(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)

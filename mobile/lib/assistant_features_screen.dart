@@ -12,6 +12,7 @@ import 'text_tools_screen.dart';
 import 'local_web_projects_screen.dart';
 import 'system_monitor_screen.dart';
 import 'focus_timer_screen.dart';
+import 'system_clock_timer_screen.dart';
 import 'journal_screen.dart';
 import 'office_document.dart';
 
@@ -32,7 +33,7 @@ class FeaturesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DefaultTabController(
     initialIndex: initialTab,
-    length: 8,
+    length: 9,
     child: Scaffold(
       appBar: AppBar(
         title: const Text('Assistant tools'),
@@ -50,6 +51,7 @@ class FeaturesScreen extends StatelessWidget {
             ),
             Tab(icon: Icon(Icons.timer_outlined), text: 'Focus timer'),
             Tab(icon: Icon(Icons.edit_note_rounded), text: 'Journal'),
+            Tab(icon: Icon(Icons.alarm_add_rounded), text: 'Clock timer'),
           ],
         ),
       ),
@@ -63,6 +65,7 @@ class FeaturesScreen extends StatelessWidget {
           const SystemMonitorScreen(),
           FocusTimerScreen(state: state),
           JournalScreen(state: state),
+          const SystemClockTimerScreen(),
         ],
       ),
     ),
