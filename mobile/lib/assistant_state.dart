@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'provider_compare.dart';
 
 import 'phone_data.dart';
+import 'local_backup_restore.dart';
 import 'app_lock.dart';
 import 'engines.dart';
 import 'gemini_models.dart';
@@ -2243,6 +2244,55 @@ class AssistantState extends ChangeNotifier {
     'private_note': note,
     'assistant_display_name': assistantName,
   });
+
+  Future<void> restoreLocalBackup(LocalBackupPreview preview) async {
+    if (busy) {
+      throw StateError(
+        'Wait for the current response before restoring a backup.',
+      );
+    }
+    final oldData = local.snapshot;
+    final oldNote = await storage.read(key: 'note');
+    final oldAssistantName = await storage.read(key: 'assistant_name');
+    try {
+      await local.replaceWithBackup(preview.data);
+      if (preview.privateNote != null) {
+        await storage.write(key: 'note', value: preview.privateNote!);
+      }
+      if (preview.assistantDisplayName != null) {
+        await storage.write(
+          key: 'assistant_name',
+          value: preview.assistantDisplayName!.trim(),
+        );
+      }
+    } catch (_) {
+      // Best-effort rollback keeps the old local records if a secure-storage
+      // write fails after the validated record-store replacement.
+      try {
+        await local.replaceWithBackup(oldData);
+        if (oldNote == null) {
+          await storage.delete(key: 'note');
+        } else {
+          await storage.write(key: 'note', value: oldNote);
+        }
+        if (oldAssistantName == null) {
+          await storage.delete(key: 'assistant_name');
+        } else {
+          await storage.write(key: 'assistant_name', value: oldAssistantName);
+        }
+      } catch (_) {
+        // Surface the original failure; the normal local-store guard remains.
+      }
+      rethrow;
+    }
+    if (preview.privateNote != null) note = preview.privateNote!;
+    if (preview.assistantDisplayName != null) {
+      assistantName = preview.assistantDisplayName!.trim();
+    }
+    messages = local.chat(conversation);
+    memories = local.rows('memories');
+    notifyListeners();
+  }
 
   Future<String> exportMemories() async =>
       const JsonEncoder.withIndent('  ')

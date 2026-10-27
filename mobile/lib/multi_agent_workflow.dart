@@ -31,29 +31,68 @@ class MultiAgentWorkflowException implements Exception {
   String toString() => message;
 }
 
-/// A sequential four-role workflow. All passes use the same configured model;
-/// this is not a parallel swarm or a set of independent model providers.
+/// A fixed, reviewed role that can be included in a user-edited run order.
+class WorkflowStepDefinition {
+  final String id;
+  final String name;
+  final String instruction;
+  const WorkflowStepDefinition(this.id, this.name, this.instruction);
+}
+
+/// A sequential, editable subset of fixed roles. All passes use the same
+/// configured model; this is not a parallel swarm or independent providers.
 class MultiAgentWorkflowRunner {
   static const maxGoalCharacters = 4000;
   static const maxPassCharacters = 6000;
-  static const _roles = <({String name, String instruction})>[
-    (
-      name: 'Planner',
-      instruction: 'Break the task into at most three concrete workstreams. Note assumptions and any genuinely missing user-only information. Do not claim to have done research or actions.',
+  static const availableSteps = <WorkflowStepDefinition>[
+    WorkflowStepDefinition(
+      'planner',
+      'Planner',
+      'Break the task into at most three concrete workstreams. Note assumptions and any genuinely missing user-only information. Do not claim to have done research or actions.',
     ),
-    (
-      name: 'Specialist',
-      instruction: 'Prepare the most useful draft for the task, following the planner’s decomposition where helpful. Use only facts supplied in the task and earlier pass outputs; label unknowns rather than inventing facts or claiming external research.',
+    WorkflowStepDefinition(
+      'specialist',
+      'Specialist',
+      'Prepare the most useful draft for the task, following the planner’s decomposition where helpful. Use only facts supplied in the task and earlier pass outputs; label unknowns rather than inventing facts or claiming external research.',
     ),
-    (
-      name: 'Reviewer',
-      instruction: 'Review the draft for unsupported claims, missed constraints, unclear steps and unsafe actions. Give specific corrections; do not claim external verification.',
+    WorkflowStepDefinition(
+      'reviewer',
+      'Reviewer',
+      'Review the draft for unsupported claims, missed constraints, unclear steps and unsafe actions. Give specific corrections; do not claim external verification.',
     ),
-    (
-      name: 'Synthesizer',
-      instruction: 'Produce the usable final draft, applying valid review feedback and preserving uncertainty. Do not claim the passes used different models, ran in parallel, or verified external facts.',
+    WorkflowStepDefinition(
+      'synthesizer',
+      'Synthesizer',
+      'Produce the usable final draft, applying valid review feedback and preserving uncertainty. Do not claim the passes used different models, ran in parallel, or verified external facts.',
     ),
   ];
+  static const defaultStepIds = <String>[
+    'planner',
+    'specialist',
+    'reviewer',
+    'synthesizer',
+  ];
+
+  static WorkflowStepDefinition stepForId(String id) =>
+      availableSteps.firstWhere((step) => step.id == id);
+
+  static bool canRemoveStep(String id) =>
+      id != 'reviewer' && id != 'synthesizer';
+
+  /// Keep a reviewer before the required final synthesis pass. This prevents
+  /// editing away the workflow's independent safety/revision checkpoint.
+  static bool validStepOrder(List<String> ids) {
+    if (ids.length < 2 ||
+        ids.length > availableSteps.length ||
+        ids.toSet().length != ids.length ||
+        ids.any((id) => !availableSteps.any((step) => step.id == id))) {
+      return false;
+    }
+    final reviewer = ids.indexOf('reviewer');
+    return reviewer >= 0 &&
+        ids.last == 'synthesizer' &&
+        reviewer < ids.length - 1;
+  }
 
   final http.Client Function() clientFactory;
   http.Client? _activeClient;
@@ -62,7 +101,11 @@ class MultiAgentWorkflowRunner {
   MultiAgentWorkflowRunner(this.clientFactory);
 
   /// Validates provider settings and the goal without sending any network request.
-  void validate(EngineConfig config, String goal) {
+  void validate(
+    EngineConfig config,
+    String goal, {
+    List<String> stepIds = defaultStepIds,
+  }) {
     if (config.mode != 'compatible') {
       throw const FormatException(
         'Choose a configured OpenAI-compatible online model. This workflow does not use offline Gemma or the private service.',
@@ -71,10 +114,15 @@ class MultiAgentWorkflowRunner {
     if (goal.trim().isEmpty || goal.trim().length > maxGoalCharacters) {
       throw const FormatException('Enter a task of 1–4,000 characters.');
     }
+    if (!validStepOrder(stepIds)) {
+      throw const FormatException(
+        'Keep the reviewer before the final synthesizer, with at least one other step.',
+      );
+    }
     try {
       config.request(
         'multi-agent-preflight',
-        _buildPrompt(_roles.first, goal.trim(), const []),
+        _buildPrompt(stepForId(stepIds.first), goal.trim(), const []),
       );
     } on Exception catch (error) {
       throw FormatException(error.toString());
@@ -88,6 +136,7 @@ class MultiAgentWorkflowRunner {
     required EngineConfig config,
     required String goal,
     required bool approvedThisRun,
+    List<String> stepIds = defaultStepIds,
     void Function(String role, int index)? onPassStarted,
   }) async {
     if (!approvedThisRun) {
@@ -95,13 +144,14 @@ class MultiAgentWorkflowRunner {
         'Review and approve the run first. No request was sent.',
       );
     }
-    validate(config, goal);
+    validate(config, goal, stepIds: stepIds);
+    final roles = stepIds.map(stepForId).toList(growable: false);
     _cancelRequested = false;
     _activeClient = null;
     final completed = <AgentPassResult>[];
 
-    for (var i = 0; i < _roles.length; i++) {
-      final role = _roles[i];
+    for (var i = 0; i < roles.length; i++) {
+      final role = roles[i];
       if (_cancelRequested) {
         throw MultiAgentWorkflowException(
           role: role.name,
@@ -177,7 +227,7 @@ class MultiAgentWorkflowRunner {
   }
 
   static String _buildPrompt(
-    ({String name, String instruction}) role,
+    WorkflowStepDefinition role,
     String goal,
     List<AgentPassResult> completed,
   ) {

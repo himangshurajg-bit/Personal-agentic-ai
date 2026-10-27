@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 
 import 'app_update.dart';
 import 'assistant_state.dart';
+import 'local_backup_restore.dart';
 import 'jee_question_request.dart';
 import 'assistant_task_tracker.dart';
 import 'mcp_servers.dart';
@@ -2690,6 +2691,32 @@ class Home extends StatelessWidget {
         .where((row) => !row['done'])
         .toList();
     final attempts = state.local.rows('attempts');
+    final localNow = DateTime.now();
+    final todayKey =
+        '${localNow.year.toString().padLeft(4, '0')}-${localNow.month.toString().padLeft(2, '0')}-${localNow.day.toString().padLeft(2, '0')}';
+    final monthKey = todayKey.substring(0, 7);
+    final waterToday = state.local
+        .rows('water_logs')
+        .where((row) => row['date'] == todayKey)
+        .fold<int>(0, (sum, row) => sum + (row['milliliters'] as int? ?? 0));
+    final habitCheckinsToday = state.local
+        .rows('habits')
+        .where(
+          (habit) =>
+              habit['completed_dates'] is List &&
+              (habit['completed_dates'] as List).contains(todayKey),
+        )
+        .length;
+    final expenseTotals = <String, int>{};
+    for (final entry in state.local.rows('expenses')) {
+      final date = entry['date']?.toString() ?? '';
+      final currency = entry['currency']?.toString().trim() ?? '';
+      if (date.startsWith(monthKey) && currency.isNotEmpty) {
+        expenseTotals[currency] =
+            (expenseTotals[currency] ?? 0) +
+            (entry['amount_minor'] as int? ?? 0);
+      }
+    }
     final upcomingReminders = state.local
         .rows('actions')
         .where(
@@ -2884,6 +2911,34 @@ class Home extends StatelessWidget {
                     value: '${upcomingReminders.length}',
                     label: 'Reminders',
                     onTap: () => Navigator.pushNamed(context, '/automations'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Glass(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Your logs', style: theme.textTheme.titleMedium),
+                Text(
+                  'Water today: $waterToday ml · Habit check-ins today: $habitCheckinsToday',
+                ),
+                if (expenseTotals.isEmpty)
+                  const Text('No expense total logged this month.')
+                else ...[
+                  const SizedBox(height: 4),
+                  for (final entry in expenseTotals.entries)
+                    Text(
+                      'This month · ${entry.key} ${entry.value ~/ 100}.${(entry.value % 100).toString().padLeft(2, '0')}',
+                    ),
+                ],
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => Navigator.pushNamed(context, '/library'),
+                    child: const Text('Open local logs'),
                   ),
                 ),
               ],
@@ -6390,13 +6445,22 @@ class _SettingsState extends State<Settings> {
     }
   }
 
+  Future<String?> _selectLocalBackup() async {
+    try {
+      return await AssistantState.device.invokeMethod<String>('import_backup');
+    } on PlatformException catch (error) {
+      if (error.code == 'cancelled') return null;
+      rethrow;
+    }
+  }
+
   Future<void> _exportLocalBackup() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Export a private backup?'),
         content: const Text(
-          'This creates a readable, unencrypted JSON copy of your on-phone chats, approved memories, notes, tasks, study records and action receipts. Provider API keys and service tokens are stored separately and are not included. Choose a private save location. Restore is not available in this build.',
+          'This creates a readable, unencrypted JSON copy of supported on-phone records and your private note and assistant name. Provider credentials and service tokens are stored separately and are not included. Choose a private save location.',
         ),
         actions: [
           TextButton(
@@ -7154,13 +7218,19 @@ class _SettingsState extends State<Settings> {
                   ),
                   const SizedBox(height: 6),
                   const Text(
-                    'Export is manual and owner-confirmed. The JSON file is readable and unencrypted; save it somewhere private. Provider keys and service tokens are excluded. Import/restore is not implemented.',
+                    'Export and restore are manual. Backups are readable, unencrypted JSON; keep them private. Provider credentials and service tokens are excluded, and restore leaves security settings and other app preferences alone.',
                   ),
                   const SizedBox(height: 10),
                   OutlinedButton.icon(
                     onPressed: _exportLocalBackup,
                     icon: const Icon(Icons.download_outlined),
                     label: const Text('Export local data'),
+                  ),
+                  const SizedBox(height: 4),
+                  LocalBackupRestoreControl(
+                    selectBackup: _selectLocalBackup,
+                    restore: widget.state.restoreLocalBackup,
+                    onResult: (message) => notice(context, message),
                   ),
                 ],
               ),

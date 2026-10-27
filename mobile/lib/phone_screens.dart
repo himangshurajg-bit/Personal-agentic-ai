@@ -13,6 +13,7 @@ import 'readable_math.dart';
 
 import 'assistant_state.dart';
 import 'phone_data.dart';
+import 'task_csv.dart';
 import 'google_tasks.dart';
 import 'google_calendar.dart';
 import 'google_contacts.dart';
@@ -32,6 +33,12 @@ class PhoneLibrary extends StatefulWidget {
 
 class _PhoneLibraryState extends State<PhoneLibrary> {
   final query = TextEditingController(), title = TextEditingController();
+  final waterAmount = TextEditingController();
+  final habitName = TextEditingController();
+  final expenseAmount = TextEditingController();
+  final expenseCurrency = TextEditingController();
+  final expenseCategory = TextEditingController();
+  String _taskSort = 'added';
   final remoteTitle = TextEditingController();
   final GoogleTasksConnector _googleTasks = GoogleTasksConnector();
   final GoogleCalendarConnector _googleCalendar = GoogleCalendarConnector();
@@ -1468,8 +1475,338 @@ class _PhoneLibraryState extends State<PhoneLibrary> {
     sheetsRange.dispose();
     sheetsValues.dispose();
     title.dispose();
+    waterAmount.dispose();
+    habitName.dispose();
+    expenseAmount.dispose();
+    expenseCurrency.dispose();
+    expenseCategory.dispose();
     remoteTitle.dispose();
     super.dispose();
+  }
+
+  Future<void> _exportTaskCsv() async {
+    try {
+      final csv = TaskCsv.exportRows(widget.state.local.rows('tasks'));
+      final result = await AssistantState.device
+          .invokeMapMethod<String, dynamic>('export', {
+            'text': csv,
+            'filename': 'personal-tasks.csv',
+            'mime_type': 'text/csv',
+          });
+      if (mounted && result?['saved'] == true) {
+        notice(context, 'Task CSV saved in your chosen location.');
+      }
+    } catch (error) {
+      if (mounted) notice(context, error);
+    }
+  }
+
+  Future<void> _editLocalTask(Map<String, dynamic> task) async {
+    final controller = TextEditingController(
+      text: task['title']?.toString() ?? '',
+    );
+    try {
+      final updated = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Edit local task'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLength: 120,
+            decoration: const InputDecoration(labelText: 'Task title'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, controller.text),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      );
+      if (updated == null || !mounted) return;
+      await widget.state.local.renameTask(task['id'].toString(), updated);
+      if (mounted) setState(() {});
+    } catch (error) {
+      if (mounted) notice(context, error);
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  Future<void> _deleteLocalTask(Map<String, dynamic> task) async {
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete local task?'),
+        content: Text('Delete “${task['title']}” from this phone?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Keep'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+    try {
+      await widget.state.local.deleteTask(task['id'].toString());
+      if (mounted) setState(() {});
+    } catch (error) {
+      if (mounted) notice(context, error);
+    }
+  }
+
+  Future<void> _importTaskCsv() async {
+    try {
+      final file = await AssistantState.device.invokeMapMethod<String, dynamic>(
+        'pick_file',
+        {'ai_document': false},
+      );
+      if (!mounted || file == null) return;
+      final name = file['name']?.toString().toLowerCase() ?? '';
+      final mime = file['mime']?.toString().toLowerCase() ?? '';
+      if (!(name.endsWith('.csv') ||
+          mime == 'text/csv' ||
+          mime == 'application/vnd.ms-excel')) {
+        throw const FormatException('Choose a CSV task file.');
+      }
+      final text = file['text'];
+      if (text is! String) {
+        throw const FormatException(
+          'The selected CSV could not be read as UTF-8 text.',
+        );
+      }
+      final rows = TaskCsv.parse(text);
+      if (rows.isEmpty) {
+        notice(context, 'This CSV has no tasks to import.');
+        return;
+      }
+      if (!mounted) return;
+      final accepted = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Import local tasks?'),
+          content: Text(
+            'Add ${rows.length} tasks to this phone? Existing tasks stay unchanged. Due dates, reminder and repeat columns are imported as inactive notes; no reminders or repeats will be scheduled.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Import tasks'),
+            ),
+          ],
+        ),
+      );
+      if (accepted != true) return;
+      await widget.state.local.importTasks(rows);
+      if (mounted) {
+        setState(() {});
+        notice(context, 'Imported ${rows.length} tasks on this phone.');
+      }
+    } catch (error) {
+      if (mounted) notice(context, error);
+    }
+  }
+
+  String _dateKey(DateTime date) =>
+      '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+  List<DateTime> _recentDates() {
+    final today = DateTime.now();
+    return List.generate(
+      7,
+      (index) => DateTime(
+        today.year,
+        today.month,
+        today.day,
+      ).subtract(Duration(days: 6 - index)),
+    );
+  }
+
+  Future<void> _logWater() async {
+    try {
+      final value = int.parse(waterAmount.text.trim());
+      await widget.state.local.addWaterLog(value);
+      waterAmount.clear();
+      if (mounted) setState(() {});
+    } catch (error) {
+      if (mounted) notice(context, error);
+    }
+  }
+
+  Future<void> _saveExpense() async {
+    try {
+      final raw = expenseAmount.text.trim();
+      if (!RegExp(r'^\d+(?:\.\d{1,2})?$').hasMatch(raw)) {
+        throw const FormatException(
+          'Enter an amount with up to two decimal places.',
+        );
+      }
+      final pieces = raw.split('.');
+      final minor =
+          int.parse(pieces.first) * 100 +
+          (pieces.length == 1 ? 0 : int.parse(pieces.last.padRight(2, '0')));
+      await widget.state.local.addExpense(
+        amountMinor: minor,
+        currency: expenseCurrency.text,
+        category: expenseCategory.text,
+      );
+      expenseAmount.clear();
+      expenseCategory.clear();
+      if (mounted) setState(() {});
+    } catch (error) {
+      if (mounted) notice(context, error);
+    }
+  }
+
+  Widget _wellnessPanel() {
+    final today = _dateKey(DateTime.now());
+    final water = widget.state.local
+        .rows('water_logs')
+        .where((row) => row['date'] == today)
+        .fold<int>(0, (sum, row) => sum + (row['milliliters'] as int? ?? 0));
+    final habits = widget.state.local.rows('habits');
+    final dates = _recentDates();
+    final expenses = widget.state.local.rows('expenses');
+    return Glass(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Daily logs', style: Theme.of(context).textTheme.titleMedium),
+          const Text(
+            'Personal records only. No targets or currency are assumed.',
+          ),
+          const SizedBox(height: 8),
+          Text('Water logged today: $water ml'),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: waterAmount,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Water (ml)',
+                    hintText: '1–4000',
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: _logWater,
+                tooltip: 'Log water',
+                icon: const Icon(Icons.add_circle_outline),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: habitName,
+            maxLength: 80,
+            decoration: const InputDecoration(labelText: 'New habit'),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () async {
+                try {
+                  await widget.state.local.addHabit(habitName.text);
+                  habitName.clear();
+                  if (mounted) setState(() {});
+                } catch (error) {
+                  if (mounted) notice(context, error);
+                }
+              },
+              icon: const Icon(Icons.add),
+              label: const Text('Add habit'),
+            ),
+          ),
+          for (final habit in habits) ...[
+            Text(
+              habit['title']?.toString() ?? 'Habit',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            Wrap(
+              spacing: 2,
+              children: [
+                for (final date in dates)
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: _dateKey(date),
+                    onPressed: () async {
+                      try {
+                        await widget.state.local.toggleHabitCheckin(
+                          habit['id'].toString(),
+                          _dateKey(date),
+                        );
+                        if (mounted) setState(() {});
+                      } catch (error) {
+                        if (mounted) notice(context, error);
+                      }
+                    },
+                    icon: Icon(
+                      (habit['completed_dates'] is List &&
+                              (habit['completed_dates'] as List).contains(
+                                _dateKey(date),
+                              ))
+                          ? Icons.check_circle
+                          : Icons.circle_outlined,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+              ],
+            ),
+          ],
+          if (habits.isEmpty)
+            const Text('Add a habit to use the seven-day check-in strip.'),
+          const Divider(),
+          Text('Log an expense', style: Theme.of(context).textTheme.titleSmall),
+          TextField(
+            controller: expenseAmount,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Amount (up to 2 decimals)',
+            ),
+          ),
+          TextField(
+            controller: expenseCurrency,
+            maxLength: 12,
+            decoration: const InputDecoration(
+              labelText: 'Currency or unit label (required; no default)',
+            ),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: expenseCategory,
+                  maxLength: 80,
+                  decoration: const InputDecoration(labelText: 'Category'),
+                ),
+              ),
+              IconButton(
+                onPressed: _saveExpense,
+                tooltip: 'Save expense',
+                icon: const Icon(Icons.save_outlined),
+              ),
+            ],
+          ),
+          if (expenses.isNotEmpty)
+            Text('${expenses.length} expense entries saved locally.'),
+        ],
+      ),
+    );
   }
 
   Widget _googleTasksPanel() => Glass(
@@ -1653,19 +1990,64 @@ class _PhoneLibraryState extends State<PhoneLibrary> {
         ),
         const SizedBox(height: 12),
         const Text('Tasks on this phone only'),
-        for (final task in widget.state.local.rows('tasks'))
-          CheckboxListTile(
-            value: task['done'],
-            title: Text(task['title']),
-            onChanged: (v) async {
-              try {
-                await widget.state.local.setTask(task['id'], v ?? false);
-                if (mounted) setState(() {});
-              } catch (e) {
-                if (context.mounted) notice(context, e);
-              }
-            },
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            DropdownButton<String>(
+              value: _taskSort,
+              items: const [
+                DropdownMenuItem(value: 'added', child: Text('Added order')),
+                DropdownMenuItem(value: 'title', child: Text('Title A–Z')),
+                DropdownMenuItem(value: 'open', child: Text('Open first')),
+              ],
+              onChanged: (value) =>
+                  setState(() => _taskSort = value ?? 'added'),
+            ),
+            OutlinedButton.icon(
+              onPressed: _exportTaskCsv,
+              icon: const Icon(Icons.download_outlined),
+              label: const Text('Export CSV'),
+            ),
+            OutlinedButton.icon(
+              onPressed: _importTaskCsv,
+              icon: const Icon(Icons.upload_file_outlined),
+              label: const Text('Import CSV'),
+            ),
+          ],
+        ),
+        for (final task in sortLocalTasks(
+          widget.state.local.rows('tasks'),
+          _taskSort,
+        ))
+          ListTile(
+            leading: Checkbox(
+              value: task['done'] == true,
+              onChanged: (value) async {
+                try {
+                  await widget.state.local.setTask(task['id'], value ?? false);
+                  if (mounted) setState(() {});
+                } catch (error) {
+                  if (context.mounted) notice(context, error);
+                }
+              },
+            ),
+            title: Text(task['title']?.toString() ?? ''),
+            trailing: PopupMenuButton<String>(
+              tooltip: 'Task options',
+              onSelected: (action) {
+                if (action == 'edit') _editLocalTask(task);
+                if (action == 'delete') _deleteLocalTask(task);
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'edit', child: Text('Edit task')),
+                PopupMenuItem(value: 'delete', child: Text('Delete task')),
+              ],
+            ),
           ),
+        const SizedBox(height: 12),
+        _wellnessPanel(),
         const SizedBox(height: 12),
         _googleDrivePanel(),
         const SizedBox(height: 12),
@@ -2576,7 +2958,7 @@ class _SelectedFilesState extends State<SelectedFiles> {
       children: [
         const Glass(
           child: Text(
-            'Choose a specific text, image or PDF through Android’s document picker. No whole-storage access. Text can be read locally; image previews are local. OCR, PDF extraction, diagram/image AI and camera are not implemented in this build. File content is untrusted data, never permission to execute an action.',
+            'Choose one file through Android’s document picker; this view reads and searches local text and previews images. For camera capture, image/PDF OCR, and reviewed Gemini file analysis, open Assistant tools → Research. File content is untrusted data, never permission to execute an action.',
           ),
         ),
         FilledButton.icon(

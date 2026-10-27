@@ -17,6 +17,12 @@ class PhoneData {
     'study_reviews': [],
     'study_lessons': [],
     'study_practice_attempts': [],
+    'water_logs': [],
+    'habits': [],
+    'expenses': [],
+    'web_projects': <dynamic>[],
+    'focus_timer': null,
+    'journal_entries': <dynamic>[],
   };
   bool _loadFailed = false;
   Future<void> _tail = Future.value();
@@ -41,11 +47,23 @@ class PhoneData {
         parsed.putIfAbsent('study_reviews', () => <dynamic>[]);
         parsed.putIfAbsent('study_lessons', () => <dynamic>[]);
         parsed.putIfAbsent('study_practice_attempts', () => <dynamic>[]);
+        parsed.putIfAbsent('water_logs', () => <dynamic>[]);
+        parsed.putIfAbsent('habits', () => <dynamic>[]);
+        parsed.putIfAbsent('expenses', () => <dynamic>[]);
+        parsed.putIfAbsent('web_projects', () => <dynamic>[]);
+        parsed.putIfAbsent('focus_timer', () => null);
+        parsed.putIfAbsent('journal_entries', () => <dynamic>[]);
         if (parsed['study_decks'] is! List ||
             parsed['flashcards'] is! List ||
             parsed['study_reviews'] is! List ||
             parsed['study_lessons'] is! List ||
-            parsed['study_practice_attempts'] is! List) {
+            parsed['study_practice_attempts'] is! List ||
+            parsed['water_logs'] is! List ||
+            parsed['habits'] is! List ||
+            parsed['expenses'] is! List ||
+            parsed['web_projects'] is! List ||
+            parsed['journal_entries'] is! List ||
+            (parsed['focus_timer'] != null && parsed['focus_timer'] is! Map)) {
           throw const FormatException('Invalid local study data');
         }
         _data = parsed;
@@ -88,6 +106,13 @@ class PhoneData {
       List<Map<String, dynamic>>.from(snapshot['chats'][id] ?? []);
   Future<void> writeChat(String id, List<Map<String, dynamic>> messages) =>
       change((d) => d['chats'][id] = jsonDecode(jsonEncode(messages)));
+
+  /// Replaces the complete on-device record store with prevalidated backup data.
+  Future<void> replaceWithBackup(Map<String, dynamic> backup) => change((d) {
+    d
+      ..clear()
+      ..addAll(jsonDecode(jsonEncode(backup)) as Map<String, dynamic>);
+  });
   Future<void> deleteChat(String id) => change((d) => d['chats'].remove(id));
   static const _rustSearch = MethodChannel('personal_assistant/rust_search');
   bool lastSearchUsedRust = false;
@@ -224,10 +249,225 @@ class PhoneData {
       throw ArgumentError('Task needs 1–120 characters.');
     }
     await change(
-      (d) =>
-          (d['tasks'] as List).add({'id': id(), 'title': title, 'done': false}),
+      (d) => (d['tasks'] as List).add({
+        'id': id(),
+        'title': title,
+        'done': false,
+        'imported_inactive_schedule_metadata': {
+          'due_date': '',
+          'reminder': '',
+          'repeat': '',
+          'active': false,
+        },
+      }),
     );
   }
+
+  Future<void> importTasks(List<Map<String, Object?>> entries) async {
+    if (entries.length > 500) {
+      throw ArgumentError('Import is limited to 500 tasks.');
+    }
+    final normalized = <Map<String, dynamic>>[];
+    for (final entry in entries) {
+      final title = entry['title'];
+      final done = entry['done'];
+      final metadata = entry['imported_inactive_schedule_metadata'];
+      if (title is! String ||
+          title.trim().isEmpty ||
+          title.trim().length > 120 ||
+          done is! bool ||
+          metadata is! Map) {
+        throw const FormatException('Task import contains an invalid row.');
+      }
+      String field(String key) {
+        final value = metadata[key];
+        if (value == null) return '';
+        if (value is! String || value.length > 1000) {
+          throw const FormatException('Task schedule metadata is invalid.');
+        }
+        return value;
+      }
+
+      normalized.add({
+        'id': id(),
+        'title': title.trim(),
+        'done': done,
+        'imported_inactive_schedule_metadata': {
+          'due_date': field('due_date'),
+          'reminder': field('reminder'),
+          'repeat': field('repeat'),
+          'active': false,
+        },
+      });
+    }
+    await change((d) => (d['tasks'] as List).addAll(normalized));
+  }
+
+  static String _localDate([DateTime? value]) {
+    final date = value ?? DateTime.now();
+    return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  static bool _isLocalDateKey(String value) {
+    if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)) return false;
+    final parsed = DateTime.tryParse(value);
+    return parsed != null && _localDate(parsed) == value;
+  }
+
+  Future<void> addWaterLog(int milliliters) async {
+    if (milliliters < 1 || milliliters > 4000) {
+      throw ArgumentError('Water entry must be 1–4,000 ml.');
+    }
+    await change(
+      (d) => (d['water_logs'] as List).add({
+        'id': id(),
+        'date': _localDate(),
+        'milliliters': milliliters,
+      }),
+    );
+  }
+
+  Future<void> addHabit(String title) async {
+    title = title.trim();
+    if (title.isEmpty || title.length > 80) {
+      throw ArgumentError('Habit name must be 1–80 characters.');
+    }
+    await change(
+      (d) => (d['habits'] as List).add({
+        'id': id(),
+        'title': title,
+        'completed_dates': <String>[],
+      }),
+    );
+  }
+
+  Future<void> toggleHabitCheckin(String habitId, String date) => change((d) {
+    if (!_isLocalDateKey(date)) {
+      throw ArgumentError('Check-in date must be a real calendar date.');
+    }
+    final habits = d['habits'] as List;
+    final index = habits.indexWhere(
+      (item) => item is Map && item['id'] == habitId,
+    );
+    if (index < 0) throw StateError('Habit no longer exists.');
+    final habit = Map<String, dynamic>.from(habits[index] as Map);
+    final dates = (habit['completed_dates'] as List? ?? const [])
+        .whereType<String>()
+        .where(_isLocalDateKey)
+        .toList();
+    if (dates.contains(date)) {
+      dates.remove(date);
+    } else {
+      if (dates.length >= 3660) {
+        throw StateError('This habit has reached its check-in history limit.');
+      }
+      dates.add(date);
+    }
+    habit['completed_dates'] = dates;
+    habits[index] = habit;
+  });
+
+  static bool _validJournalDate(String value) {
+    if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)) return false;
+    final parsed = DateTime.tryParse(value);
+    return parsed != null && _localDate(parsed) == value;
+  }
+
+  Future<String> saveJournalEntry({
+    String? id,
+    required String date,
+    required String text,
+  }) async {
+    final cleanText = text.trim();
+    if (!_validJournalDate(date)) {
+      throw ArgumentError('Choose a valid journal date.');
+    }
+    if (cleanText.isEmpty || cleanText.length > 10000) {
+      throw ArgumentError('Entry text must be 1–10,000 characters.');
+    }
+    final entryId = id ?? this.id();
+    await change((d) {
+      final entries = d['journal_entries'] as List;
+      final index = entries.indexWhere(
+        (entry) => entry is Map && entry['id'] == entryId,
+      );
+      if (id != null && index < 0) {
+        throw StateError('Journal entry no longer exists.');
+      }
+      final prior = index < 0
+          ? null
+          : Map<String, dynamic>.from(entries[index] as Map);
+      final entry = <String, dynamic>{
+        'id': entryId,
+        'date': date,
+        'text': cleanText,
+        'created_at':
+            prior?['created_at'] ?? DateTime.now().toUtc().toIso8601String(),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      };
+      if (index < 0) {
+        entries.add(entry);
+      } else {
+        entries[index] = entry;
+      }
+    });
+    return entryId;
+  }
+
+  Future<void> deleteJournalEntry(String entryId) => change((d) {
+    final entries = d['journal_entries'] as List;
+    if (!entries.any((entry) => entry is Map && entry['id'] == entryId)) {
+      throw StateError('Journal entry no longer exists.');
+    }
+    entries.removeWhere((entry) => entry is Map && entry['id'] == entryId);
+  });
+
+  Future<void> addExpense({
+    required int amountMinor,
+    required String currency,
+    required String category,
+  }) async {
+    final unit = currency.trim();
+    final label = category.trim();
+    if (amountMinor < 1 || amountMinor > 1000000000000) {
+      throw ArgumentError('Enter a positive amount.');
+    }
+    if (unit.isEmpty || unit.length > 12) {
+      throw ArgumentError('Enter the currency or unit used for this entry.');
+    }
+    if (label.isEmpty || label.length > 80) {
+      throw ArgumentError('Category must be 1–80 characters.');
+    }
+    await change(
+      (d) => (d['expenses'] as List).add({
+        'id': id(),
+        'date': _localDate(),
+        'amount_minor': amountMinor,
+        'currency': unit,
+        'category': label,
+      }),
+    );
+  }
+
+  Future<void> renameTask(String id, String title) async {
+    title = title.trim();
+    if (title.isEmpty || title.length > 120) {
+      throw ArgumentError('Task needs 1–120 characters.');
+    }
+    await change((d) {
+      final tasks = d['tasks'] as List;
+      final index = tasks.indexWhere((task) => task is Map && task['id'] == id);
+      if (index < 0) throw StateError('Task no longer exists.');
+      final task = Map<String, dynamic>.from(tasks[index] as Map);
+      task['title'] = title;
+      tasks[index] = task;
+    });
+  }
+
+  Future<void> deleteTask(String id) => change((d) {
+    final tasks = d['tasks'] as List;
+    tasks.removeWhere((task) => task is Map && task['id'] == id);
+  });
 
   Future<void> setTask(String id, bool done) => change((d) {
     for (final m in d['tasks']) {

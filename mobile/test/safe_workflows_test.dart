@@ -93,6 +93,66 @@ void main() {
   });
 
   testWidgets(
+    'workflow steps can be reordered and optional steps removed/restored',
+    (tester) async {
+      final state = AssistantState();
+      await tester.pumpWidget(
+        MaterialApp(home: MultiAgentWorkflowScreen(state: state)),
+      );
+
+      expect(find.byTooltip('Remove Planner'), findsOneWidget);
+      expect(find.byTooltip('Remove Specialist'), findsOneWidget);
+      expect(find.byTooltip('Remove Reviewer'), findsNothing);
+      expect(find.byTooltip('Remove Synthesizer'), findsNothing);
+
+      final specialistUp = find
+          .descendant(
+            of: find.byKey(const ValueKey('workflow-step-specialist')),
+            matching: find.byType(IconButton),
+          )
+          .first;
+      final specialistUpButton = tester.widget<IconButton>(specialistUp);
+      expect(specialistUpButton.onPressed, isNotNull);
+      specialistUpButton.onPressed!();
+      await tester.pumpAndSettle();
+      final orderedIds = tester
+          .widgetList<ListTile>(find.byType(ListTile))
+          .map((tile) => tile.key)
+          .whereType<ValueKey<String>>()
+          .map((key) => key.value)
+          .where((key) => key.startsWith('workflow-step-'))
+          .toList();
+      expect(orderedIds, [
+        'workflow-step-specialist',
+        'workflow-step-planner',
+        'workflow-step-reviewer',
+        'workflow-step-synthesizer',
+      ]);
+
+      final removePlanner = find
+          .descendant(
+            of: find.byKey(const ValueKey('workflow-step-planner')),
+            matching: find.byType(IconButton),
+          )
+          .last;
+      await tester.ensureVisible(removePlanner);
+      final removePlannerButton = tester.widget<IconButton>(removePlanner);
+      expect(removePlannerButton.onPressed, isNotNull);
+      removePlannerButton.onPressed!();
+      await tester.pumpAndSettle();
+      expect(find.text('Add Planner'), findsOneWidget);
+      expect(find.byTooltip('Remove Planner'), findsNothing);
+      final addPlanner = tester.widget<ActionChip>(
+        find.widgetWithText(ActionChip, 'Add Planner'),
+      );
+      expect(addPlanner.onPressed, isNotNull);
+      addPlanner.onPressed!();
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Remove Planner'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
     'skills page exposes local actions and a bounded multi-agent workflow',
     (tester) async {
       final state = AssistantState();

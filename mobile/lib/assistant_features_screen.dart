@@ -8,6 +8,12 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import 'assistant_state.dart';
 import 'feature_services.dart';
+import 'text_tools_screen.dart';
+import 'local_web_projects_screen.dart';
+import 'system_monitor_screen.dart';
+import 'focus_timer_screen.dart';
+import 'journal_screen.dart';
+import 'office_document.dart';
 
 const _featureVoiceEvents = MethodChannel('personal_assistant/feature_voice');
 
@@ -26,7 +32,7 @@ class FeaturesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DefaultTabController(
     initialIndex: initialTab,
-    length: 3,
+    length: 8,
     child: Scaffold(
       appBar: AppBar(
         title: const Text('Assistant tools'),
@@ -36,6 +42,14 @@ class FeaturesScreen extends StatelessWidget {
             Tab(icon: Icon(Icons.description_outlined), text: 'Files'),
             Tab(icon: Icon(Icons.mic_none_rounded), text: 'Voice actions'),
             Tab(icon: Icon(Icons.travel_explore_rounded), text: 'Research'),
+            Tab(icon: Icon(Icons.transform_rounded), text: 'Text tools'),
+            Tab(icon: Icon(Icons.code_rounded), text: 'Web projects'),
+            Tab(
+              icon: Icon(Icons.monitor_heart_outlined),
+              text: 'System monitor',
+            ),
+            Tab(icon: Icon(Icons.timer_outlined), text: 'Focus timer'),
+            Tab(icon: Icon(Icons.edit_note_rounded), text: 'Journal'),
           ],
         ),
       ),
@@ -44,6 +58,11 @@ class FeaturesScreen extends StatelessWidget {
           _DocumentFeature(state: state),
           _VoiceActionsFeature(state: state, onReminder: onReminder),
           _ResearchFeature(state: state),
+          const TextToolsScreen(),
+          LocalWebProjectsScreen(state: state),
+          const SystemMonitorScreen(),
+          FocusTimerScreen(state: state),
+          JournalScreen(state: state),
         ],
       ),
     ),
@@ -62,8 +81,13 @@ class _DocumentFeatureState extends State<_DocumentFeature> {
   Uint8List? _bytes;
   String _name = '';
   String _mime = '';
+  String _extractedText = '';
+  bool _extractedTextTruncated = false;
   String _task = 'Summarize';
   FeatureAnswer? _answer;
+  String? _ocrText;
+  String _ocrSummary = '';
+  bool _ocrBusy = false;
   bool _busy = false;
   String _error = '';
 
@@ -74,30 +98,44 @@ class _DocumentFeatureState extends State<_DocumentFeature> {
     super.dispose();
   }
 
-  Future<void> _pickFile() async {
-    setState(() {
-      _error = '';
-    });
+  Future<void> _openLocalMedia(String kind) async {
+    setState(() => _error = '');
+    try {
+      await AssistantState.device.invokeMethod<void>('open_local_media', {
+        'kind': kind,
+      });
+    } on PlatformException catch (error) {
+      if (error.code != 'cancelled' && mounted) {
+        setState(
+          () => _error = error.message ?? 'Could not open a local viewer.',
+        );
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _capturePhoto() async {
+    setState(() => _error = '');
     try {
       final result = await AssistantState.device
-          .invokeMapMethod<String, dynamic>('pick_file', {'ai_document': true});
+          .invokeMapMethod<String, dynamic>('capture_photo');
       if (result == null) return;
       final mime = result['mime'];
       final encoded = result['content_base64'];
       final name = result['name'];
       if (mime is! String || encoded is! String || name is! String) {
-        throw FeatureServiceException(
-          (result['unsupported'] as String?) ??
-              'Choose a PDF or image on Android.',
+        throw const FeatureServiceException(
+          'The camera did not return a usable photo.',
         );
       }
       final bytes = base64Decode(encoded);
-      if (!supportedAiDocumentMimes.contains(mime) ||
+      if (mime != 'image/jpeg' ||
           bytes.isEmpty ||
-          bytes.length > maxAiDocumentBytes) {
+          bytes.length > 2 * 1024 * 1024) {
         bytes.fillRange(0, bytes.length, 0);
         throw const FeatureServiceException(
-          'That file is not supported or exceeds 12 MB.',
+          'The camera photo is invalid or exceeds 2 MB.',
         );
       }
       _bytes?.fillRange(0, _bytes!.length, 0);
@@ -105,7 +143,73 @@ class _DocumentFeatureState extends State<_DocumentFeature> {
         _bytes = bytes;
         _mime = mime;
         _name = name;
+        _extractedText = '';
+        _extractedTextTruncated = false;
         _answer = null;
+        _ocrText = null;
+        _ocrSummary = '';
+        _error = '';
+        _task = 'Summarize';
+        _question.clear();
+      });
+    } on PlatformException catch (error) {
+      if (error.code != 'cancelled' && mounted) {
+        setState(() => _error = error.message ?? 'Could not capture a photo.');
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _pickFile() async {
+    setState(() {
+      _error = '';
+    });
+    try {
+      final result = await AssistantState.device
+          .invokeMapMethod<String, dynamic>('pick_file', {
+            'ai_document': true,
+            'office_docx': true,
+          });
+      if (result == null) return;
+      final mime = result['mime'];
+      final encoded = result['content_base64'];
+      final name = result['name'];
+      if (mime is! String || encoded is! String || name is! String) {
+        throw FeatureServiceException(
+          (result['unsupported'] as String?) ??
+              'Choose a PDF, DOCX or image on Android.',
+        );
+      }
+      final bytes = base64Decode(encoded);
+      final isDocx = mime == docxMime && name.toLowerCase().endsWith('.docx');
+      if ((!supportedAiDocumentMimes.contains(mime) && !isDocx) ||
+          bytes.isEmpty ||
+          bytes.length > maxAiDocumentBytes) {
+        bytes.fillRange(0, bytes.length, 0);
+        throw const FeatureServiceException(
+          'That file is not supported or exceeds 12 MB.',
+        );
+      }
+      ExtractedOfficeText? extracted;
+      if (isDocx) {
+        try {
+          extracted = extractDocxText(bytes);
+        } catch (_) {
+          bytes.fillRange(0, bytes.length, 0);
+          rethrow;
+        }
+      }
+      _bytes?.fillRange(0, _bytes!.length, 0);
+      setState(() {
+        _bytes = bytes;
+        _mime = mime;
+        _name = name;
+        _extractedText = extracted?.text ?? '';
+        _extractedTextTruncated = extracted?.truncated ?? false;
+        _answer = null;
+        _ocrText = null;
+        _ocrSummary = '';
         _error = '';
         _task = 'Summarize';
         _question.clear();
@@ -136,10 +240,95 @@ class _DocumentFeatureState extends State<_DocumentFeature> {
     );
   }
 
+  Future<void> _extractImageTextLocally() async {
+    final bytes = _bytes;
+    if (bytes == null || !(_mime.startsWith('image/'))) {
+      setState(() => _error = 'Choose a JPEG, PNG or WebP image first.');
+      return;
+    }
+    setState(() {
+      _ocrBusy = true;
+      _ocrText = null;
+      _error = '';
+    });
+    try {
+      final text = await AssistantState.device.invokeMethod<String>(
+        'extract_image_text_locally',
+        {'image_bytes': bytes, 'mime': _mime},
+      );
+      if (mounted) setState(() => _ocrText = text ?? '');
+    } on PlatformException catch (error) {
+      if (mounted) {
+        setState(
+          () => _error = error.message ?? 'Local text extraction failed.',
+        );
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _ocrBusy = false);
+    }
+  }
+
+  Future<void> _extractPdfTextLocally() async {
+    final bytes = _bytes;
+    if (bytes == null || _mime != 'application/pdf') {
+      setState(() => _error = 'Choose a PDF first.');
+      return;
+    }
+    setState(() {
+      _ocrBusy = true;
+      _ocrText = null;
+      _ocrSummary = '';
+      _error = '';
+    });
+    try {
+      final result = await AssistantState.device
+          .invokeMapMethod<String, dynamic>('extract_pdf_text_locally', {
+            'pdf_bytes': bytes,
+            'mime': _mime,
+          });
+      if (result == null) {
+        throw const FeatureServiceException(
+          'Local PDF text extraction returned no result.',
+        );
+      }
+      final text = result['text'];
+      final processed = result['pages_processed'];
+      final total = result['page_count'];
+      final truncated = result['truncated'];
+      if (text is! String ||
+          processed is! int ||
+          total is! int ||
+          truncated is! bool) {
+        throw const FeatureServiceException(
+          'Local PDF text extraction returned an invalid result.',
+        );
+      }
+      if (mounted) {
+        setState(() {
+          _ocrText = text;
+          _ocrSummary =
+              'Read $processed of $total pages locally${truncated ? ' · partial result' : ''}.';
+        });
+      }
+    } on PlatformException catch (error) {
+      if (mounted) {
+        setState(
+          () => _error = error.message ?? 'Local PDF text extraction failed.',
+        );
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _ocrBusy = false);
+    }
+  }
+
   Future<void> _ask() async {
     final bytes = _bytes;
     if (bytes == null) {
-      setState(() => _error = 'Choose a PDF or image first.');
+      setState(() => _error = 'Choose a PDF, DOCX or image first.');
       return;
     }
     final client = _client();
@@ -162,9 +351,15 @@ class _DocumentFeatureState extends State<_DocumentFeature> {
         await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('Send this file to Gemini?'),
+            title: Text(
+              _mime == docxMime
+                  ? 'Send extracted text to Gemini?'
+                  : 'Send this file to Gemini?',
+            ),
             content: Text(
-              '“$_name” and your question will be sent online to Google Gemini (${client.model}) for analysis. Google handles the content under its service terms. This feature does not add the file or answer to chat history; the selected file is held temporarily on this screen.',
+              _mime == docxMime
+                  ? 'Text extracted locally from “$_name” and your question will be sent online to Google Gemini (${client.model}) for analysis. The DOCX itself is not sent. Google handles the text under its service terms. The text and answer are not added to chat history and are held temporarily on this screen.'
+                  : '“$_name” and your question will be sent online to Google Gemini (${client.model}) for analysis. Google handles the content under its service terms. This feature does not add the file or answer to chat history; the selected file is held temporarily on this screen.',
             ),
             actions: [
               TextButton(
@@ -186,11 +381,13 @@ class _DocumentFeatureState extends State<_DocumentFeature> {
       _answer = null;
     });
     try {
-      final answer = await client.askDocument(
-        mimeType: _mime,
-        bytes: bytes,
-        prompt: prompt,
-      );
+      final answer = _mime == docxMime
+          ? await client.askExtractedText(text: _extractedText, prompt: prompt)
+          : await client.askDocument(
+              mimeType: _mime,
+              bytes: bytes,
+              prompt: prompt,
+            );
       if (mounted) setState(() => _answer = answer);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -205,14 +402,56 @@ class _DocumentFeatureState extends State<_DocumentFeature> {
     children: [
       const _FeatureNotice(
         icon: Icons.privacy_tip_outlined,
-        text: 'Choose a PDF or photo, then ask Gemini to summarize, explain or quiz you. The file is not sent until you review the online-send prompt. Qwen offline chat cannot inspect images or PDFs.',
+        text: 'Choose a PDF, DOCX or photo, or take a photo with Android’s camera app. PDF and image text can also be extracted on-device (Latin script), without sending the file online. Gemini analysis still needs your review, and Qwen offline chat is text-only.',
       ),
       const SizedBox(height: 12),
-      OutlinedButton.icon(
-        onPressed: _busy ? null : _pickFile,
-        icon: const Icon(Icons.attach_file_rounded),
-        label: Text(
-          _bytes == null ? 'Choose PDF or photo' : 'Choose a different file',
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
+            onPressed: _busy ? null : () => _openLocalMedia('pdf'),
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+            label: const Text('Open PDF locally'),
+          ),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : () => _openLocalMedia('video'),
+            icon: const Icon(Icons.video_library_outlined),
+            label: const Text('Open video locally'),
+          ),
+        ],
+      ),
+      const Padding(
+        padding: EdgeInsets.only(top: 6),
+        child: Text(
+          'Choose a local viewer or player; page navigation and seeking depend on that app. These files are not sent to Gemini.',
+        ),
+      ),
+      const SizedBox(height: 12),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _capturePhoto,
+            icon: const Icon(Icons.photo_camera_outlined),
+            label: const Text('Take a photo'),
+          ),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _pickFile,
+            icon: const Icon(Icons.attach_file_rounded),
+            label: Text(
+              _bytes == null
+                  ? 'Choose PDF, DOCX or photo'
+                  : 'Choose a different file',
+            ),
+          ),
+        ],
+      ),
+      const Padding(
+        padding: EdgeInsets.only(top: 6),
+        child: Text(
+          'Personal AI keeps a captured photo only temporarily on this screen. Remove it when finished; online analysis still requires your review.',
         ),
       ),
       if (_name.isNotEmpty) ...[
@@ -237,13 +476,94 @@ class _DocumentFeatureState extends State<_DocumentFeature> {
                       _bytes = null;
                       _name = '';
                       _mime = '';
+                      _extractedText = '';
+                      _extractedTextTruncated = false;
                       _answer = null;
+                      _ocrText = null;
+                      _ocrSummary = '';
                       _question.clear();
                     }),
               icon: const Icon(Icons.close_rounded),
             ),
           ),
         ),
+      ],
+      if (_bytes != null && _mime == docxMime) ...[
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Text extracted locally'),
+                const SizedBox(height: 6),
+                Text(
+                  _extractedTextTruncated
+                      ? 'Preview limited to $maxExtractedDocxChars characters. Gemini will receive only this extracted text.'
+                      : 'Gemini will receive only the extracted text after you approve.',
+                ),
+                const SizedBox(height: 8),
+                SelectableText(_extractedText),
+              ],
+            ),
+          ),
+        ),
+      ],
+      if (_bytes != null && _mime.startsWith('image/')) ...[
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: _busy || _ocrBusy ? null : _extractImageTextLocally,
+          icon: _ocrBusy
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.document_scanner_outlined),
+          label: Text(
+            _ocrBusy ? 'Extracting locally…' : 'Extract text on device',
+          ),
+        ),
+        const Text(
+          'Uses a bundled Latin-script OCR model. Extracted text stays on this screen and is not added to chat.',
+        ),
+        if (_ocrText != null)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: _ocrText!.isEmpty
+                  ? const Text('No text was recognized.')
+                  : SelectableText(_ocrText!),
+            ),
+          ),
+      ],
+      if (_bytes != null && _mime == 'application/pdf') ...[
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: _busy || _ocrBusy ? null : _extractPdfTextLocally,
+          icon: _ocrBusy
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.document_scanner_outlined),
+          label: Text(
+            _ocrBusy ? 'Extracting locally…' : 'Extract PDF text on device',
+          ),
+        ),
+        const Text(
+          'Only the first 8 pages are checked with the bundled Latin-script OCR model. Text stays on this screen; the PDF is not uploaded by this action.',
+        ),
+        if (_ocrSummary.isNotEmpty) Text(_ocrSummary),
+        if (_ocrText != null)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: _ocrText!.isEmpty
+                  ? const Text('No text was recognized.')
+                  : SelectableText(_ocrText!),
+            ),
+          ),
       ],
       const SizedBox(height: 12),
       Wrap(

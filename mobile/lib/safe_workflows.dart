@@ -31,12 +31,17 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
     setState(() => _opening = true);
     try {
       await _device.invokeMethod<Object?>('share_text', {
-        'title': _kind == 'whatsapp' ? 'Review WhatsApp reply' : 'Review social caption',
+        'title': _kind == 'whatsapp'
+            ? 'Review WhatsApp reply'
+            : 'Review social caption',
         'text': body,
       });
     } on PlatformException catch (error) {
       if (mounted) {
-        notice(context, error.message ?? 'Android could not open the share sheet.');
+        notice(
+          context,
+          error.message ?? 'Android could not open the share sheet.',
+        );
       }
     } on MissingPluginException {
       if (mounted) {
@@ -55,11 +60,15 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 118),
         children: [
-          Text('Write it here, send it yourself', style: Theme.of(context).textTheme.headlineSmall),
+          Text(
+            'Write it here, send it yourself',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
           const SizedBox(height: 8),
           Text(
             'Nothing is sent or published by this app. Continue opens Android’s share sheet; choose the app and conversation, then review and send there.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: colors.onSurfaceVariant),
+            style: Theme.of(context).textTheme.bodyMedium
+                ?.copyWith(color: colors.onSurfaceVariant),
           ),
           const SizedBox(height: 18),
           Glass(
@@ -71,10 +80,17 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
                   isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Draft type'),
                   items: const [
-                    DropdownMenuItem(value: 'whatsapp', child: Text('WhatsApp reply')),
-                    DropdownMenuItem(value: 'social', child: Text('Social post caption')),
+                    DropdownMenuItem(
+                      value: 'whatsapp',
+                      child: Text('WhatsApp reply'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'social',
+                      child: Text('Social post caption'),
+                    ),
                   ],
-                  onChanged: (value) => setState(() => _kind = value ?? 'whatsapp'),
+                  onChanged: (value) =>
+                      setState(() => _kind = value ?? 'whatsapp'),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -86,7 +102,9 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
                   keyboardType: TextInputType.multiline,
                   textCapitalization: TextCapitalization.sentences,
                   decoration: InputDecoration(
-                    labelText: _kind == 'whatsapp' ? 'Reply draft' : 'Caption draft',
+                    labelText: _kind == 'whatsapp'
+                        ? 'Reply draft'
+                        : 'Caption draft',
                     hintText: _kind == 'whatsapp'
                         ? 'Write a reply to review in your messaging app…'
                         : 'Write a caption to review in your social app…',
@@ -99,11 +117,21 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: _text.text.trim().isEmpty || _opening ? null : _openShareSheet,
+                    onPressed: _text.text.trim().isEmpty || _opening
+                        ? null
+                        : _openShareSheet,
                     icon: _opening
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
                         : const Icon(Icons.ios_share_rounded),
-                    label: Text(_kind == 'whatsapp' ? 'Choose app to review reply' : 'Choose app to review caption'),
+                    label: Text(
+                      _kind == 'whatsapp'
+                          ? 'Choose app to review reply'
+                          : 'Choose app to review caption',
+                    ),
                   ),
                 ),
               ],
@@ -133,11 +161,15 @@ class SafeSkillsScreen extends StatelessWidget {
     child: ListView(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 118),
       children: [
-        Text('Small, explicit workflows', style: Theme.of(context).textTheme.headlineSmall),
+        Text(
+          'Small, explicit workflows',
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
         const SizedBox(height: 8),
         Text(
           'Each action starts only when you tap it and asks for approval before it runs. Android app launches come only from the live installed-app picker; reminders use Android notifications.',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+          style: Theme.of(context).textTheme.bodyMedium
+              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
         const SizedBox(height: 16),
         Glass(
@@ -147,7 +179,9 @@ class SafeSkillsScreen extends StatelessWidget {
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.school_outlined),
                 title: const Text('Open a study app'),
-                subtitle: const Text('Pick an installed app, review its name, then approve the launch.'),
+                subtitle: const Text(
+                  'Pick an installed app, review its name, then approve the launch.',
+                ),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Home(state: state).openAppPicker(context),
               ),
@@ -156,7 +190,9 @@ class SafeSkillsScreen extends StatelessWidget {
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.notifications_active_outlined),
                 title: const Text('Prepare a study reminder'),
-                subtitle: const Text('Choose its wording and time, then approve the reminder.'),
+                subtitle: const Text(
+                  'Choose its wording and time, then approve the reminder.',
+                ),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Home(state: state).reminder(context),
               ),
@@ -166,7 +202,9 @@ class SafeSkillsScreen extends StatelessWidget {
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.hub_outlined),
                 title: const Text('Try a multi-agent workflow'),
-                subtitle: const Text('A reviewed, four-pass team using your selected online model.'),
+                subtitle: const Text(
+                  'A reviewed, configurable sequence using your selected online model.',
+                ),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
@@ -182,9 +220,14 @@ class SafeSkillsScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('What the team can and can’t do', style: TextStyle(fontWeight: FontWeight.w700)),
+              Text(
+                'What the team can and can’t do',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
               SizedBox(height: 6),
-              Text('The workflow runs four sequential roles—planner, specialist, reviewer and synthesizer—through the same configured online model. It is not a parallel swarm or independent models. It has no tools, memory, chat history, files or permission to execute actions; you review the result yourself. MCP tool discovery remains display-only.'),
+              Text(
+                'By default it runs planner, specialist, reviewer and synthesizer in sequence through the same configured online model. You can reorder or remove the planner and specialist; reviewer and synthesizer stay required. It is not a parallel swarm or independent models, and has no tools, memory, chat history, files or permission to execute actions. You review the result yourself; MCP tool discovery remains display-only.',
+              ),
             ],
           ),
         ),
@@ -215,6 +258,7 @@ class _MultiAgentWorkflowScreenState extends State<MultiAgentWorkflowScreen> {
     widget.state.clientFactory,
   );
   List<AgentPassResult> _passes = const [];
+  List<String> _stepIds = List.of(MultiAgentWorkflowRunner.defaultStepIds);
   bool _running = false;
   String _progress = '';
   String _error = '';
@@ -226,11 +270,52 @@ class _MultiAgentWorkflowScreenState extends State<MultiAgentWorkflowScreen> {
     super.dispose();
   }
 
+  void _moveStep(int index, int delta) {
+    final destination = index + delta;
+    if (_running ||
+        destination < 0 ||
+        destination >= _stepIds.length ||
+        _stepIds[destination] == 'synthesizer') {
+      return;
+    }
+    setState(() {
+      final next = List<String>.of(_stepIds);
+      final value = next.removeAt(index);
+      next.insert(destination, value);
+      if (MultiAgentWorkflowRunner.validStepOrder(next)) _stepIds = next;
+      _passes = const [];
+      _error = '';
+    });
+  }
+
+  void _removeStep(String id) {
+    if (_running || !MultiAgentWorkflowRunner.canRemoveStep(id)) return;
+    setState(() {
+      _stepIds.remove(id);
+      _passes = const [];
+      _error = '';
+    });
+  }
+
+  void _restoreStep(String id) {
+    if (_running || _stepIds.contains(id)) return;
+    setState(() {
+      if (id == 'synthesizer') {
+        _stepIds.add(id);
+      } else {
+        final finalIndex = _stepIds.indexOf('synthesizer');
+        _stepIds.insert(finalIndex < 0 ? _stepIds.length : finalIndex, id);
+      }
+      _passes = const [];
+      _error = '';
+    });
+  }
+
   Future<void> _reviewAndRun() async {
     final goal = _task.text.trim();
     final config = widget.state.config;
     try {
-      _runner.validate(config, goal);
+      _runner.validate(config, goal, stepIds: _stepIds);
     } catch (error) {
       setState(() => _error = error.toString());
       return;
@@ -240,7 +325,7 @@ class _MultiAgentWorkflowScreenState extends State<MultiAgentWorkflowScreen> {
         await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
-            title: const Text('Review the four-pass run'),
+            title: Text('Review the ${_stepIds.length}-step run'),
             scrollable: true,
             content: Column(
               mainAxisSize: MainAxisSize.min,
@@ -249,8 +334,8 @@ class _MultiAgentWorkflowScreenState extends State<MultiAgentWorkflowScreen> {
                 Text('Same online model: ${config.model}'),
                 Text('Provider: $providerHost'),
                 const SizedBox(height: 12),
-                const Text(
-                  'Passes run in order: planner → specialist → reviewer → synthesizer.',
+                Text(
+                  'Steps run in order: ${_stepIds.map((id) => MultiAgentWorkflowRunner.stepForId(id).name).join(' → ')}.',
                 ),
                 const SizedBox(height: 12),
                 const Text(
@@ -258,7 +343,7 @@ class _MultiAgentWorkflowScreenState extends State<MultiAgentWorkflowScreen> {
                 ),
                 const SizedBox(height: 12),
                 const Text(
-                  'All four passes use the same model; this is not parallel or independent agents. Nothing the model suggests is executed automatically.',
+                  'All steps use the same model; this is not parallel or independent agents. The reviewer and final synthesizer remain required. Nothing the model suggests is executed automatically.',
                 ),
                 const SizedBox(height: 12),
                 const Text('Exact task to send:'),
@@ -273,7 +358,7 @@ class _MultiAgentWorkflowScreenState extends State<MultiAgentWorkflowScreen> {
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Run four passes'),
+                child: Text('Run ${_stepIds.length} steps'),
               ),
             ],
           ),
@@ -292,8 +377,13 @@ class _MultiAgentWorkflowScreenState extends State<MultiAgentWorkflowScreen> {
         config: config,
         goal: goal,
         approvedThisRun: true,
+        stepIds: List.unmodifiable(_stepIds),
         onPassStarted: (role, index) {
-          if (mounted) setState(() => _progress = 'Pass $index of 4 · $role');
+          if (mounted) {
+            setState(
+              () => _progress = 'Step $index of ${_stepIds.length} · $role',
+            );
+          }
         },
       );
       if (mounted) setState(() => _passes = result.passes);
@@ -335,7 +425,7 @@ class _MultiAgentWorkflowScreenState extends State<MultiAgentWorkflowScreen> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Planner, specialist, reviewer and synthesizer run one after another using the same configured OpenAI-compatible model. Each pass sees your task and prior pass outputs. This is a bounded multi-role workflow, not separate models or a parallel swarm.',
+            'Choose the order and optional steps for a bounded workflow. The reviewer and final synthesizer stay required; every step uses the same configured OpenAI-compatible model, one after another. Each sees your task and prior outputs, not separate models or a parallel swarm.',
           ),
           const SizedBox(height: 14),
           const Glass(
@@ -348,6 +438,73 @@ class _MultiAgentWorkflowScreenState extends State<MultiAgentWorkflowScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text(
+                  'Workflow steps',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 6),
+                for (var i = 0; i < _stepIds.length; i++)
+                  ListTile(
+                    key: ValueKey('workflow-step-${_stepIds[i]}'),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: IconButton(
+                      tooltip:
+                          'Move ${MultiAgentWorkflowRunner.stepForId(_stepIds[i]).name} up',
+                      onPressed: !_running && i > 0
+                          ? () => _moveStep(i, -1)
+                          : null,
+                      icon: const Icon(Icons.arrow_upward),
+                    ),
+                    title: Text(
+                      MultiAgentWorkflowRunner.stepForId(_stepIds[i]).name,
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip:
+                              'Move ${MultiAgentWorkflowRunner.stepForId(_stepIds[i]).name} down',
+                          onPressed:
+                              !_running &&
+                                  i < _stepIds.length - 1 &&
+                                  _stepIds[i] != 'reviewer'
+                              ? () => _moveStep(i, 1)
+                              : null,
+                          icon: const Icon(Icons.arrow_downward),
+                        ),
+                        if (MultiAgentWorkflowRunner.canRemoveStep(_stepIds[i]))
+                          IconButton(
+                            tooltip:
+                                'Remove ${MultiAgentWorkflowRunner.stepForId(_stepIds[i]).name}',
+                            onPressed: !_running
+                                ? () => _removeStep(_stepIds[i])
+                                : null,
+                            icon: const Icon(Icons.remove_circle_outline),
+                          )
+                        else
+                          const SizedBox(width: 48),
+                      ],
+                    ),
+                  ),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final step
+                        in MultiAgentWorkflowRunner.availableSteps.where(
+                          (step) =>
+                              !_stepIds.contains(step.id) &&
+                              MultiAgentWorkflowRunner.canRemoveStep(step.id),
+                        ))
+                      ActionChip(
+                        label: Text('Add ${step.name}'),
+                        onPressed: !_running
+                            ? () => _restoreStep(step.id)
+                            : null,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
                 TextField(
                   key: const ValueKey('multi-agent-task'),
                   controller: _task,
@@ -357,7 +514,7 @@ class _MultiAgentWorkflowScreenState extends State<MultiAgentWorkflowScreen> {
                   textCapitalization: TextCapitalization.sentences,
                   decoration: const InputDecoration(
                     labelText: 'Task for the team',
-                    hintText: 'Describe one task for the four passes…',
+                    hintText: 'Describe one task for the workflow…',
                     alignLabelWithHint: true,
                     border: OutlineInputBorder(),
                   ),
@@ -408,7 +565,7 @@ class _MultiAgentWorkflowScreenState extends State<MultiAgentWorkflowScreen> {
                           ? _reviewAndRun
                           : null,
                       icon: const Icon(Icons.hub_outlined),
-                      label: const Text('Review & run four passes'),
+                      label: Text('Review & run ${_stepIds.length} steps'),
                     ),
                   ),
                 ],

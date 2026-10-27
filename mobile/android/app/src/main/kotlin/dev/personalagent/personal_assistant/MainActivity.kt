@@ -2,21 +2,28 @@ package dev.personalagent.personal_assistant
 
 import android.Manifest
 import android.app.AlarmManager
+import android.app.ActivityManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.ComponentName
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.pdf.PdfRenderer
 import android.graphics.Canvas
 import android.media.MediaPlayer
 import android.net.Uri
+import android.net.TrafficStats
 import android.os.Build
 import android.os.Bundle
+import android.os.ParcelFileDescriptor
+import android.os.StatFs
 import android.provider.OpenableColumns
 import android.speech.SpeechRecognizer
 import android.speech.RecognitionListener
@@ -28,8 +35,13 @@ import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.EventChannel
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.google.android.gms.tasks.Tasks
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.TimeUnit
 
 internal fun isValidTextSharePayload(title: String?, text: String?): Boolean =
     !title.isNullOrBlank() && title.length <= 80 && !text.isNullOrBlank() && text.length <= 10000
@@ -140,6 +152,8 @@ class MainActivity : FlutterFragmentActivity() {
     private var pendingAction: Map<*, *>? = null
     private var exportResult: MethodChannel.Result? = null
     private var exportText: String? = null
+    private var exportBytes: ByteArray? = null
+    private var backupImportResult: MethodChannel.Result? = null
     private var voice: SpeechRecognizer? = null
     private var voiceChannel: MethodChannel? = null
     private var featureVoiceChannel: MethodChannel? = null
@@ -311,7 +325,13 @@ class MainActivity : FlutterFragmentActivity() {
         super.onDestroy()
     }
     private var fileResult: MethodChannel.Result? = null
+    private var cameraResult: MethodChannel.Result? = null
+    private var localOcrInFlight = false
     private var fileForAi = false
+    private var fileForOfficeDocx = false
+    private var localMediaResult: MethodChannel.Result? = null
+    private var localMediaKind: String? = null
+    private var previousSystemCpuTicks: SystemCpuTicks? = null
     private var offlineModelCoordinator: Gemma4OfflineCoordinator? = null
     private var offlineModelEventSink: EventChannel.EventSink? = null
     override fun configureFlutterEngine(engine: FlutterEngine) {
@@ -564,6 +584,9 @@ class MainActivity : FlutterFragmentActivity() {
                         }
                     }
                 }
+                "read_system_metrics" -> result.success(readSystemMonitorMetrics())
+                "extract_image_text_locally" -> extractImageTextLocally(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
+                "extract_pdf_text_locally" -> extractPdfTextLocally(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "device_status" -> result.success(mapOf(
                     "sdk" to Build.VERSION.SDK_INT,
                     "microphone_granted" to (checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED),
@@ -592,28 +615,268 @@ class MainActivity : FlutterFragmentActivity() {
                         else { permissionResult=result; pendingAction=args; requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 41) }
                     } else execute(args,result)
                 }
+                "open_local_media" -> {
+                    val kind = call.argument<String>("kind")
+                    if (kind !in setOf("pdf", "video")) {
+                        result.error("invalid_argument", "Choose PDF or video", null)
+                    } else if (localMediaResult != null) {
+                        result.error("busy", "A local file selection is already open", null)
+                    } else {
+                        localMediaResult = result
+                        localMediaKind = kind
+                        try {
+                            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                                type = if (kind == "pdf") "application/pdf" else "video/*"
+                            }, 44)
+                        } catch (_: Exception) {
+                            localMediaResult = null
+                            localMediaKind = null
+                            result.error("unavailable", "Android could not open the local file picker", null)
+                        }
+                    }
+                }
+                "capture_photo" -> {
+                    if (cameraResult != null) result.error("busy", "A camera capture is already open", null)
+                    else {
+                        cameraResult = result
+                        try {
+                            startActivityForResult(Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE), 45)
+                        } catch (_: Exception) {
+                            cameraResult = null
+                            result.error("unavailable", "No Android camera app is available", null)
+                        }
+                    }
+                }
+                "import_backup" -> {
+                    if (backupImportResult != null) {
+                        result.error("busy", "A backup selection is already open", null)
+                    } else {
+                        backupImportResult = result
+                        try {
+                            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                                type = "application/json"
+                            }, 46)
+                        } catch (_: Exception) {
+                            backupImportResult = null
+                            result.error("unavailable", "Android could not open the backup picker", null)
+                        }
+                    }
+                }
                 "pick_file" -> {
                     if(fileResult != null) result.error("busy","A selection is already open",null)
                     else {
                         fileResult=result
                         fileForAi=call.argument<Boolean>("ai_document")==true
-                        try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="*/*"; putExtra(Intent.EXTRA_MIME_TYPES,arrayOf("text/plain","text/markdown","application/json","application/pdf","image/png","image/jpeg","image/webp")) },43) }
-                        catch(_:Exception) { fileResult=null;fileForAi=false;result.error("unavailable","Document picker unavailable",null) }
+                        fileForOfficeDocx=call.argument<Boolean>("office_docx")==true
+                        val mimeTypes = arrayOf("text/plain","text/markdown","text/csv","application/json","application/pdf","image/png","image/jpeg","image/webp") + if(fileForOfficeDocx) arrayOf("application/vnd.openxmlformats-officedocument.wordprocessingml.document") else emptyArray()
+                        try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="*/*"; putExtra(Intent.EXTRA_MIME_TYPES,mimeTypes) },43) }
+                        catch(_:Exception) { fileResult=null;fileForAi=false;fileForOfficeDocx=false;result.error("unavailable","Document picker unavailable",null) }
                     }
                 }
                 "export" -> {
                     if(exportResult != null) { result.error("busy","An export is already open",null) }
                     else {
-                        exportText=call.argument<String>("text"); exportResult=result
-                        val filename = safeJsonExportName(call.argument<String>("filename"))
-                        try { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="application/json"; putExtra(Intent.EXTRA_TITLE,filename) },42) }
+                        exportText=call.argument<String>("text"); exportBytes=null; exportResult=result
+                        val mimeType = call.argument<String>("mime_type")?.takeIf { it in setOf("application/json", "text/csv") } ?: "application/json"
+                        val filename = safeDocumentExportName(call.argument<String>("filename"), if (mimeType == "text/csv") ".csv" else ".json")
+                        try { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type=mimeType; putExtra(Intent.EXTRA_TITLE,filename) },42) }
                         catch(_:Exception) { exportResult=null; exportText=null; result.error("unavailable","No document picker is available",null) }
+                    }
+                }
+                "export_bytes" -> {
+                    if(exportResult != null) { result.error("busy","An export is already open",null) }
+                    else {
+                        val bytes = call.argument<ByteArray>("bytes")
+                        if (bytes == null || bytes.isEmpty() || bytes.size > 256 * 1024) {
+                            result.error("invalid_argument","ZIP export must be between 1 byte and 256 KB",null)
+                            return@setMethodCallHandler
+                        }
+                        exportText=null; exportBytes=bytes.copyOf(); exportResult=result
+                        val filename = safeDocumentExportName(call.argument<String>("filename"), ".zip")
+                        try { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="application/zip"; putExtra(Intent.EXTRA_TITLE,filename) },42) }
+                        catch(_:Exception) { exportResult=null; exportBytes=null; result.error("unavailable","No document picker is available",null) }
                     }
                 }
                 else -> result.notImplemented()
             }
         }
     }
+    /** Run bundled, on-device Latin-script OCR over one explicitly selected image. */
+    private fun extractImageTextLocally(args: Map<*, *>, result: MethodChannel.Result) {
+        if (localOcrInFlight) {
+            result.error("busy", "An image text extraction is already running", null)
+            return
+        }
+        val bytes = args["image_bytes"] as? ByteArray
+        val mime = args["mime"] as? String
+        if (bytes == null || bytes.isEmpty() || bytes.size > MAX_LOCAL_OCR_BYTES ||
+            mime == null || !supportsLocalOcrMime(mime)) {
+            result.error("invalid_image", "Choose a JPEG, PNG or WebP image up to 12 MB", null)
+            return
+        }
+
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            result.error("invalid_image", "The selected image could not be decoded", null)
+            return
+        }
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = localOcrSampleSize(bounds.outWidth, bounds.outHeight)
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        val bitmap = try { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) }
+        catch (_: Exception) { null }
+        if (bitmap == null) {
+            result.error("invalid_image", "The selected image could not be decoded", null)
+            return
+        }
+
+        localOcrInFlight = true
+        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        try {
+            recognizer.process(InputImage.fromBitmap(bitmap, 0))
+                .addOnSuccessListener { recognized ->
+                    result.success(boundedLocalOcrText(recognized.text))
+                }
+                .addOnFailureListener { error ->
+                    result.error("ocr_failed", "On-device text extraction failed", error.javaClass.simpleName)
+                }
+                .addOnCompleteListener {
+                    localOcrInFlight = false
+                    recognizer.close()
+                    if (!bitmap.isRecycled) bitmap.recycle()
+                }
+        } catch (error: Exception) {
+            localOcrInFlight = false
+            recognizer.close()
+            if (!bitmap.isRecycled) bitmap.recycle()
+            result.error("ocr_failed", "On-device text extraction could not start", error.javaClass.simpleName)
+        }
+    }
+
+    /** Rasterize only the first bounded set of pages and OCR them on-device. */
+    private fun extractPdfTextLocally(args: Map<*, *>, result: MethodChannel.Result) {
+        if (localOcrInFlight) {
+            result.error("busy", "A local text extraction is already running", null)
+            return
+        }
+        val bytes = args["pdf_bytes"] as? ByteArray
+        val mime = args["mime"] as? String
+        if (bytes == null || bytes.isEmpty() || bytes.size > MAX_LOCAL_PDF_OCR_BYTES || mime != "application/pdf") {
+            result.error("invalid_pdf", "Choose a non-empty PDF up to 12 MB", null)
+            return
+        }
+
+        localOcrInFlight = true
+        Thread({
+            var temporary: java.io.File? = null
+            var recognizer: com.google.mlkit.vision.text.TextRecognizer? = null
+            try {
+                temporary = java.io.File.createTempFile("selected-pdf-ocr-", ".pdf", cacheDir)
+                temporary.writeBytes(bytes)
+                val descriptor = ParcelFileDescriptor.open(temporary, ParcelFileDescriptor.MODE_READ_ONLY)
+                val renderedText = StringBuilder()
+                var pagesProcessed = 0
+                var pageCount = 0
+                var truncated = false
+                descriptor.use { pfd ->
+                    PdfRenderer(pfd).use { renderer ->
+                        pageCount = renderer.pageCount
+                        val pageLimit = localPdfOcrPageLimit(pageCount)
+                        truncated = pageCount > pageLimit
+                        recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                        for (index in 0 until pageLimit) {
+                            val page = renderer.openPage(index)
+                            page.use {
+                                val dimensions = localPdfOcrBitmapSize(page.width, page.height)
+                                    ?: throw IllegalArgumentException("PDF page has invalid dimensions")
+                                val bitmap = Bitmap.createBitmap(dimensions.first, dimensions.second, Bitmap.Config.ARGB_8888)
+                                try {
+                                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                    val text = Tasks.await(
+                                        recognizer!!.process(InputImage.fromBitmap(bitmap, 0)),
+                                        15,
+                                        TimeUnit.SECONDS,
+                                    ).text
+                                    val existingText = renderedText.toString()
+                                    truncated = truncated || pdfPageTextWouldTruncate(existingText, index + 1, text)
+                                    val combined = appendBoundedPdfPage(existingText, index + 1, text)
+                                    renderedText.setLength(0)
+                                    renderedText.append(combined)
+                                    pagesProcessed++
+                                    if (renderedText.length >= MAX_LOCAL_PDF_OCR_CHARS) {
+                                        truncated = truncated || index + 1 < pageCount
+                                        break
+                                    }
+                                } finally {
+                                    if (!bitmap.isRecycled) bitmap.recycle()
+                                }
+                            }
+                        }
+                    }
+                }
+                runOnUiThread {
+                    localOcrInFlight = false
+                    result.success(mapOf(
+                        "text" to renderedText.toString(),
+                        "pages_processed" to pagesProcessed,
+                        "page_count" to pageCount,
+                        "truncated" to truncated,
+                    ))
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    localOcrInFlight = false
+                    result.error("pdf_ocr_failed", "The selected PDF could not be read locally", error.javaClass.simpleName)
+                }
+            } finally {
+                recognizer?.close()
+                temporary?.delete()
+            }
+        }, "local-pdf-ocr").start()
+    }
+
+    /** Read aggregate device metrics on demand; no polling or history is retained. */
+    private fun readSystemMonitorMetrics(): Map<String, Any?> {
+        val cpuNow = try {
+            java.io.File("/proc/stat").bufferedReader().use { reader ->
+                SystemMonitorMetrics.parseCpuTicks(reader.readLine().orEmpty())
+            }
+        } catch (_: Exception) {
+            null
+        }
+        val cpuPercent = SystemMonitorMetrics.cpuPercent(previousSystemCpuTicks, cpuNow)
+        previousSystemCpuTicks = cpuNow
+
+        val memory = try {
+            val info = ActivityManager.MemoryInfo()
+            (getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(info)
+            info.availMem.takeIf { it >= 0L } to info.totalMem.takeIf { it > 0L }
+        } catch (_: Exception) {
+            null to null
+        }
+        val storage = try {
+            val stats = StatFs(filesDir.absolutePath)
+            stats.availableBytes.takeIf { it >= 0L } to stats.totalBytes.takeIf { it > 0L }
+        } catch (_: Exception) {
+            null to null
+        }
+        val received = TrafficStats.getTotalRxBytes().takeIf { it >= 0L }
+        val sent = TrafficStats.getTotalTxBytes().takeIf { it >= 0L }
+        return mapOf(
+            "cpu_percent" to cpuPercent,
+            "memory_available_bytes" to memory.first,
+            "memory_total_bytes" to memory.second,
+            "storage_free_bytes" to storage.first,
+            "storage_total_bytes" to storage.second,
+            "network_received_bytes" to received,
+            "network_sent_bytes" to sent,
+        )
+    }
+
     private fun shareText(args: Map<*, *>, result: MethodChannel.Result) {
         val title = (args["title"] as? String)?.trim()
         val text = args["text"] as? String
@@ -633,15 +896,18 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
-    private fun safeJsonExportName(requested: String?): String {
-        val name = (requested ?: "personal-memories.json")
+    private fun safeDocumentExportName(requested: String?, extension: String): String {
+        val name = (requested ?: "personal-data")
             .substringAfterLast('/')
             .substringAfterLast('\\')
             .replace(Regex("[^A-Za-z0-9._-]"), "_")
             .trim('.', '_')
             .take(80)
             .ifBlank { "personal-data" }
-        return if (name.endsWith(".json", ignoreCase = true)) name else "$name.json"
+        val base = name.removeSuffix(".json").removeSuffix(".JSON")
+            .removeSuffix(".csv").removeSuffix(".CSV")
+            .removeSuffix(".zip").removeSuffix(".ZIP")
+        return "$base$extension"
     }
 
     private fun cleanAppLabel(value: String): String =
@@ -801,18 +1067,90 @@ class MainActivity : FlutterFragmentActivity() {
     @Deprecated("Android activity result bridge for Flutter document export")
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
         super.onActivityResult(requestCode,resultCode,data)
+        if (requestCode == 45) {
+            val result = cameraResult
+            cameraResult = null
+            if (resultCode != RESULT_OK) {
+                result?.error("cancelled", "No photo captured", null)
+                return
+            }
+            val bitmap = data?.extras?.get("data") as? Bitmap
+            if (bitmap == null) {
+                result?.error("capture_failed", "The camera did not return a photo", null)
+                return
+            }
+            try {
+                val output = ByteArrayOutputStream()
+                if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)) {
+                    throw IllegalStateException("Could not encode the camera photo")
+                }
+                val bytes = output.toByteArray()
+                if (!isValidJpegCapture(bytes)) {
+                    throw IllegalArgumentException("Camera photo is empty or exceeds the 2 MB limit")
+                }
+                result?.success(mapOf(
+                    "name" to "Camera photo",
+                    "mime" to "image/jpeg",
+                    "content_base64" to Base64.encodeToString(bytes, Base64.NO_WRAP)
+                ))
+            } catch (e: Exception) {
+                result?.error("capture_failed", e.message ?: "Could not read camera photo", null)
+            } finally {
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
+            return
+        }
+        if (requestCode == 46) {
+            val result = backupImportResult
+            backupImportResult = null
+            val uri = data?.data
+            if (resultCode != RESULT_OK || uri == null) {
+                result?.error("cancelled", "No backup selected", null)
+                return
+            }
+            try {
+                val mime = contentResolver.getType(uri)
+                if (mime != null && mime !in setOf("application/json", "text/json", "application/octet-stream")) {
+                    throw IllegalArgumentException("Choose a JSON backup file")
+                }
+                val bytes = contentResolver.openInputStream(uri)?.use { input ->
+                    val output = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    var total = 0
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        if (total > 2 * 1024 * 1024) throw IllegalArgumentException("Backup exceeds the 2 MB limit")
+                        output.write(buffer, 0, count)
+                    }
+                    output.toByteArray()
+                } ?: throw IllegalStateException("Could not read selected backup")
+                if (bytes.isEmpty()) throw IllegalArgumentException("Selected backup is empty")
+                val decoder = Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                val json = decoder.decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+                result?.success(json)
+            } catch (error: Exception) {
+                result?.error("read_failed", error.message ?: "Could not read selected backup", null)
+            }
+            return
+        }
         if(requestCode==43) {
             val result=fileResult;fileResult=null
             val forAi=fileForAi;fileForAi=false
+            val forOfficeDocx=fileForOfficeDocx;fileForOfficeDocx=false
             val uri=data?.data
             if(resultCode!=RESULT_OK || uri==null) {result?.error("cancelled","No file selected",null);return}
             try {
-                val mime=contentResolver.getType(uri) ?: "application/octet-stream"
+                val rawMime=contentResolver.getType(uri) ?: "application/octet-stream"
                 var name="Selected file"
                 contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)?.use { cursor -> if(cursor.moveToFirst()) name=cursor.getString(0) ?: name }
+                val docxMime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                val mime=if(forOfficeDocx && name.endsWith(".docx",ignoreCase=true) && rawMime in setOf("application/octet-stream","application/zip",docxMime)) docxMime else rawMime
                 val response=mutableMapOf<String,Any>("name" to name.take(200),"mime" to mime)
                 if(forAi) {
-                    if(mime !in setOf("application/pdf","image/jpeg","image/png","image/webp")) throw IllegalArgumentException("Choose a PDF or PNG, JPEG or WebP image")
+                    val allowedAiMimes = setOf("application/pdf","image/jpeg","image/png","image/webp") + if(forOfficeDocx) setOf("application/vnd.openxmlformats-officedocument.wordprocessingml.document") else emptySet()
+                    if(mime !in allowedAiMimes) throw IllegalArgumentException("Choose a PDF, supported image${if(forOfficeDocx) " or DOCX" else ""}")
                     val bytes=contentResolver.openInputStream(uri)?.use { input ->
                         val out=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192);var total=0
                         while(true) {val n=input.read(buffer);if(n<0)break;total+=n;if(total>12*1024*1024)throw IllegalArgumentException("File exceeds the 12 MB AI feature limit");out.write(buffer,0,n)}
@@ -829,7 +1167,7 @@ class MainActivity : FlutterFragmentActivity() {
                         out.toByteArray()
                     } ?: throw IllegalStateException("Could not read selected file")
                     if(mime in setOf("image/png","image/jpeg")) response["image_base64"]=Base64.encodeToString(bytes,Base64.NO_WRAP)
-                    else if(mime.startsWith("text/") || mime=="application/json") {
+                    else if(mime.startsWith("text/") || mime=="application/json" || name.endsWith(".csv", ignoreCase=true)) {
                         val decoder=Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
                         response["text"]=decoder.decode(java.nio.ByteBuffer.wrap(bytes)).toString()
                     } else response["unsupported"]="This file type has no local reader in this build. No content sent."
@@ -837,10 +1175,40 @@ class MainActivity : FlutterFragmentActivity() {
                 result?.success(response)
             } catch(e:Exception) {result?.error("read_failed",e.message ?: "Could not read file",null)}
         }
+        if(requestCode==44) {
+            val result = localMediaResult; localMediaResult = null
+            val kind = localMediaKind; localMediaKind = null
+            val uri = data?.data
+            if(resultCode != RESULT_OK || uri == null || kind == null) {
+                result?.error("cancelled", "No local file selected", null)
+                return
+            }
+            try {
+                val mime = contentResolver.getType(uri) ?: "application/octet-stream"
+                val valid = if(kind == "pdf") mime == "application/pdf" else mime.startsWith("video/")
+                if(!valid) throw IllegalArgumentException(if(kind == "pdf") "Choose a PDF file" else "Choose a video file")
+                val viewer = Intent(this, LocalMediaActivity::class.java).apply {
+                    setDataAndType(uri, mime)
+                    putExtra(LocalMediaActivity.EXTRA_KIND, kind)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    clipData = ClipData.newUri(contentResolver, "Local media", uri)
+                }
+                startActivity(viewer)
+                result?.success(mapOf("viewer_opened" to true, "shared_online" to false))
+            } catch(e: Exception) {
+                result?.error("viewer_unavailable", e.message ?: "No local viewer could be opened", null)
+            }
+            return
+        }
         if(requestCode==42) {
-            val result=exportResult; val text=exportText; exportResult=null; exportText=null
-            if(resultCode!=RESULT_OK || data?.data==null || text==null) { result?.error("cancelled","Export cancelled; no file saved",null); return }
-            try { contentResolver.openOutputStream(data.data!!,"wt")?.use { it.write(text.toByteArray(Charsets.UTF_8)); it.flush() } ?: throw IllegalStateException("Could not open destination")
+            val result=exportResult; val text=exportText; val bytes=exportBytes
+            exportResult=null; exportText=null; exportBytes=null
+            if(resultCode!=RESULT_OK || data?.data==null || (text==null && bytes==null)) { result?.error("cancelled","Export cancelled; no file saved",null); return }
+            try {
+                contentResolver.openOutputStream(data.data!!,"wt")?.use { stream ->
+                    if (bytes != null) stream.write(bytes) else stream.write(text!!.toByteArray(Charsets.UTF_8))
+                    stream.flush()
+                } ?: throw IllegalStateException("Could not open destination")
                 result?.success(mapOf("saved" to true))
             } catch(_:Exception) { result?.error("write_failed","Local data export could not be saved",null) }
         }

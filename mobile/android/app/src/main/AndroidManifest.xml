@@ -32,6 +32,11 @@
             </intent-filter>
         </activity>
         <activity
+            android:name=".LocalMediaActivity"
+            android:exported="false"
+            android:label="Local media"
+            android:theme="@style/NormalTheme" />
+        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"

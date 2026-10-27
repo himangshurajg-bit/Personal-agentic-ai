@@ -167,6 +167,91 @@ void main() {
     },
   );
 
+  test('allows optional-step removal and reordering but protects review and synthesis', () async {
+    expect(
+      MultiAgentWorkflowRunner.validStepOrder([
+        'specialist',
+        'reviewer',
+        'planner',
+        'synthesizer',
+      ]),
+      isTrue,
+    );
+    expect(
+      MultiAgentWorkflowRunner.validStepOrder(['reviewer', 'synthesizer']),
+      isTrue,
+    );
+    expect(
+      MultiAgentWorkflowRunner.validStepOrder([
+        'planner',
+        'specialist',
+        'synthesizer',
+      ]),
+      isFalse,
+    );
+    expect(
+      MultiAgentWorkflowRunner.validStepOrder([
+        'planner',
+        'reviewer',
+        'specialist',
+        'synthesizer',
+      ]),
+      isTrue,
+    );
+    expect(
+      MultiAgentWorkflowRunner.validStepOrder([
+        'planner',
+        'reviewer',
+        'reviewer',
+        'synthesizer',
+      ]),
+      isFalse,
+    );
+
+    var requests = 0;
+    final runner = MultiAgentWorkflowRunner(
+      () => MockClient((request) async {
+        requests++;
+        return sse('step-$requests');
+      }),
+    );
+    final result = await runner.run(
+      config: config(),
+      goal: 'Review a checklist',
+      approvedThisRun: true,
+      stepIds: const ['specialist', 'reviewer', 'synthesizer'],
+    );
+    expect(result.passes.map((pass) => pass.role), [
+      'Specialist',
+      'Reviewer',
+      'Synthesizer',
+    ]);
+    expect(requests, 3);
+  });
+
+  test(
+    'rejects a workflow without review before any provider request',
+    () async {
+      var requests = 0;
+      final runner = MultiAgentWorkflowRunner(
+        () => MockClient((_) async {
+          requests++;
+          return sse('unexpected');
+        }),
+      );
+      await expectLater(
+        runner.run(
+          config: config(),
+          goal: 'Plan a task',
+          approvedThisRun: true,
+          stepIds: const ['planner', 'specialist', 'synthesizer'],
+        ),
+        throwsA(isA<FormatException>()),
+      );
+      expect(requests, 0);
+    },
+  );
+
   test(
     'stops on first failed pass without retry and returns completed notes',
     () async {
