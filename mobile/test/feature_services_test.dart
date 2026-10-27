@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -69,6 +70,28 @@ void main() {
   });
 
   group('Gemini web research', () {
+    test('times out if the response body stalls after headers', () async {
+      final stalledClient = _StalledBodyClient();
+      final client = GeminiFeatureClient(
+        model: 'gemini-3.5-flash-lite',
+        apiKey: 'test-key',
+        requestTimeout: const Duration(milliseconds: 30),
+        clientFactory: () => stalledClient,
+      );
+
+      await expectLater(
+        client.research('What is a test?'),
+        throwsA(
+          isA<FeatureServiceException>().having(
+            (error) => error.message,
+            'message',
+            contains('timed out'),
+          ),
+        ),
+      );
+      expect(stalledClient.closed, isTrue);
+    });
+
     test('requests Google Search grounding and surfaces only returned HTTPS sources', () async {
       final client = GeminiFeatureClient(
         model: 'gemini-3.5-flash-lite',
@@ -191,3 +214,21 @@ void main() {
 
 http.Response httpResponse(Map<String, dynamic> body) =>
     http.Response(jsonEncode(body), 200);
+
+class _StalledBodyClient extends http.BaseClient {
+  StreamController<List<int>>? _body;
+  bool closed = false;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    _body = StreamController<List<int>>();
+    return http.StreamedResponse(_body!.stream, 200);
+  }
+
+  @override
+  void close() {
+    closed = true;
+    final body = _body;
+    if (body != null && !body.isClosed) unawaited(body.close());
+  }
+}

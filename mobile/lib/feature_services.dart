@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -161,12 +162,14 @@ class GeminiFeatureClient {
   final String apiKey;
   final String endpoint;
   final http.Client Function() clientFactory;
+  final Duration requestTimeout;
 
   const GeminiFeatureClient({
     required this.model,
     required this.apiKey,
     required this.clientFactory,
     this.endpoint = GeminiModels.modelsEndpoint,
+    this.requestTimeout = const Duration(seconds: 60),
   });
 
   void _validate() {
@@ -282,11 +285,19 @@ class GeminiFeatureClient {
   Future<FeatureAnswer> _send(http.Request request) async {
     _validate();
     final client = clientFactory();
+    final elapsed = Stopwatch()..start();
+
+    Future<T> withinRequestDeadline<T>(Future<T> operation) {
+      final remaining = requestTimeout - elapsed.elapsed;
+      if (remaining <= Duration.zero) {
+        return Future<T>.error(TimeoutException('Request timed out.'));
+      }
+      return operation.timeout(remaining);
+    }
+
     try {
-      final response = await client
-          .send(request)
-          .timeout(const Duration(seconds: 60));
-      final body = await response.stream.bytesToString();
+      final response = await withinRequestDeadline(client.send(request));
+      final body = await withinRequestDeadline(response.stream.bytesToString());
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw FeatureServiceException(
           'Gemini could not complete the request (HTTP ${response.statusCode}). Check model access and quota; nothing was retried.',
@@ -301,6 +312,10 @@ class GeminiFeatureClient {
       return FeatureAnswer.fromGenerateContent(decoded);
     } on FeatureServiceException {
       rethrow;
+    } on TimeoutException {
+      throw const FeatureServiceException(
+        'Gemini request timed out. Check your connection; the request was not retried.',
+      );
     } on FormatException {
       throw const FeatureServiceException(
         'Gemini returned an unreadable response.',
