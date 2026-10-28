@@ -2,6 +2,20 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_assistant/local_audio_preview.dart';
 
+final class _TestPlatformFile extends PlatformFile {
+  _TestPlatformFile(this.name, this.path);
+
+  @override
+  final String name;
+
+  @override
+  final String? path;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      super.noSuchMethod(invocation);
+}
+
 void main() {
   group('audioTimeLabel', () {
     test('formats minutes and seconds', () {
@@ -19,11 +33,8 @@ void main() {
   });
 
   group('localAudioTracks', () {
-    PlatformFile file(String name, String? path) => PlatformFile(
-      name: name,
-      size: 0,
-      path: path,
-    );
+    PlatformFile file(String name, String? path) =>
+        _TestPlatformFile(name, path);
 
     test('keeps only unique files with usable local paths', () {
       final tracks = localAudioTracks([
