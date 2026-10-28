@@ -7,6 +7,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+CLOUD_API_URL = 'https://api.openai.com/v1/chat/completions'
+
 SYSTEM = '''You plan tasks for a bounded personal-agent demo. Return JSON only:
 {"steps":[{"tool":"calculator","args":{"expression":"2 + 2"}}]}
 Allowed tools: calculator(expression string), notes.search(query string),
@@ -125,7 +127,7 @@ def local_runtime_version(endpoint):
         return None
 
 
-def plan_with_provider(request, provider):
+def plan_with_provider(request, provider, *, max_completion_tokens=512):
     if provider == 'demo':
         text = request.strip()
         commands = text[5:].split(';') if text.lower().startswith('goal:') else [text]
@@ -158,14 +160,16 @@ def plan_with_provider(request, provider):
             raise ValueError('Unexpected local response')
         content = payload['message'].get('content')
     elif provider == 'cloud':
+        if (type(max_completion_tokens) is not int or not 1 <= max_completion_tokens <= 512):
+            raise ValueError('Invalid cloud output limit')
         key = os.environ.get('OPENAI_API_KEY', '')
         model = os.environ.get('CLOUD_AGENT_MODEL', '')
         if not key or not model:
             raise ValueError('Set OPENAI_API_KEY and CLOUD_AGENT_MODEL; cloud may incur provider charges')
-        payload = post_json('https://api.openai.com/v1/chat/completions', {
+        payload = post_json(CLOUD_API_URL, {
             'model': model, 'messages': [{'role': 'system', 'content': SYSTEM},
                                         {'role': 'user', 'content': request}],
-            'response_format': {'type': 'json_object'}, 'max_completion_tokens': 512,
+            'response_format': {'type': 'json_object'}, 'max_completion_tokens': max_completion_tokens,
         }, {'Authorization': 'Bearer ' + key})
         try:
             content = payload['choices'][0]['message']['content']

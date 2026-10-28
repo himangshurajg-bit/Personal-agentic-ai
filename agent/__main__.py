@@ -24,6 +24,7 @@ def main():
     web = sub.add_parser('web', help='Start local-only liquid-glass interface')
     web.add_argument('--port', type=int, default=8765)
     sub.add_parser('check-local', help='Opt-in fixed-prompt local model schema check; no tools or memory')
+    sub.add_parser('check-cloud', help='Explicit one-request cloud schema smoke; may incur charges')
     notes = sub.add_parser('notes', help='Browse/filter saved notes with ID-based pagination; no model')
     notes.add_argument('--query', default='', help='Literal Unicode case-insensitive substring')
     notes.add_argument('--limit', type=int, default=20, help='Page size 1–100')
@@ -46,6 +47,11 @@ def main():
             output = check_local()
             print(json.dumps(output, indent=2, ensure_ascii=True))
             return 1 if output['status'] == 'failed' else 0
+        if args.command == 'check-cloud':
+            from .diagnostics import check_cloud
+            output = check_cloud()
+            print(json.dumps(output, indent=2, ensure_ascii=True))
+            return 1 if output['status'] in ('failed', 'unknown_outcome') else 0
         if args.command == 'web':
             from .web import serve
             serve(args.db, args.port)

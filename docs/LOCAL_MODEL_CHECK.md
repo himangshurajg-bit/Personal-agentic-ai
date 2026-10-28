@@ -1,5 +1,7 @@
 # Opt-in local model schema check
 
+For the separate explicitly authorized OpenAI cloud-provider smoke, see [CLOUD_MODEL_CHECK.md](CLOUD_MODEL_CHECK.md).
+
 Issue #2 includes a gap between fixture-tested HTTP transport and real local-model
 compatibility. `check-local` provides a repeatable, side-effect-free diagnostic for an
 already-installed Ollama-compatible runtime. It does not install a model/runtime or
@@ -80,5 +82,5 @@ note request that must not create a database. These fixtures are not real infere
 During development on 20 October 2026, no installed Ollama executable or listening
 runtime was found at the default endpoint. The actual no-model command reported
 `skipped`. No model download, paid API, emulator, Android modification or deployment
-was performed. Real-model accuracy/runtime verification and cloud verification in
+was performed. Real local-model accuracy/runtime verification and live cloud compatibility in
 issue #2 remain open; the external executor in issue #3 is unchanged and unimplemented.
