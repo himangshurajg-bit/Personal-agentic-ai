@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'main.dart' show Shell;
+
 const int maxInAppToastCodePoints = 120;
 
 /// Accepts only short, non-empty text without control characters.
@@ -85,9 +87,9 @@ class _InAppToastScreenState extends State<InAppToastScreen> {
   Widget build(BuildContext context) {
     final valid = isValidInAppToastText(_text.text);
     final colors = Theme.of(context).colorScheme;
-    return Scaffold(
-      appBar: AppBar(title: const Text('In-app toast')),
-      body: ListView(
+    return Shell(
+      title: 'In-app toast',
+      child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
           Text(
