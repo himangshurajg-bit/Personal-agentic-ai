@@ -29,6 +29,10 @@ Personal AI now adapts MYRA's source-backed `navigate_to` capability as a user-e
 
 - Wi-Fi: Personal AI has a separate user-tapped enabled-state read and Android connectivity-settings handoff; it does not toggle Wi-Fi, read network details, or claim post-settings state. See `docs/MYRA_WIFI.md`; runtime/device behavior remains unverified.
 
+### Reviewed clipboard copy
+
+Personal AI now has a manual, user-entered copy flow in Skills & actions, based on MYRA's bounded `copy_text` behavior. The person enters up to 4,000 characters, reviews the complete exact text, and only a separate approval writes it to Android's clipboard. The action does not send text to Gemini or save it in Personal AI; other apps may read clipboard contents. This is a manual adaptation, not Gemini function-call routing. The Flutter interaction has focused widget-test coverage; Android clipboard behavior has not been tested on a physical device.
+
 ### Reviewed temporary brightness
 
 Personal AI now adapts MYRA's bounded `set_brightness` feature as a user-started slider in Skills & actions. The selected 0–255 level is shown for approval and applied only to Personal AI's current Android window; the original window value is restored when the app pauses or the owner taps Restore now. It never changes system-wide brightness or requests `WRITE_SETTINGS`. Flutter interaction and range mapping have focused tests; physical screen behavior and lifecycle restoration remain unverified on a device. This is a manual app control, not Gemini function-call routing.
