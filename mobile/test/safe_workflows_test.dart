@@ -20,6 +20,9 @@ void main() {
           if (call.method == 'open_whatsapp_draft') {
             return <String, Object?>{'result': 'handoff_opened', 'sent': false};
           }
+          if (call.method == 'open_map_search') {
+            return <String, Object?>{'result': 'opened_search'};
+          }
           return null;
         });
   });
@@ -120,6 +123,60 @@ void main() {
     });
   });
 
+  testWidgets('Maps handoff uses the exact typed destination only after tap', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: MapSearchAction())),
+    );
+    expect(calls, isEmpty);
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const ValueKey('review-map-search')))
+          .onPressed,
+      isNull,
+    );
+
+    await tester.enterText(
+      find.byKey(const ValueKey('map-search-destination')),
+      '  Library, Guwahati  ',
+    );
+    await tester.pump();
+    expect(calls, isEmpty);
+    final button = find.byKey(const ValueKey('review-map-search'));
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(calls, hasLength(1));
+    expect(calls.single.method, 'open_map_search');
+    expect(calls.single.arguments, {'destination': 'Library, Guwahati'});
+    expect(find.textContaining('navigation has not started'), findsOneWidget);
+  });
+
+  testWidgets('Maps destination input is capped at 120 characters', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: MapSearchAction())),
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('map-search-destination')),
+      'x' * 121,
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextField>(
+            find.byKey(const ValueKey('map-search-destination')),
+          )
+          .controller!
+          .text
+          .length,
+      120,
+    );
+    expect(calls, isEmpty);
+  });
+
   testWidgets(
     'workflow steps can be reordered and optional steps removed/restored',
     (tester) async {
@@ -190,6 +247,11 @@ void main() {
       expect(find.text('Open a study app'), findsOneWidget);
       expect(find.text('Prepare a study reminder'), findsOneWidget);
       expect(find.text('Turn flashlight off'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('map-search-destination')),
+        findsOneWidget,
+      );
+      expect(find.text('Review and open Maps'), findsOneWidget);
       expect(
         find.textContaining('Android asks for approval first'),
         findsOneWidget,

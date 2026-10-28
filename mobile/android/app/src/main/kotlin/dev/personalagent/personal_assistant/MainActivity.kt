@@ -626,6 +626,10 @@ class MainActivity : FlutterFragmentActivity() {
                     }
                 }
                 "turn_torch_off" -> reviewTorchOff(result)
+                "open_map_search" -> reviewAndOpenMapSearch(
+                    call.argument<Any>("destination"),
+                    result,
+                )
                 "open_whatsapp_draft" -> reviewAndOpenWhatsAppDraft(
                     call.argument<Any>("number"),
                     call.argument<Any>("message"),
@@ -1216,6 +1220,30 @@ class MainActivity : FlutterFragmentActivity() {
         pendingTorchOffResult = null
         stopTorchOffObservation()
         result.error("torch_off_unconfirmed", message, null)
+    }
+
+    private fun reviewAndOpenMapSearch(rawDestination: Any?, result: MethodChannel.Result) {
+        val request = MapSearchRequestParser.parse(rawDestination)
+        if (request == null) {
+            result.error("invalid_argument", "Enter one destination up to 120 characters", null)
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Review Maps search")
+            .setMessage("Open this exact destination in a map app?\n\n${request.destination}\n\nPersonal AI will not read your location or start navigation.")
+            .setNegativeButton("Cancel") { _, _ ->
+                result.success(mapOf("result" to "cancelled"))
+            }
+            .setPositiveButton("Open Maps search") { _, _ ->
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(request.uri)))
+                    result.success(mapOf("result" to "opened_search"))
+                } catch (_: Exception) {
+                    result.error("unavailable", "No map app could open this destination", null)
+                }
+            }
+            .setOnCancelListener { result.success(mapOf("result" to "cancelled")) }
+            .show()
     }
 
     private fun shareText(args: Map<*, *>, result: MethodChannel.Result) {

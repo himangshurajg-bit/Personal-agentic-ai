@@ -70,7 +70,8 @@ void main() {
         await tester.scrollUntilVisible(
           screenEvidence,
           240,
-          scrollable: find.byType(Scrollable).last,
+          // Skills now contains a horizontal TextField scrollable; target the page list.
+          scrollable: find.byType(Scrollable).first,
         );
         await tester.pumpAndSettle();
         expect(screenEvidence, findsOneWidget);

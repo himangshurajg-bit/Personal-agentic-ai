@@ -190,6 +190,103 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
   }
 }
 
+/// A user-entered destination is reviewed by Android before Maps is opened.
+class MapSearchAction extends StatefulWidget {
+  const MapSearchAction({super.key});
+
+  @override
+  State<MapSearchAction> createState() => _MapSearchActionState();
+}
+
+class _MapSearchActionState extends State<MapSearchAction> {
+  static const _device = MethodChannel('personal_assistant/device');
+  final _destination = TextEditingController();
+  bool _opening = false;
+
+  @override
+  void dispose() {
+    _destination.dispose();
+    super.dispose();
+  }
+
+  Future<void> _reviewAndOpen() async {
+    final destination = _destination.text.trim();
+    if (_opening ||
+        destination.isEmpty ||
+        destination.length > 120 ||
+        destination.contains(RegExp(r'[\x00-\x1f\x7f]'))) {
+      return;
+    }
+    setState(() => _opening = true);
+    try {
+      final response = await _device.invokeMethod<Object?>('open_map_search', {
+        'destination': destination,
+      });
+      if (mounted && response is Map && response['result'] == 'opened_search') {
+        notice(
+          context,
+          'Android opened a map search. Choose what to do there; navigation has not started.',
+        );
+      }
+    } on PlatformException catch (error) {
+      if (mounted) {
+        notice(
+          context,
+          error.message ?? 'Android could not open a map search.',
+        );
+      }
+    } on MissingPluginException {
+      if (mounted) {
+        notice(context, 'Map search is available in the Android app only.');
+      }
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final value = _destination.text.trim();
+    final valid =
+        value.isNotEmpty &&
+        value.length <= 120 &&
+        !value.contains(RegExp(r'[\x00-\x1f\x7f]'));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          key: const ValueKey('map-search-destination'),
+          controller: _destination,
+          maxLength: 120,
+          decoration: const InputDecoration(
+            labelText: 'Place or address',
+            hintText: 'Enter a destination to search in Maps',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 8),
+        FilledButton.icon(
+          key: const ValueKey('review-map-search'),
+          onPressed: valid && !_opening ? _reviewAndOpen : null,
+          icon: _opening
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.map_outlined),
+          label: const Text('Review and open Maps'),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Android shows the exact destination for approval first. It opens a map search only; no location is read and navigation does not start automatically.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+    );
+  }
+}
+
 /// This action begins only from a user's tap; Android shows a separate approval
 /// dialog before it requests camera permission or changes the torch state.
 class TorchOffAction extends StatefulWidget {
@@ -297,6 +394,8 @@ class SafeSkillsScreen extends StatelessWidget {
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Home(state: state).reminder(context),
               ),
+              const Divider(),
+              const MapSearchAction(),
               const Divider(),
               const TorchOffAction(),
               const Divider(),
