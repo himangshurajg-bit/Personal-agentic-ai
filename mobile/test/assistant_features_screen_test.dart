@@ -16,6 +16,10 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           calls.add(call);
+          if (call.method == 'list_user_downloads') return <Object?>[];
+          if (call.method == 'enqueue_user_download') {
+            return <String, Object?>{'id': 21, 'file_name': 'report.pdf'};
+          }
           return <String, Object?>{
             'chooser_opened': true,
             'shared_online': false,
@@ -26,6 +30,50 @@ void main() {
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
+  });
+
+  testWidgets('download is not enqueued until exact URL review is approved', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: FeaturesScreen(
+          state: AssistantState(),
+          onReminder: (context, value) async {},
+          initialTab: 9,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byType(TextField).first,
+      'https://example.com/report.pdf',
+    );
+    await tester.pump();
+    expect(
+      calls.where((call) => call.method == 'enqueue_user_download'),
+      isEmpty,
+    );
+    await tester.tap(find.text('Review and download'));
+    await tester.pumpAndSettle();
+    expect(find.text('Review download'), findsOneWidget);
+    expect(
+      find.textContaining('https://example.com/report.pdf'),
+      findsNWidgets(2),
+    );
+    expect(
+      calls.where((call) => call.method == 'enqueue_user_download'),
+      isEmpty,
+    );
+    await tester.tap(find.text('Start download'));
+    await tester.pumpAndSettle();
+    final enqueue = calls
+        .where((call) => call.method == 'enqueue_user_download')
+        .single;
+    expect(enqueue.arguments, {
+      'url': 'https://example.com/report.pdf',
+      'file_name': 'report.pdf',
+    });
   });
 
   testWidgets('local PDF and video viewing stays separate from Gemini upload', (
