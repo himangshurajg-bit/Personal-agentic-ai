@@ -1,0 +1,32 @@
+# Personal AI paired screen-share receiver (prototype contract)
+
+This receiver accepts an explicit stream from one paired sender. It does not capture a screen, start Android `MediaProjection`, save frames, or implement a viewer UI. A sender must get Android's per-session MediaProjection approval and run its foreground service before it connects. A text field or client-supplied `media_projection_consent: true` is only a protocol assertion; the server cannot prove the Android system dialog was granted.
+
+## Security and lifecycle
+
+- Receiver controls and frame reads require the existing `Authorization: Bearer $ASSISTANT_TOKEN`. The service rejects browser `Origin` headers; pairing and streaming clients must be native or trusted clients.
+- The receiver creates a 192-bit random, one-use pairing code that expires after five minutes. The service stores only its SHA-256 hash, allows one redemption, caps incorrect/redeem attempts, and returns a separate random sender token once. Never put either value in a URL, logs, analytics, screenshots, or persistent diagnostics.
+- The sender token is scoped to that pairing, stored only as a hash, expires after 30 days, and is revoked when the receiver revokes the pairing. It is not the service's owner token.
+- Pairing alone does not authorize screen content. Every sender-created session remains `awaiting_receiver_approval` until the receiver explicitly approves that exact session. One pending/active session per paired sender; at most two pending/active sessions for this single-user process.
+- The stream route checks the pairing token in the WebSocket `Authorization` header before accepting. The first text message must declare an explicit start after OS consent and a foreground service; subsequent messages must be bounded JPEG binary frames. No frame is accepted before receiver approval.
+- The owner can stop one session or revoke a pairing. Both clear the in-memory latest frame and close the sending WebSocket. The sender must treat disconnect/close as a stop signal and call `MediaProjection.stop()` / stop its foreground service. Android's `MediaProjection.Callback.onStop` must likewise terminate its local encoder and socket.
+- Pairings, sessions and the latest frame are held only in service-process memory. Restart clears them and disconnects streams; no frame is written to SQLite, a file or the model.
+
+## HTTP contract
+
+All URLs are relative to the private service origin. Use HTTPS/WSS whenever traffic leaves a trusted local device/network; the current development service binds to loopback and has no remote/TLS deployment setup. The caller must not expose this prototype directly to the public Internet.
+
+1. Receiver: `POST /screen-share/pairings` with the owner bearer token. Response includes `pairing_id`, one-time `pairing_code`, `expires_in_seconds`, and state. Display the code only in the receiver's deliberate pairing flow.
+2. Sender: `POST /screen-share/pairings/redeem` with `{ "pairing_id": "…", "pairing_code": "…", "sender_label": "MYRA on this device" }`. The code is a short-lived capability credential. Response returns the pairing-scoped `sender_token` exactly once. Receiver can view state/label using `GET /screen-share/pairings`.
+3. Sender: `POST /screen-share/sessions` with `{ "pairing_id": "…" }` and `Authorization: Bearer <sender_token>`. Response is pending. Poll `GET /screen-share/sessions/{session_id}/status` with the same sender token until `approved`, `stopped`, `expired`, or `revoked/unauthorized`.
+4. Receiver: inspect `GET /screen-share/sessions` with the owner token, then explicitly approve that session at `POST /screen-share/sessions/{session_id}/approve`. Never auto-approve based only on pairing or sender name.
+5. Sender: only after the receiver has approved, invoke Android's MediaProjection system consent UI. If granted, start the Android foreground service and open `wss://<service>/screen-share/sessions/{session_id}/stream` with the pairing-scoped bearer header. Send one first text JSON message exactly shaped as `{ "type":"start", "media_projection_consent":true, "foreground_service":true, "width":1080, "height":2400, "fps":5 }`. The server replies `{ "type":"ready", ... }`; then send JPEGs as binary WebSocket messages. Dimensions are bounded to ≤4096 per side and ≤8,294,400 pixels; fps is 1–5; each JPEG is ≤1,500,000 bytes. Only valid-looking JPEG start/end markers are checked here; a future Android viewer must decode untrusted JPEGs safely and use sampled/bounded decoding.
+6. Receiver viewer: poll `GET /screen-share/sessions/{session_id}/frame?after_sequence=<last-sequence>` with the owner bearer token. A new image returns `image/jpeg`, `Cache-Control: no-store`, and `X-Frame-Sequence`; `204` means no newer fresh frame; stopped/inactive sessions return `409`. The latest frame is kept only in memory and considered stale after ten seconds. This endpoint is a latest-frame pull contract, not an Android viewer screen or a low-latency playback UI.
+7. Either side may stop: receiver `POST /screen-share/sessions/{session_id}/stop` with owner token, or sender `POST /screen-share/sessions/{session_id}/end` with sender token. Receiver can revoke a paired device at `POST /screen-share/pairings/{pairing_id}/revoke`.
+
+## Still required before real use
+
+- Implement a receiver-side pairing/status/approval/viewer UI in Personal AI and a sender-side QR/code entry plus MediaProjection foreground service in MYRA; no capture/sender implementation is included here.
+- Ensure transport is HTTPS/WSS on an owner-controlled reachable service, with firewall/network policy and token-safe logging; the current loopback dev service cannot receive from a separate Android device.
+- Validate Android 14+ MediaProjection consent, foreground service type, lifecycle stop callbacks, reconnection/rotation behavior, and display on the actual devices. No Android build, end-to-end test, emulator/device check, or live screen display is claimed by this contract.
+- Add integration tests for real TLS/network deployment and client decoding before enabling this in a release.

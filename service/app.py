@@ -15,9 +15,19 @@ from pathlib import Path
 from typing import Annotated, AsyncIterator, Literal, Protocol, Union
 import re
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+try:  # support both `service.app` and the existing tests' `app` import path
+    from .screen_share import (
+        CreateShareSessionRequest, PairingRedeemRequest, ScreenShareRegistry,
+        authenticate_stream, close_socket, run_sender_stream,
+    )
+except ImportError:  # pragma: no cover - used when service/ is directly on sys.path
+    from screen_share import (
+        CreateShareSessionRequest, PairingRedeemRequest, ScreenShareRegistry,
+        authenticate_stream, close_socket, run_sender_stream,
+    )
 
 class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -335,6 +345,8 @@ def create_app(path=None, provider=None, token=None, voice_provider=None, image_
     app.state.provider_configured=not isinstance(provider, Unconfigured)
     app.state.voice_provider=voice_provider
     app.state.image_provider=image_provider
+    screen_share=ScreenShareRegistry()
+    app.state.screen_share=screen_share
     image_calls=deque()
     calls=defaultdict(deque)
     voice_calls=deque()
@@ -444,6 +456,88 @@ def create_app(path=None, provider=None, token=None, voice_provider=None, image_
         with store.db() as db: found=db.execute("DELETE FROM memories WHERE id=?",(id,)).rowcount
         if not found: raise HTTPException(404,"Memory not found")
         return {"deleted":True}
+    # Screen-share pairing uses a one-use capability code. The ordinary ASSISTANT_TOKEN
+    # remains required for receiver controls and frame reads; the sender gets only a
+    # short-lived, pairing-scoped token. No frame is accepted before per-session approval.
+    @app.post("/screen-share/pairings")
+    async def create_screen_share_pairing(_=Depends(auth)):
+        return await screen_share.create_pairing()
+
+    @app.post("/screen-share/pairings/redeem")
+    async def redeem_screen_share_pairing(body:PairingRedeemRequest, request:Request):
+        if request.headers.get("origin"):
+            raise HTTPException(403,"Browser origins are not enabled")
+        source=request.client.host if request.client else "unknown"
+        await screen_share.allow_redeem_attempt(source)
+        return await screen_share.redeem_pairing(body.pairing_id,body.pairing_code,body.sender_label)
+
+    @app.get("/screen-share/pairings")
+    async def list_screen_share_pairings(_=Depends(auth)):
+        return await screen_share.pairings()
+
+    @app.post("/screen-share/pairings/{pairing_id}/revoke")
+    async def revoke_screen_share_pairing(pairing_id:str,_=Depends(auth)):
+        result,socket=await screen_share.revoke_pairing(pairing_id)
+        await close_socket(socket)
+        return result
+
+    @app.post("/screen-share/sessions")
+    async def request_screen_share_session(body:CreateShareSessionRequest,request:Request):
+        if request.headers.get("origin"):
+            raise HTTPException(403,"Browser origins are not enabled")
+        await screen_share.authenticate_sender(body.pairing_id,request.headers.get("authorization"))
+        return await screen_share.create_session(body.pairing_id)
+
+    @app.get("/screen-share/sessions")
+    async def list_screen_share_sessions(_=Depends(auth)):
+        return await screen_share.sessions()
+
+    @app.get("/screen-share/sessions/{session_id}/status")
+    async def screen_share_sender_status(session_id:str,request:Request):
+        if request.headers.get("origin"):
+            raise HTTPException(403,"Browser origins are not enabled")
+        return await screen_share.sender_session_status(session_id,request.headers.get("authorization"))
+
+    @app.post("/screen-share/sessions/{session_id}/approve")
+    async def approve_screen_share_session(session_id:str,_=Depends(auth)):
+        return await screen_share.approve_session(session_id)
+
+    @app.post("/screen-share/sessions/{session_id}/stop")
+    async def stop_screen_share_session(session_id:str,_=Depends(auth)):
+        result,socket=await screen_share.stop_session(session_id)
+        await close_socket(socket)
+        return result
+
+    @app.post("/screen-share/sessions/{session_id}/end")
+    async def end_screen_share_from_sender(session_id:str,request:Request):
+        if request.headers.get("origin"):
+            raise HTTPException(403,"Browser origins are not enabled")
+        result,socket=await screen_share.stop_session_as_sender(session_id,request.headers.get("authorization"))
+        await close_socket(socket)
+        return result
+
+    @app.get("/screen-share/sessions/{session_id}/frame")
+    async def latest_screen_share_frame(session_id:str,after_sequence:int=0,_=Depends(auth)):
+        if after_sequence < 0:
+            raise HTTPException(422,"after_sequence must be nonnegative")
+        frame=await screen_share.frame(session_id,after_sequence)
+        if frame is None:
+            return Response(status_code=204,headers={"Cache-Control":"no-store"})
+        data,sequence=frame
+        return Response(
+            data,media_type="image/jpeg",
+            headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff",
+                     "X-Frame-Sequence":str(sequence)},
+        )
+
+    @app.websocket("/screen-share/sessions/{session_id}/stream")
+    async def receive_screen_share_stream(ws:WebSocket,session_id:str):
+        scope=await authenticate_stream(ws,screen_share,session_id)
+        if scope is None:
+            return
+        session,pairing=scope
+        await run_sender_stream(ws,screen_share,session,pairing)
+
     @app.post("/actions/prepare")
     async def prepare(body:Prepare,_=Depends(auth)):
         id=secrets.token_hex(12); approval=secrets.token_urlsafe(32); payload=json.dumps(body.action.model_dump(),sort_keys=True)

@@ -78,3 +78,7 @@ uv run --project service pytest service/tests -q
 The tests cover auth/origins, strict schemas, persisted history, conversation-scoped factual selection and forgetting, unconfigured/provider errors, opt-in Cloudflare selection and mocked image generation, rate limits, expired/used approvals and device-reported results. The client suite separately exercises weak/disconnected streams, status failures, timeout cancellation and denied-permission flows with mocks. No test-provider response should be described as a real AI conversation or physical-device result.
 
 Forgetting a saved memory deletes that record only. It does not erase facts already present in conversation history; delete that conversation separately if needed. Exported JSON files are outside the memory database and must be handled by their owner.
+
+## Paired screen-share receiver prototype
+
+The private service includes an opt-in paired receiver contract for an external Android sender. It requires a one-use expiring pairing code, sender-scoped credentials, and per-session receiver approval; frames remain in memory and are never saved. It does not capture screens, grant MediaProjection, or include an Android receiver UI. Read [`docs/SCREEN_SHARE_RECEIVER.md`](../docs/SCREEN_SHARE_RECEIVER.md) for the protocol, security boundaries, and outstanding integration/device work. The development server is loopback-only; do not expose these routes over a network without HTTPS/WSS, owner-controlled access, and client lifecycle validation.
