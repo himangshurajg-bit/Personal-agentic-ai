@@ -61,9 +61,11 @@ void main() {
       for (final entry in [
         ('Skills & actions', 'What the team can and can’t do'),
         ('Message & social drafts', 'Write it here, send it yourself'),
+        ('In-app toast', 'Show a short message'),
       ]) {
         await tester.tap(find.byTooltip('Open navigation menu'));
         await tester.pumpAndSettle();
+        await _scrollDrawerUntilVisible(tester, entry.$1);
         await tester.tap(find.text(entry.$1).last);
         await tester.pumpAndSettle();
         final screenEvidence = find.text(entry.$2);
@@ -78,27 +80,22 @@ void main() {
         expect(tester.takeException(), isNull, reason: 'Entering ${entry.$1}');
       }
 
-      var chatUsesDrawer = false;
       for (final label in ['Chat', 'Memory', 'Settings', 'Home', 'Memory']) {
-        if (chatUsesDrawer) {
-          await tester.tap(find.byTooltip('Open navigation menu'));
-          await tester.pumpAndSettle();
-          if (label == 'Memory' || label == 'Settings') {
-            await _scrollDrawerUntilVisible(tester, label);
-          }
-          await tester.tap(find.text(label).last);
-        } else {
-          await tester.tap(find.text(label).last);
-        }
+        await tester.tap(find.byTooltip('Open navigation menu'));
+        await tester.pumpAndSettle();
+        await _scrollDrawerUntilVisible(tester, label);
+        final drawerItem = find.descendant(
+          of: find.byKey(const Key('navigation-drawer-list')),
+          matching: find.text(label),
+        );
+        await tester.tap(drawerItem.last);
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull, reason: 'Entering $label');
         if (label == 'Chat') {
           expect(find.text('Chat'), findsNothing);
           expect(find.byTooltip('Start a voice conversation'), findsNothing);
-          chatUsesDrawer = true;
         } else if (label == 'Memory') {
           expect(find.text('Synthetic navigation memory'), findsOneWidget);
-          chatUsesDrawer = false;
         }
       }
       await tester.pumpWidget(const SizedBox());
@@ -114,15 +111,14 @@ Future<void> _scrollDrawerUntilVisible(
 ) async {
   final list = find.byKey(const Key('navigation-drawer-list'));
   final item = find.descendant(of: list, matching: find.text(label));
-  final screenSize = tester.view.physicalSize / tester.view.devicePixelRatio;
-  final screen = Offset.zero & screenSize;
-  for (var attempt = 0; attempt < 12; attempt++) {
-    if (item.evaluate().isNotEmpty && screen.contains(tester.getCenter(item))) {
-      return;
-    }
-    await tester.drag(list, const Offset(0, -220));
-    await tester.pumpAndSettle();
-  }
-  expect(item, findsOneWidget);
-  expect(screen.contains(tester.getCenter(item)), isTrue);
+  // ListView lazily builds offscreen drawer rows, so scroll the drawer's own
+  // viewport until the requested item exists and is visible.
+  await tester.scrollUntilVisible(
+    item,
+    240,
+    scrollable: find.descendant(of: list, matching: find.byType(Scrollable)).first,
+  );
+  await tester.pumpAndSettle();
+  final listRect = tester.getRect(list);
+  expect(listRect.contains(tester.getCenter(item)), isTrue);
 }

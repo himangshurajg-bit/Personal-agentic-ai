@@ -13,9 +13,11 @@ import 'local_web_projects_screen.dart';
 import 'system_monitor_screen.dart';
 import 'focus_timer_screen.dart';
 import 'system_clock_timer_screen.dart';
+import 'wifi_settings_screen.dart';
 import 'journal_screen.dart';
 import 'office_document.dart';
 import 'download_input.dart';
+import 'download_review.dart';
 import 'clipboard_preview_screen.dart';
 
 const _featureVoiceEvents = MethodChannel('personal_assistant/feature_voice');
@@ -35,7 +37,7 @@ class FeaturesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DefaultTabController(
     initialIndex: initialTab,
-    length: 11,
+    length: 12,
     child: Scaffold(
       appBar: AppBar(
         title: const Text('Assistant tools'),
@@ -55,6 +57,7 @@ class FeaturesScreen extends StatelessWidget {
             Tab(icon: Icon(Icons.edit_note_rounded), text: 'Journal'),
             Tab(icon: Icon(Icons.alarm_add_rounded), text: 'Clock timer'),
             Tab(icon: Icon(Icons.download_outlined), text: 'Downloads'),
+            Tab(icon: Icon(Icons.wifi_rounded), text: 'Wi-Fi'),
             Tab(icon: Icon(Icons.content_paste_outlined), text: 'Clipboard'),
           ],
         ),
@@ -71,6 +74,7 @@ class FeaturesScreen extends StatelessWidget {
           JournalScreen(state: state),
           const SystemClockTimerScreen(),
           const _DownloadsFeature(),
+          const WifiSettingsScreen(),
           const ClipboardPreviewScreen(),
         ],
       ),
@@ -136,26 +140,8 @@ class _DownloadsFeatureState extends State<_DownloadsFeature> {
       );
       return;
     }
-    final approved = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Review download'),
-        content: SelectableText(
-          'Download ${parsed.fileName} from:\n${parsed.url}\n\nThis uses network data and may incur charges. The file will be stored in Personal AI’s app-specific Downloads folder.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Start download'),
-          ),
-        ],
-      ),
-    );
-    if (approved != true || !mounted) return;
+    final approved = await reviewDownload(context, parsed);
+    if (!approved || !mounted) return;
     setState(() {
       _starting = true;
       _message = 'Starting download…';

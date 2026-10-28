@@ -347,6 +347,160 @@ class _TorchOffActionState extends State<TorchOffAction> {
   );
 }
 
+/// A user-started haptic test, adapted from MYRA's bounded vibration action.
+class HapticPulseAction extends StatefulWidget {
+  const HapticPulseAction({super.key});
+
+  @override
+  State<HapticPulseAction> createState() => _HapticPulseActionState();
+}
+
+class _HapticPulseActionState extends State<HapticPulseAction> {
+  bool _running = false;
+
+  Future<void> _pulse() async {
+    if (_running) return;
+    setState(() => _running = true);
+    try {
+      await HapticFeedback.vibrate();
+      if (mounted) {
+        notice(context, 'Requested one short haptic pulse.');
+      }
+    } on PlatformException {
+      if (mounted) {
+        notice(context, 'This device did not provide haptic feedback.');
+      }
+    } finally {
+      if (mounted) setState(() => _running = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+    key: const ValueKey('haptic-pulse-action'),
+    contentPadding: EdgeInsets.zero,
+    leading: _running
+        ? const SizedBox.square(
+            dimension: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : const Icon(Icons.vibration_outlined),
+    title: const Text('Test haptic feedback'),
+    subtitle: const Text(
+      'Tap to request one short pulse. Android may ignore it if vibration is unavailable or disabled.',
+    ),
+    trailing: const Icon(Icons.chevron_right_rounded),
+    onTap: _running ? null : _pulse,
+  );
+}
+
+/// Copies only user-entered text, after a full-text review and explicit approval.
+class CopyTextAction extends StatefulWidget {
+  const CopyTextAction({super.key});
+
+  @override
+  State<CopyTextAction> createState() => _CopyTextActionState();
+}
+
+class _CopyTextActionState extends State<CopyTextAction> {
+  final _text = TextEditingController();
+  bool _copying = false;
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  Future<void> _reviewAndCopy() async {
+    final exactText = _text.text;
+    if (_copying || exactText.isEmpty || exactText.length > 4000) return;
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Review clipboard text'),
+        scrollable: true,
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Copy this exact text to Android’s clipboard?'),
+            const SizedBox(height: 12),
+            SelectableText(
+              exactText,
+              key: const ValueKey('clipboard-review-text'),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Other apps may be able to read clipboard contents. Personal AI will not save this text.',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('approve-clipboard-copy'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Copy this text'),
+          ),
+        ],
+      ),
+    ) ??
+    false;
+    if (!approved || !mounted) return;
+    setState(() => _copying = true);
+    try {
+      await Clipboard.setData(ClipboardData(text: exactText));
+      if (mounted) notice(context, 'Copied the reviewed text to the clipboard.');
+    } on PlatformException {
+      if (mounted) notice(context, 'Android could not copy the text.');
+    } on MissingPluginException {
+      if (mounted) notice(context, 'Clipboard copy is available on Android only.');
+    } finally {
+      if (mounted) setState(() => _copying = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      TextField(
+        key: const ValueKey('clipboard-copy-text'),
+        controller: _text,
+        maxLength: 4000,
+        maxLines: 4,
+        decoration: const InputDecoration(
+          labelText: 'Text to copy',
+          hintText: 'Enter the exact text you want on your clipboard',
+          border: OutlineInputBorder(),
+        ),
+        onChanged: (_) => setState(() {}),
+      ),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: OutlinedButton.icon(
+          key: const ValueKey('review-clipboard-copy'),
+          onPressed:
+              _text.text.isNotEmpty && _text.text.length <= 4000 && !_copying
+              ? _reviewAndCopy
+              : null,
+          icon: const Icon(Icons.content_copy_rounded),
+          label: const Text('Review and copy text'),
+        ),
+      ),
+      const SizedBox(height: 6),
+      Text(
+        'Nothing is copied until you approve the exact text. Other apps may read clipboard contents.',
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+    ],
+  );
+}
+
 /// First-party skills are limited to the already-reviewed local actions.
 class SafeSkillsScreen extends StatelessWidget {
   final AssistantState state;
@@ -398,6 +552,10 @@ class SafeSkillsScreen extends StatelessWidget {
               const MapSearchAction(),
               const Divider(),
               const TorchOffAction(),
+              const Divider(),
+              const HapticPulseAction(),
+              const Divider(),
+              const CopyTextAction(),
               const Divider(),
               ListTile(
                 key: const ValueKey('multi-agent-workflow-entry'),

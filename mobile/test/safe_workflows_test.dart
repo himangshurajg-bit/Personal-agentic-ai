@@ -178,6 +178,127 @@ void main() {
   });
 
   testWidgets(
+    'clipboard is written only after exact-text approval',
+    (tester) async {
+      final clipboardWrites = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+            if (call.method == 'Clipboard.setData') {
+              clipboardWrites.add((call.arguments as Map)['text'] as String);
+            }
+            return null;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(SystemChannels.platform, null);
+      });
+
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: CopyTextAction())),
+      );
+      expect(clipboardWrites, isEmpty);
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.byKey(const ValueKey('review-clipboard-copy')),
+            )
+            .onPressed,
+        isNull,
+      );
+      const exactText = '  Keep this exact\nline.  ';
+      await tester.enterText(
+        find.byKey(const ValueKey('clipboard-copy-text')),
+        exactText,
+      );
+      await tester.pump();
+      expect(clipboardWrites, isEmpty);
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('review-clipboard-copy')),
+      );
+      await tester.tap(find.byKey(const ValueKey('review-clipboard-copy')));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Copy this exact text to Android’s clipboard?'),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('clipboard-review-text')), findsOneWidget);
+      expect(clipboardWrites, isEmpty);
+
+      await tester.tap(find.byKey(const ValueKey('approve-clipboard-copy')));
+      await tester.pumpAndSettle();
+      expect(clipboardWrites, [exactText]);
+      expect(find.text('Copied the reviewed text to the clipboard.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'clipboard cancellation makes no system write',
+    (tester) async {
+    final writes = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'Clipboard.setData') {
+            writes.add((call.arguments as Map)['text'] as String);
+          }
+          return null;
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: CopyTextAction())),
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('clipboard-copy-text')),
+      'Do not copy unless approved.',
+    );
+    await tester.pump();
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('review-clipboard-copy')),
+    );
+    await tester.tap(find.byKey(const ValueKey('review-clipboard-copy')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+      expect(writes, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'clipboard text input is bounded to 4000 characters',
+    (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: CopyTextAction())),
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('clipboard-copy-text')),
+        'x' * 4001,
+      );
+      await tester.pump();
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('clipboard-copy-text')),
+            )
+            .controller!
+            .text
+            .length,
+        4000,
+      );
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.byKey(const ValueKey('review-clipboard-copy')),
+            )
+            .onPressed,
+        isNotNull,
+      );
+    },
+  );
+
+  testWidgets(
     'workflow steps can be reordered and optional steps removed/restored',
     (tester) async {
       final state = AssistantState();
@@ -237,6 +358,32 @@ void main() {
     },
   );
 
+  testWidgets('haptic test requests feedback only after an explicit tap', (
+    tester,
+  ) async {
+    final hapticCalls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method.startsWith('HapticFeedback.')) {
+            hapticCalls.add(call);
+          }
+          return null;
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: HapticPulseAction())),
+    );
+    expect(hapticCalls, isEmpty);
+    await tester.tap(find.byKey(const ValueKey('haptic-pulse-action')));
+    await tester.pumpAndSettle();
+    expect(hapticCalls.map((call) => call.method), ['HapticFeedback.vibrate']);
+    expect(find.text('Requested one short haptic pulse.'), findsOneWidget);
+  });
+
   testWidgets(
     'skills page exposes local actions and a bounded multi-agent workflow',
     (tester) async {
@@ -247,6 +394,8 @@ void main() {
       expect(find.text('Open a study app'), findsOneWidget);
       expect(find.text('Prepare a study reminder'), findsOneWidget);
       expect(find.text('Turn flashlight off'), findsOneWidget);
+      expect(find.text('Test haptic feedback'), findsOneWidget);
+      expect(find.byKey(const ValueKey('clipboard-copy-text')), findsOneWidget);
       expect(
         find.byKey(const ValueKey('map-search-destination')),
         findsOneWidget,

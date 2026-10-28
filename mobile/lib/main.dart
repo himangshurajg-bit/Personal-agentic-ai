@@ -22,12 +22,16 @@ import 'phone_screens.dart';
 import 'safe_workflows.dart';
 import 'image_generation_screen.dart';
 import 'assistant_features_screen.dart';
+import 'download_input.dart';
+import 'download_review.dart';
+import 'spoken_download_command.dart';
 import 'feature_services.dart';
 import 'ui_motion.dart';
 import 'typing_indicator.dart';
 import 'visual_theme.dart';
 import 'voice_services.dart';
 import 'live_conversation.dart';
+import 'in_app_toast_screen.dart';
 import 'readable_math.dart';
 
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -261,6 +265,7 @@ class _AssistantAppState extends State<AssistantApp>
           '/automations': (_) => ActionHistory(state: widget.state),
           '/drafts': (_) => const OutboundDraftsScreen(),
           '/skills': (_) => SafeSkillsScreen(state: widget.state),
+          '/in-app-toast': (_) => const InAppToastScreen(),
           '/images': (_) => ImageGenerationScreen(
             endpoint: widget.state.endpoint,
             token: widget.state.token,
@@ -438,7 +443,17 @@ class Shell extends StatelessWidget {
                 ),
               ),
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        actions: actions,
+        actions: [
+          if (primaryNavigation && canPop)
+            Builder(
+              builder: (drawerContext) => IconButton(
+                tooltip: 'Open navigation menu',
+                onPressed: () => Scaffold.of(drawerContext).openDrawer(),
+                icon: const Icon(Icons.menu_rounded),
+              ),
+            ),
+          ...?actions,
+        ],
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         scrolledUnderElevation: 0,
@@ -838,6 +853,12 @@ class _AssistantDrawer extends StatelessWidget {
                     label: 'Skills & actions',
                     selected: _selected('/skills'),
                     onTap: () => _go(context, '/skills'),
+                  ),
+                  _DrawerRow(
+                    icon: Icons.message_outlined,
+                    label: 'In-app toast',
+                    selected: _selected('/in-app-toast'),
+                    onTap: () => _go(context, '/in-app-toast'),
                   ),
                   _DrawerRow(
                     icon: Icons.edit_note_rounded,
@@ -3925,6 +3946,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       while (_liveConversationActive && _liveTurnQueue.isNotEmpty) {
         final turn = _liveTurnQueue.removeAt(0);
+        final download = SpokenDownloadCommand.parse(turn);
+        if (download != null) {
+          await _reviewAndStartLiveDownload(download);
+          continue;
+        }
         await widget.state.send(
           turn,
           shareMemories: widget.state.shareMemories,
@@ -3948,6 +3974,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     } finally {
       _liveTurnProcessing = false;
+    }
+  }
+
+  Future<void> _reviewAndStartLiveDownload(DownloadInput download) async {
+    final approved = await reviewDownload(context, download);
+    if (!approved || !mounted || !_liveConversationActive) return;
+    try {
+      final result = await AssistantState.device
+          .invokeMapMethod<String, dynamic>('enqueue_user_download', {
+            'url': download.url,
+            'file_name': download.fileName,
+          });
+      if (!mounted) return;
+      notice(
+        context,
+        result == null
+            ? 'Android did not confirm that the download started.'
+            : 'Android accepted ${result['file_name'] ?? download.fileName}. Completion is not verified.',
+      );
+    } catch (error) {
+      if (mounted) notice(context, 'Download did not start: $error');
     }
   }
 

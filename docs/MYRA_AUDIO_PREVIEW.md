@@ -1,0 +1,9 @@
+# MYRA local audio preview and queue adaptation
+
+MYRA's Android Files feature matrix records both a single selected audio preview and a temporary multi-file queue. The queue permits up to 25 unique audio files selected through Android's document picker; tapping a row starts local playback with seek, previous/next, pause and stop. The queue is in-memory, clears when leaving Files, stops playback when the app backgrounds, and does not upload or modify files. Source: `myra-ultra/FEATURE_MATRIX.md`. This is a behavior-level adaptation, not copied MYRA source or assets.
+
+Personal Agentic AI's Files card uses its existing `file_picker` and `just_audio` dependencies. It builds an in-memory queue from at most 25 unique selected entries with usable local paths; missing paths and duplicate paths are skipped. Row selection starts playback, and controls provide previous/next, play/pause, stop, seek and elapsed/duration display. Selecting another batch replaces the queue. Leaving Files disposes the player and drops the queue. The existing app lifecycle behavior pauses playback when the app leaves the resumed state; this intentionally preserves the existing Personal AI preview behavior rather than claiming a complete match for MYRA's background-stop semantics. No file bytes or metadata are sent to Gemini or a remote service.
+
+`mobile/test/local_audio_preview_test.dart` covers time labels, queue bounds/order, duplicate and missing-path handling and fallback filenames. These code-level tests do not establish Android document-provider grants, codec support, live playback, seeking or lifecycle behavior. The Android 16 CI check and Redmi/device testing are still needed; a picker result without a usable local path is skipped or surfaced as an error.
+
+See [`MYRA_AUDIO_QUEUE.md`](MYRA_AUDIO_QUEUE.md) for the queue-specific behavior and limits.

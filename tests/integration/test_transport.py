@@ -86,6 +86,31 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(headers['X-Fixture'], 'example')
         self.assertEqual(json.loads(body), {'request': 'fictional café'})
 
+
+    def test_explicit_cloud_smoke_uses_only_fixed_prompt_and_fixture_provider(self):
+        from agent.diagnostics import CLOUD_SMOKE_ACK, CHECK_REQUEST, check_cloud
+        response = {'choices': [{'message': {'content': json.dumps({
+            'steps': [{'tool': 'calculator', 'args': {'expression': '2 + 2'}}]})}}]}
+        with fixture(body=json.dumps(response).encode()) as (url, requests), \
+                patch('agent.providers.CLOUD_API_URL', url + '/v1/chat/completions'), \
+                patch.dict(os.environ, {
+                    'OPENAI_API_KEY': 'fixture-only-key', 'CLOUD_AGENT_MODEL': 'fixture-model',
+                    'CLOUD_AGENT_SMOKE_BUDGET_USD': '0.05', 'CLOUD_AGENT_SMOKE_ACK': CLOUD_SMOKE_ACK,
+                }, clear=True):
+            report = check_cloud()
+        self.assertEqual(report['status'], 'schema_valid')
+        self.assertEqual(report['attempts'], 1)
+        self.assertEqual(len(requests), 1)
+        path, headers, raw = requests[0]
+        self.assertEqual(path, '/v1/chat/completions')
+        self.assertEqual(headers['Authorization'], 'Bearer fixture-only-key')
+        sent = json.loads(raw)
+        self.assertEqual(sent['messages'][-1], {'role': 'user', 'content': CHECK_REQUEST})
+        self.assertEqual(sent['max_completion_tokens'], 128)
+        self.assertEqual(sent['model'], 'fixture-model')
+        self.assertNotIn('fixture-only-key', json.dumps(report))
+        self.assertNotIn('2 + 2', json.dumps(report))
+
     def test_invalid_json_is_sanitized(self):
         with fixture(body=b'private-fixture-marker') as (url, _):
             with self.assertRaisesRegex(ValueError, '^Provider returned invalid JSON$'):
