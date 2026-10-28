@@ -29,6 +29,10 @@ Personal AI now adapts MYRA's source-backed `navigate_to` capability as a user-e
 
 - Wi-Fi: Personal AI has a separate user-tapped enabled-state read and Android connectivity-settings handoff; it does not toggle Wi-Fi, read network details, or claim post-settings state. See `docs/MYRA_WIFI.md`; runtime/device behavior remains unverified.
 
+### Reviewed clipboard copy
+
+Personal AI now has a manual, user-entered copy flow in Skills & actions, based on MYRA's bounded `copy_text` behavior. The person enters up to 4,000 characters, reviews the complete exact text, and only a separate approval writes it to Android's clipboard. The action does not send text to Gemini or save it in Personal AI; other apps may read clipboard contents. This is a manual adaptation, not Gemini function-call routing. The Flutter interaction has focused widget-test coverage; Android clipboard behavior has not been tested on a physical device.
+
 ### Reviewed clipboard excerpt
 
 Personal AI reads clipboard text only after the user taps **Review clipboard text**. It previews the first plain-text item (up to 4,000 characters) and, only after **Add to draft**, inserts a clearly marked quoted excerpt into the editable chat draft. It does not send, monitor, or retain the clipboard content automatically. The draft still requires the usual user Send action. This is a manual reviewed adaptation of MYRA's `read_clipboard_text` capability, not automatic Gemini function-call routing; Android device behavior remains unverified.
