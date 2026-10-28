@@ -17,6 +17,9 @@ void main() {
           if (call.method == 'share_text') {
             return <String, Object?>{'result': 'chooser_opened', 'sent': false};
           }
+          if (call.method == 'open_whatsapp_draft') {
+            return <String, Object?>{'result': 'handoff_opened', 'sent': false};
+          }
           return null;
         });
   });
@@ -26,44 +29,69 @@ void main() {
         .setMockMethodCallHandler(channel, null);
   });
 
-  testWidgets('draft preview stays inert until explicit share-sheet tap', (
+  testWidgets(
+    'WhatsApp handoff stays inert until exact recipient and draft are approved',
+    (tester) async {
+      await tester.pumpWidget(const MaterialApp(home: OutboundDraftsScreen()));
+
+      expect(
+        find.textContaining('Nothing is sent or published by this app.'),
+        findsOneWidget,
+      );
+      expect(find.text('Review WhatsApp draft'), findsOneWidget);
+      expect(
+        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+        isNull,
+      );
+      expect(calls, isEmpty);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('outbound-draft-number')),
+        '+14155550123',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('outbound-draft-text')),
+        'Please send me the class notes when you can.',
+      );
+      await tester.pump();
+      expect(
+        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+        isNotNull,
+      );
+      expect(calls, isEmpty);
+
+      final reviewButton = find.text('Review WhatsApp draft');
+      await tester.ensureVisible(reviewButton);
+      await tester.pumpAndSettle();
+      await tester.tap(reviewButton);
+      await tester.pumpAndSettle();
+      expect(calls, hasLength(1));
+      expect(calls.single.method, 'open_whatsapp_draft');
+      expect(calls.single.arguments, {
+        'number': '+14155550123',
+        'message': 'Please send me the class notes when you can.',
+      });
+    },
+  );
+
+  testWidgets('WhatsApp recipient must be a full international number', (
     tester,
   ) async {
     await tester.pumpWidget(const MaterialApp(home: OutboundDraftsScreen()));
-
-    expect(
-      find.textContaining('Nothing is sent or published by this app.'),
-      findsOneWidget,
+    await tester.enterText(
+      find.byKey(const ValueKey('outbound-draft-text')),
+      'A reviewed reply.',
     );
-    expect(find.text('Choose app to review reply'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('outbound-draft-number')),
+      '4155550123',
+    );
+    await tester.pump();
     expect(
       tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
       isNull,
     );
     expect(calls, isEmpty);
-
-    await tester.enterText(
-      find.byKey(const ValueKey('outbound-draft-text')),
-      'Please send me the class notes when you can.',
-    );
-    await tester.pump();
-    expect(
-      tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
-      isNotNull,
-    );
-    expect(calls, isEmpty);
-
-    final replyShareButton = find.text('Choose app to review reply');
-    await tester.ensureVisible(replyShareButton);
-    await tester.pumpAndSettle();
-    await tester.tap(replyShareButton);
-    await tester.pumpAndSettle();
-    expect(calls, hasLength(1));
-    expect(calls.single.method, 'share_text');
-    expect(calls.single.arguments, {
-      'title': 'Review WhatsApp reply',
-      'text': 'Please send me the class notes when you can.',
-    });
   });
 
   testWidgets('social caption uses the same explicit text-only chooser', (
@@ -161,8 +189,22 @@ void main() {
       );
       expect(find.text('Open a study app'), findsOneWidget);
       expect(find.text('Prepare a study reminder'), findsOneWidget);
+      expect(find.text('Turn flashlight off'), findsOneWidget);
+      expect(
+        find.textContaining('Android asks for approval first'),
+        findsOneWidget,
+      );
       expect(find.text('Try a multi-agent workflow'), findsOneWidget);
       expect(calls, isEmpty);
+
+      final torchOff = find.byKey(const ValueKey('torch-off-action'));
+      await tester.ensureVisible(torchOff);
+      await tester.pumpAndSettle();
+      await tester.tap(torchOff);
+      await tester.pumpAndSettle();
+      expect(calls, hasLength(1));
+      expect(calls.single.method, 'turn_torch_off');
+      calls.clear();
 
       final workflowEntry = find.byKey(
         const ValueKey('multi-agent-workflow-entry'),

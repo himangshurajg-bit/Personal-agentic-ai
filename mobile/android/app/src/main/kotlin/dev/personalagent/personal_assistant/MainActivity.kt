@@ -3,6 +3,8 @@ package dev.personalagent.personal_assistant
 import android.Manifest
 import android.app.AlarmManager
 import android.app.ActivityManager
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -22,6 +24,8 @@ import android.net.Uri
 import android.net.TrafficStats
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.StatFs
 import android.provider.OpenableColumns
@@ -31,6 +35,7 @@ import android.speech.RecognitionSupport
 import android.speech.RecognitionSupportCallback
 import android.speech.RecognizerIntent
 import android.util.Base64
+import androidx.appcompat.app.AlertDialog
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -314,6 +319,9 @@ class MainActivity : FlutterFragmentActivity() {
         super.onPause()
     }
     override fun onDestroy() {
+        pendingTorchOffResult?.let {
+            completeTorchOffFailure("Personal AI closed before Android confirmed the flashlight state; check it before trying again.")
+        }
         stopVoice()
         stopAudio()
         liveStopReceiver?.let { receiver ->
@@ -330,6 +338,11 @@ class MainActivity : FlutterFragmentActivity() {
     private var fileForAi = false
     private var fileForOfficeDocx = false
     private var localMediaResult: MethodChannel.Result? = null
+    private var pendingTorchOffResult: MethodChannel.Result? = null
+    private var torchOffManager: CameraManager? = null
+    private var torchOffCallback: CameraManager.TorchCallback? = null
+    private var torchOffTimeout: Runnable? = null
+    private val torchOffHandler by lazy { Handler(Looper.getMainLooper()) }
     private var localMediaKind: String? = null
     private var previousSystemCpuTicks: SystemCpuTicks? = null
     private var offlineModelCoordinator: Gemma4OfflineCoordinator? = null
@@ -610,6 +623,12 @@ class MainActivity : FlutterFragmentActivity() {
                         }
                     }
                 }
+                "turn_torch_off" -> reviewTorchOff(result)
+                "open_whatsapp_draft" -> reviewAndOpenWhatsAppDraft(
+                    call.argument<Any>("number"),
+                    call.argument<Any>("message"),
+                    result,
+                )
                 "read_system_metrics" -> result.success(readSystemMonitorMetrics())
                 "extract_image_text_locally" -> extractImageTextLocally(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "extract_pdf_text_locally" -> extractPdfTextLocally(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
@@ -908,6 +927,168 @@ class MainActivity : FlutterFragmentActivity() {
         )
     }
 
+    private fun reviewAndOpenWhatsAppDraft(number: Any?, message: Any?, result: MethodChannel.Result) {
+        val request = WhatsAppDraftPolicy.parse(number, message)
+        if (request == null) {
+            result.error(
+                "invalid_argument",
+                "Enter one full international number (+ and country code) and a message up to 1,600 characters.",
+                null,
+            )
+            return
+        }
+        var completed = false
+        fun cancelled() {
+            if (completed) return
+            completed = true
+            result.success(mapOf("result" to "cancelled", "sent" to false))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Review WhatsApp message")
+            .setMessage("To: ${request.number}\n\n${request.message}\n\nPersonal AI will open WhatsApp with this exact draft. Nothing is sent here; you must review it and tap Send in WhatsApp.")
+            .setNegativeButton("Cancel") { _, _ -> cancelled() }
+            .setPositiveButton("Open WhatsApp") { _, _ ->
+                if (completed) return@setPositiveButton
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(WhatsAppDraftPolicy.link(request)))
+                    .setPackage("com.whatsapp")
+                try {
+                    startActivity(intent)
+                    completed = true
+                    result.success(mapOf("result" to "handoff_opened", "sent" to false))
+                } catch (_: Exception) {
+                    completed = true
+                    result.error("unavailable", "WhatsApp could not open this link; nothing was sent.", null)
+                }
+            }
+            .create()
+        dialog.setOnCancelListener { cancelled() }
+        dialog.show()
+    }
+
+    private fun reviewTorchOff(result: MethodChannel.Result) {
+        if (pendingTorchOffResult != null) {
+            result.error("busy", "A flashlight-off review is already open.", null)
+            return
+        }
+        pendingTorchOffResult = result
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Turn flashlight off?")
+            .setMessage("Personal AI will ask Android to turn off the phone's camera flash. Nothing changes unless you approve this step. Camera permission, if needed, is requested only after you approve.")
+            .setNegativeButton("Cancel") { _, _ -> completeTorchOffCancelled() }
+            .setPositiveButton("Turn off") { _, _ ->
+                if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                    if (permissionResult != null || accessPermissionResult != null || voicePermission != null) {
+                        completeTorchOffFailure("Another Android permission request is already open; the flashlight was not changed.")
+                    } else {
+                        try {
+                            requestPermissions(arrayOf(Manifest.permission.CAMERA), 47)
+                        } catch (_: Exception) {
+                            completeTorchOffFailure("Android could not request camera permission; the flashlight was not changed.")
+                        }
+                    }
+                } else {
+                    applyTorchOff()
+                }
+            }
+            .create()
+        dialog.setOnCancelListener { completeTorchOffCancelled() }
+        dialog.show()
+    }
+
+    private fun findFlashCameraId(manager: CameraManager): String? {
+        val candidates = try {
+            manager.cameraIdList.mapNotNull { id ->
+                val characteristics = manager.getCameraCharacteristics(id)
+                val flash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+                val back = characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+                TorchCameraCandidate(id, flash, back)
+            }
+        } catch (_: Exception) {
+            return null
+        }
+        return chooseTorchCamera(candidates)
+    }
+
+    private fun applyTorchOff() {
+        val result = pendingTorchOffResult ?: return
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            completeTorchOffFailure("Camera permission is not available; the flashlight was not changed.")
+            return
+        }
+        val manager = getSystemService(Context.CAMERA_SERVICE) as? CameraManager
+        if (manager == null) {
+            completeTorchOffFailure("Android's camera service is unavailable; flashlight state is unchanged or unknown.")
+            return
+        }
+        val cameraId = findFlashCameraId(manager)
+        if (cameraId == null) {
+            completeTorchOffFailure("No available camera flash was found; its state could not be changed.")
+            return
+        }
+
+        var commandIssued = false
+        var lastObservedState: Boolean? = null
+        val callback = object : CameraManager.TorchCallback() {
+            override fun onTorchModeChanged(id: String, enabled: Boolean) {
+                if (id != cameraId) return
+                lastObservedState = enabled
+                if (commandIssued && !enabled) completeTorchOffSuccess()
+            }
+
+            override fun onTorchModeUnavailable(id: String) {
+                if (id == cameraId) completeTorchOffFailure("Android reports the camera flash is unavailable; off state was not confirmed.")
+            }
+        }
+        torchOffManager = manager
+        torchOffCallback = callback
+        try {
+            manager.registerTorchCallback(callback, torchOffHandler)
+            val timeout = Runnable {
+                completeTorchOffFailure("Android did not confirm the flashlight is off. Check its state before trying again.")
+            }
+            torchOffTimeout = timeout
+            torchOffHandler.postDelayed(timeout, 3_000)
+            manager.setTorchMode(cameraId, false)
+            commandIssued = true
+            if (lastObservedState == false) completeTorchOffSuccess()
+        } catch (_: Exception) {
+            completeTorchOffFailure("Android could not confirm the flashlight-off request. Check its state before trying again.")
+        }
+    }
+
+    private fun stopTorchOffObservation() {
+        torchOffTimeout?.let(torchOffHandler::removeCallbacks)
+        torchOffTimeout = null
+        val manager = torchOffManager
+        val callback = torchOffCallback
+        if (manager != null && callback != null) {
+            try { manager.unregisterTorchCallback(callback) } catch (_: Exception) { }
+        }
+        torchOffManager = null
+        torchOffCallback = null
+    }
+
+    private fun completeTorchOffSuccess() {
+        val result = pendingTorchOffResult ?: return
+        pendingTorchOffResult = null
+        stopTorchOffObservation()
+        result.success(mapOf("result" to "confirmed_off"))
+    }
+
+    private fun completeTorchOffCancelled() {
+        val result = pendingTorchOffResult ?: return
+        pendingTorchOffResult = null
+        stopTorchOffObservation()
+        result.success(mapOf("result" to "cancelled"))
+    }
+
+    private fun completeTorchOffFailure(message: String) {
+        val result = pendingTorchOffResult ?: return
+        pendingTorchOffResult = null
+        stopTorchOffObservation()
+        result.error("torch_off_unconfirmed", message, null)
+    }
+
     private fun shareText(args: Map<*, *>, result: MethodChannel.Result) {
         val title = (args["title"] as? String)?.trim()
         val text = args["text"] as? String
@@ -1066,6 +1247,11 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun onRequestPermissionsResult(requestCode:Int,permissions:Array<out String>,grantResults:IntArray) {
         super.onRequestPermissionsResult(requestCode,permissions,grantResults)
+        if (requestCode == 47) {
+            val granted = checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+            if (granted) applyTorchOff()
+            else completeTorchOffFailure("Camera permission was denied; the flashlight was not changed.")
+        }
         if(requestCode==44) {
             val result=voicePermission;val args=voiceArgs;voicePermission=null;voiceArgs=null
             if(result!=null && args!=null) {

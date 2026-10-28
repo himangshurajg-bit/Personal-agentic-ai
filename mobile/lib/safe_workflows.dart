@@ -16,26 +16,45 @@ class OutboundDraftsScreen extends StatefulWidget {
 class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
   static const _device = MethodChannel('personal_assistant/device');
   final _text = TextEditingController();
+  final _number = TextEditingController();
   String _kind = 'whatsapp';
   bool _opening = false;
 
   @override
   void dispose() {
     _text.dispose();
+    _number.dispose();
     super.dispose();
   }
 
   Future<void> _openShareSheet() async {
-    final body = _text.text.trim();
-    if (body.isEmpty || body.length > 10000 || _opening) return;
+    final body = _text.text;
+    final number = _number.text.trim();
+    final isWhatsApp = _kind == 'whatsapp';
+    final validNumber = RegExp(r'^\+[1-9][0-9]{6,14}$').hasMatch(number);
+    if (body.trim().isEmpty || _opening) return;
+    if (isWhatsApp && (!validNumber || body.length > 1600)) return;
+    if (!isWhatsApp && body.length > 10000) return;
     setState(() => _opening = true);
     try {
-      await _device.invokeMethod<Object?>('share_text', {
-        'title': _kind == 'whatsapp'
-            ? 'Review WhatsApp reply'
-            : 'Review social caption',
-        'text': body,
-      });
+      final response = isWhatsApp
+          ? await _device.invokeMethod<Object?>('open_whatsapp_draft', {
+              'number': number,
+              'message': body,
+            })
+          : await _device.invokeMethod<Object?>('share_text', {
+              'title': 'Review social caption',
+              'text': body,
+            });
+      if (isWhatsApp &&
+          mounted &&
+          response is Map &&
+          response['result'] == 'handoff_opened') {
+        notice(
+          context,
+          'Android accepted the WhatsApp-link handoff. Nothing was sent; review the draft and tap Send in WhatsApp.',
+        );
+      }
     } on PlatformException catch (error) {
       if (mounted) {
         notice(
@@ -66,7 +85,7 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Nothing is sent or published by this app. Continue opens Android’s share sheet; choose the app and conversation, then review and send there.',
+            'Nothing is sent or published by this app. For WhatsApp, enter one full international number; Personal AI shows the exact recipient and message in an approval dialog before opening a prefilled link. You must tap Send in WhatsApp. Social captions open Android’s share sheet.',
             style: Theme.of(context).textTheme.bodyMedium
                 ?.copyWith(color: colors.onSurfaceVariant),
           ),
@@ -92,13 +111,29 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
                   onChanged: (value) =>
                       setState(() => _kind = value ?? 'whatsapp'),
                 ),
+                if (_kind == 'whatsapp') ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: const ValueKey('outbound-draft-number'),
+                    controller: _number,
+                    keyboardType: TextInputType.phone,
+                    maxLength: 16,
+                    decoration: const InputDecoration(
+                      labelText: 'International phone number',
+                      hintText: '+<country code><number>',
+                      helperText: 'Include + and the country code; no spaces.',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 TextField(
                   key: const ValueKey('outbound-draft-text'),
                   controller: _text,
                   minLines: 7,
                   maxLines: 14,
-                  maxLength: 10000,
+                  maxLength: _kind == 'whatsapp' ? 1600 : 10000,
                   keyboardType: TextInputType.multiline,
                   textCapitalization: TextCapitalization.sentences,
                   decoration: InputDecoration(
@@ -117,7 +152,13 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: _text.text.trim().isEmpty || _opening
+                    onPressed:
+                        _text.text.trim().isEmpty ||
+                            _opening ||
+                            (_kind == 'whatsapp' &&
+                                (!RegExp(r'^\+[1-9][0-9]{6,14}$')
+                                        .hasMatch(_number.text.trim()) ||
+                                    _text.text.length > 1600))
                         ? null
                         : _openShareSheet,
                     icon: _opening
@@ -129,7 +170,7 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
                         : const Icon(Icons.ios_share_rounded),
                     label: Text(
                       _kind == 'whatsapp'
-                          ? 'Choose app to review reply'
+                          ? 'Review WhatsApp draft'
                           : 'Choose app to review caption',
                     ),
                   ),
@@ -140,13 +181,73 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
           const SizedBox(height: 12),
           const Glass(
             child: Text(
-              'This shares text only. It does not connect to your accounts, choose a recipient, attach media, send messages, or publish posts. Draft text stays in this screen and is not saved after you leave.',
+              'WhatsApp requires a number you enter yourself and a separate approval step. The app never sends the message. Social sharing still does not choose a recipient, attach media, or publish a post. Drafts are not saved after you leave.',
             ),
           ),
         ],
       ),
     );
   }
+}
+
+/// This action begins only from a user's tap; Android shows a separate approval
+/// dialog before it requests camera permission or changes the torch state.
+class TorchOffAction extends StatefulWidget {
+  const TorchOffAction({super.key});
+
+  @override
+  State<TorchOffAction> createState() => _TorchOffActionState();
+}
+
+class _TorchOffActionState extends State<TorchOffAction> {
+  static const _device = MethodChannel('personal_assistant/device');
+  bool _running = false;
+
+  Future<void> _reviewTorchOff() async {
+    if (_running) return;
+    setState(() => _running = true);
+    try {
+      final response = await _device.invokeMethod<Object?>('turn_torch_off');
+      if (!mounted || response is! Map) return;
+      if (response['result'] == 'confirmed_off') {
+        notice(context, 'Android confirmed the flashlight is off.');
+      }
+    } on PlatformException catch (error) {
+      if (mounted) {
+        notice(
+          context,
+          error.message ?? 'Android could not confirm the flashlight is off.',
+        );
+      }
+    } on MissingPluginException {
+      if (mounted) {
+        notice(
+          context,
+          'Flashlight control is available in the Android app only.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _running = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+    key: const ValueKey('torch-off-action'),
+    contentPadding: EdgeInsets.zero,
+    leading: _running
+        ? const SizedBox.square(
+            dimension: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : const Icon(Icons.flashlight_off_outlined),
+    title: const Text('Turn flashlight off'),
+    subtitle: const Text(
+      'Android asks for approval first; camera permission is requested only if needed.',
+    ),
+    trailing: const Icon(Icons.chevron_right_rounded),
+    onTap: _running ? null : _reviewTorchOff,
+  );
 }
 
 /// First-party skills are limited to the already-reviewed local actions.
@@ -196,6 +297,8 @@ class SafeSkillsScreen extends StatelessWidget {
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Home(state: state).reminder(context),
               ),
+              const Divider(),
+              const TorchOffAction(),
               const Divider(),
               ListTile(
                 key: const ValueKey('multi-agent-workflow-entry'),
