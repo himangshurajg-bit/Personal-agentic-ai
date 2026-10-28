@@ -116,15 +116,11 @@ Future<void> _scrollDrawerUntilVisible(
 ) async {
   final list = find.byKey(const Key('navigation-drawer-list'));
   final item = find.descendant(of: list, matching: find.text(label));
-  final screenSize = tester.view.physicalSize / tester.view.devicePixelRatio;
-  final screen = Offset.zero & screenSize;
-  for (var attempt = 0; attempt < 12; attempt++) {
-    if (item.evaluate().isNotEmpty && screen.contains(tester.getCenter(item))) {
-      return;
-    }
-    await tester.drag(list, const Offset(0, -220));
-    await tester.pumpAndSettle();
-  }
   expect(item, findsOneWidget);
-  expect(screen.contains(tester.getCenter(item)), isTrue);
+  // The item may be within the overall screen bounds but clipped by the drawer's
+  // own viewport. Let its actual ancestor Scrollable reveal it before tapping.
+  await tester.ensureVisible(item);
+  await tester.pumpAndSettle();
+  final listRect = tester.getRect(list);
+  expect(listRect.contains(tester.getCenter(item)), isTrue);
 }

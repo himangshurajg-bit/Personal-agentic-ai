@@ -38,7 +38,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('review-in-app-toast')));
     await tester.pumpAndSettle();
     expect(find.text('Review in-app message'), findsOneWidget);
-    expect(find.text(message), findsOneWidget);
+    expect(
+      find.descendant(of: find.byType(AlertDialog), matching: find.text(message)),
+      findsOneWidget,
+    );
     expect(find.byType(SnackBar), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('cancel-in-app-toast')));
@@ -51,7 +54,10 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 250));
     expect(find.byType(SnackBar), findsOneWidget);
-    expect(find.text(message), findsOneWidget);
+    expect(
+      find.descendant(of: find.byType(SnackBar), matching: find.text(message)),
+      findsOneWidget,
+    );
     expect(find.text('Shown briefly in this app only.'), findsOneWidget);
   });
 }
