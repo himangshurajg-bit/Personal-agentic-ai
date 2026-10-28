@@ -19,6 +19,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.drawable.Icon
 import android.graphics.pdf.PdfRenderer
 import android.graphics.Canvas
 import android.media.MediaPlayer
@@ -33,6 +34,7 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.StatFs
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.speech.SpeechRecognizer
 import android.speech.RecognitionListener
 import android.speech.RecognitionSupport
@@ -325,7 +327,57 @@ class MainActivity : FlutterFragmentActivity() {
             .setContentIntent(openChat)
             .addAction(android.app.Notification.Action.Builder(android.R.drawable.ic_btn_speak_now, "Voice command", openVoice).build())
             .build()
+
+        val islandPayload = if (BuildConfig.HYPEROS_ISLAND_OPT_IN) {
+            buildHyperOsIslandPayload(
+                buildOptIn = true,
+                manufacturer = Build.MANUFACTURER,
+                brand = Build.BRAND,
+                islandSystemFeature = hasHyperOsIslandSystemFeature(),
+                focusProtocolVersion = hyperOsFocusProtocolVersion(),
+                standardTaskStatus = status,
+            )
+        } else {
+            null
+        }
+        if (islandPayload != null) {
+            // The regular notification remains the source of truth and fallback.
+            // The vendor view receives only fixed, generic app/status strings.
+            notification.extras.putString(HYPEROS_ISLAND_PARAM_EXTRA, islandPayload)
+            notification.extras.putBundle(
+                HYPEROS_ISLAND_PICS_EXTRA,
+                Bundle().apply {
+                    putParcelable(
+                        HYPEROS_ISLAND_APP_ICON_KEY,
+                        Icon.createWithResource(this@MainActivity, R.mipmap.ic_launcher),
+                    )
+                },
+            )
+        }
         manager.notify(TASK_NOTIFICATION_ID, notification)
+    }
+
+    private fun hasHyperOsIslandSystemFeature(): Boolean {
+        if (Build.MANUFACTURER.lowercase() !in setOf("xiaomi", "redmi", "poco") &&
+            Build.BRAND.lowercase() !in setOf("xiaomi", "redmi", "poco")
+        ) return false
+        return try {
+            val properties = Class.forName("android.os.SystemProperties")
+            val getBoolean = properties.getDeclaredMethod(
+                "getBoolean",
+                String::class.java,
+                Boolean::class.javaPrimitiveType,
+            )
+            getBoolean.invoke(null, "persist.sys.feature.island", false) as? Boolean ?: false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun hyperOsFocusProtocolVersion(): Int = try {
+        Settings.System.getInt(contentResolver, "notification_focus_protocol", 0)
+    } catch (_: Exception) {
+        0
     }
 
     override fun onPause() {
