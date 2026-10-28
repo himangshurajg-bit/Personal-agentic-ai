@@ -443,7 +443,17 @@ class Shell extends StatelessWidget {
                 ),
               ),
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        actions: actions,
+        actions: [
+          if (primaryNavigation && canPop)
+            Builder(
+              builder: (drawerContext) => IconButton(
+                tooltip: 'Open navigation menu',
+                onPressed: () => Scaffold.of(drawerContext).openDrawer(),
+                icon: const Icon(Icons.menu_rounded),
+              ),
+            ),
+          ...?actions,
+        ],
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         scrolledUnderElevation: 0,
