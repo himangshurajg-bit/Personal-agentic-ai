@@ -36,9 +36,13 @@ void main() {
         .setMockMethodCallHandler(channel, null);
   });
 
-  testWidgets('temporary brightness requires review and exposes exact level', (
+  testWidgets('temporary brightness requires review and fits narrow phones', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       const MaterialApp(home: Scaffold(body: TemporaryBrightnessAction())),
     );
@@ -60,6 +64,7 @@ void main() {
     expect(calls.single.method, 'set_temporary_brightness');
     expect(calls.single.arguments, {'level': 128});
     expect(find.byKey(const ValueKey('restore-temporary-brightness')), findsOneWidget);
+    expect(tester.takeException(), isNull);
 
     await tester.tap(find.byKey(const ValueKey('restore-temporary-brightness')));
     await tester.pumpAndSettle();

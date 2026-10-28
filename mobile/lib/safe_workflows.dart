@@ -513,10 +513,13 @@ class _TemporaryBrightnessActionState extends State<TemporaryBrightnessAction>
         label: '$_level',
         onChanged: _busy ? null : (value) => setState(() => _level = value.round()),
       ),
-      Row(
+      Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 8,
+        runSpacing: 4,
         children: [
           Text('$_level / 255'),
-          const Spacer(),
           if (_active)
             TextButton(
               key: const ValueKey('restore-temporary-brightness'),
