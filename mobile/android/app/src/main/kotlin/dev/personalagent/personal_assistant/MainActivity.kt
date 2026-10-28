@@ -54,6 +54,9 @@ import java.util.concurrent.TimeUnit
 internal fun isValidTextSharePayload(title: String?, text: String?): Boolean =
     !title.isNullOrBlank() && title.length <= 80 && !text.isNullOrBlank() && text.length <= 10000
 
+internal fun temporaryWindowBrightness(level: Int): Float? =
+    level.takeIf { it in 0..255 }?.div(255f)
+
 internal fun canPostAssistantTaskNotification(sdk: Int, notificationsGranted: Boolean): Boolean =
     sdk < 33 || notificationsGranted
 
@@ -77,6 +80,8 @@ class MainActivity : FlutterFragmentActivity() {
     private var pendingTaskVoiceCommand = false
     private var taskTrackerChannel: MethodChannel? = null
     private var activeTaskNotificationId: String? = null
+    private var hasTemporaryWindowBrightness = false
+    private var originalWindowBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
 
     override fun onCreate(savedInstanceState: Bundle?) {
         if (intent?.action == ACTION_TASK_VOICE_COMMAND) pendingTaskVoiceCommand = true
@@ -316,6 +321,7 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     override fun onPause() {
+        restoreTemporaryWindowBrightness()
         stopVoice()
         stopAudio()
         offlineModelCoordinator?.onAppPaused()
@@ -325,6 +331,7 @@ class MainActivity : FlutterFragmentActivity() {
         pendingTorchOffResult?.let {
             completeTorchOffFailure("Personal AI closed before Android confirmed the flashlight state; check it before trying again.")
         }
+        restoreTemporaryWindowBrightness()
         stopVoice()
         stopAudio()
         liveStopReceiver?.let { receiver ->
@@ -684,6 +691,8 @@ class MainActivity : FlutterFragmentActivity() {
                 ))
                 "request_access_permission" -> requestAccessPermission(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "share_text" -> shareText(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
+                "set_temporary_brightness" -> setTemporaryWindowBrightness(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
+                "restore_temporary_brightness" -> { restoreTemporaryWindowBrightness(); result.success(true) }
                 "voice_start" -> startVoice(call.arguments as? Map<*,*> ?: emptyMap<Any,Any>(),result)
                 "voice_cancel" -> {stopVoice();result.success(true)}
                 "list_launchable_apps" -> {
@@ -1277,6 +1286,37 @@ class MainActivity : FlutterFragmentActivity() {
             }
             .setOnCancelListener { result.success(mapOf("result" to "cancelled")) }
             .show()
+    }
+
+    private fun setTemporaryWindowBrightness(args: Map<*, *>, result: MethodChannel.Result) {
+        val level = args["level"] as? Int
+        val value = level?.let(::temporaryWindowBrightness)
+        if (value == null) {
+            result.error("invalid_argument", "Brightness must be an integer from 0 to 255", null)
+            return
+        }
+        try {
+            if (!hasTemporaryWindowBrightness) {
+                originalWindowBrightness = window.attributes.screenBrightness
+                hasTemporaryWindowBrightness = true
+            }
+            window.attributes = window.attributes.apply { screenBrightness = value }
+            result.success(mapOf("applied" to level, "window_only" to true))
+        } catch (_: Exception) {
+            restoreTemporaryWindowBrightness()
+            result.error("unavailable", "Android could not change this app window's brightness", null)
+        }
+    }
+
+    private fun restoreTemporaryWindowBrightness() {
+        if (!hasTemporaryWindowBrightness) return
+        try {
+            window.attributes = window.attributes.apply { screenBrightness = originalWindowBrightness }
+        } catch (_: Exception) {
+            // Best effort during lifecycle teardown; Android restores the window with the activity.
+        } finally {
+            hasTemporaryWindowBrightness = false
+        }
     }
 
     private fun shareText(args: Map<*, *>, result: MethodChannel.Result) {

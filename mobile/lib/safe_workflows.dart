@@ -394,6 +394,150 @@ class _HapticPulseActionState extends State<HapticPulseAction> {
   );
 }
 
+/// Applies a reviewed temporary brightness level to this app's window only.
+class TemporaryBrightnessAction extends StatefulWidget {
+  const TemporaryBrightnessAction({super.key});
+
+  @override
+  State<TemporaryBrightnessAction> createState() =>
+      _TemporaryBrightnessActionState();
+}
+
+class _TemporaryBrightnessActionState extends State<TemporaryBrightnessAction>
+    with WidgetsBindingObserver {
+  static const _device = MethodChannel('personal_assistant/device');
+  int _level = 128;
+  bool _active = false;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      if (mounted && _active) setState(() => _active = false);
+    }
+  }
+
+  Future<void> _apply() async {
+    if (_busy) return;
+    final selected = _level;
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Review temporary brightness'),
+        content: Text(
+          'Set this app window to brightness $selected of 255? The rest of your screen is unchanged. Android’s original setting will be restored when Personal AI leaves the foreground.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('approve-temporary-brightness'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Apply to this app'),
+          ),
+        ],
+      ),
+    ) ?? false;
+    if (!approved || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await _device.invokeMethod<Object?>(
+        'set_temporary_brightness',
+        {'level': selected},
+      );
+      if (mounted) {
+        setState(() => _active = true);
+        notice(context, 'Applied brightness $selected to Personal AI only.');
+      }
+    } on PlatformException catch (error) {
+      if (mounted) notice(context, error.message ?? 'Could not change brightness.');
+    } on MissingPluginException {
+      if (mounted) notice(context, 'Temporary brightness is available on Android only.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _restore() async {
+    if (_busy || !_active) return;
+    setState(() => _busy = true);
+    try {
+      await _device.invokeMethod<Object?>('restore_temporary_brightness');
+      if (mounted) {
+        setState(() => _active = false);
+        notice(context, 'Restored the original app brightness.');
+      }
+    } on PlatformException catch (error) {
+      if (mounted) notice(context, error.message ?? 'Could not restore brightness.');
+    } on MissingPluginException {
+      if (mounted) notice(context, 'Temporary brightness is available on Android only.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: const Icon(Icons.brightness_6_outlined),
+        title: const Text('Temporary app brightness'),
+        subtitle: const Text(
+          'Choose a level for this app only; Android restores the prior setting when you leave it.',
+        ),
+      ),
+      Slider(
+        key: const ValueKey('temporary-brightness-slider'),
+        value: _level.toDouble(),
+        min: 0,
+        max: 255,
+        divisions: 255,
+        label: '$_level',
+        onChanged: _busy ? null : (value) => setState(() => _level = value.round()),
+      ),
+      Row(
+        children: [
+          Text('$_level / 255'),
+          const Spacer(),
+          if (_active)
+            TextButton(
+              key: const ValueKey('restore-temporary-brightness'),
+              onPressed: _busy ? null : _restore,
+              child: const Text('Restore now'),
+            ),
+          FilledButton.tonal(
+            key: const ValueKey('review-temporary-brightness'),
+            onPressed: _busy ? null : _apply,
+            child: const Text('Review level'),
+          ),
+        ],
+      ),
+      Text(
+        'The exact level is shown before applying. This does not change Android’s system-wide brightness.',
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+    ],
+  );
+}
+
 /// First-party skills are limited to the already-reviewed local actions.
 class SafeSkillsScreen extends StatelessWidget {
   final AssistantState state;
@@ -447,6 +591,8 @@ class SafeSkillsScreen extends StatelessWidget {
               const TorchOffAction(),
               const Divider(),
               const HapticPulseAction(),
+              const Divider(),
+              const TemporaryBrightnessAction(),
               const Divider(),
               ListTile(
                 key: const ValueKey('multi-agent-workflow-entry'),
