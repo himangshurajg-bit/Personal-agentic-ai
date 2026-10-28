@@ -2,6 +2,7 @@ package dev.personalagent.personal_assistant
 
 import android.Manifest
 import android.app.AlarmManager
+import android.app.DownloadManager
 import android.app.ActivityManager
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
@@ -25,6 +26,7 @@ import android.net.TrafficStats
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.os.Environment
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.StatFs
@@ -630,6 +632,10 @@ class MainActivity : FlutterFragmentActivity() {
                     result,
                 )
                 "read_system_metrics" -> result.success(readSystemMonitorMetrics())
+                "enqueue_user_download" -> enqueueUserDownload(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
+                "list_user_downloads" -> listUserDownloads(result)
+                "remove_user_download" -> removeUserDownload(call.argument<Any>("id"), result)
+                "open_user_download" -> openUserDownload(call.argument<Any>("id"), result)
                 "extract_image_text_locally" -> extractImageTextLocally(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "extract_pdf_text_locally" -> extractPdfTextLocally(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "device_status" -> result.success(mapOf(
@@ -753,6 +759,129 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
     }
+    private fun downloadRefs() = getSharedPreferences("user_downloads", MODE_PRIVATE)
+        .getStringSet("refs", emptySet()).orEmpty().mapNotNull(UserDownloadRef::decode)
+
+    private fun saveDownloadRefs(refs: List<UserDownloadRef>) {
+        getSharedPreferences("user_downloads", MODE_PRIVATE).edit()
+            .putStringSet("refs", refs.takeLast(100).map(UserDownloadRef::encode).toSet()).apply()
+    }
+
+    private fun enqueueUserDownload(args: Map<*, *>, result: MethodChannel.Result) {
+        val target = UserDownloadData.validate(args["url"] as? String)
+        if (target == null) {
+            result.error("invalid_url", "Enter one credential-free HTTP or HTTPS download URL.", null)
+            return
+        }
+        val requestedName = UserDownloadData.safeFileName(args["file_name"] as? String, target.fileName)
+        val safeName = UserDownloadData.uniqueFileName(
+            requestedName,
+            downloadRefs().map { it.fileName }.toSet(),
+        )
+        val manager = getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+        if (manager == null) {
+            result.error("unavailable", "Android Download Manager is unavailable; nothing was started.", null)
+            return
+        }
+        try {
+            val request = DownloadManager.Request(Uri.parse(target.url))
+                .setTitle(safeName)
+                .setDescription("Saved to Personal AI's app downloads")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setAllowedOverRoaming(false)
+                .setAllowedOverMetered(true)
+                .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, safeName)
+            val id = manager.enqueue(request)
+            val ref = UserDownloadRef(id, safeName)
+            saveDownloadRefs((downloadRefs().filterNot { it.id == id } + ref))
+            result.success(mapOf("id" to id, "file_name" to safeName, "location" to "app-specific downloads"))
+        } catch (_: Exception) {
+            result.error("enqueue_failed", "Android could not start this download.", null)
+        }
+    }
+
+    private fun listUserDownloads(result: MethodChannel.Result) {
+        val manager = getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+        if (manager == null) {
+            result.error("unavailable", "Android Download Manager is unavailable.", null)
+            return
+        }
+        val rows = downloadRefs().sortedByDescending { it.id }.map { ref ->
+            val cursor = try { manager.query(DownloadManager.Query().setFilterById(ref.id)) } catch (_: Exception) { null }
+            if (cursor == null) return@map mapOf<String, Any?>("id" to ref.id, "file_name" to ref.fileName, "status" to "unknown", "label" to "Status unavailable", "progress" to null, "can_open" to false)
+            cursor.use {
+                if (!it.moveToFirst()) return@use mapOf<String, Any?>("id" to ref.id, "file_name" to ref.fileName, "status" to "unknown", "label" to "Status unavailable", "progress" to null, "can_open" to false)
+                val status = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                val reason = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
+                val downloaded = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+                val total = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                val progress = UserDownloadData.progress(downloaded, total)
+                val state = when (status) {
+                    DownloadManager.STATUS_PENDING -> "pending"
+                    DownloadManager.STATUS_RUNNING -> "running"
+                    DownloadManager.STATUS_PAUSED -> "paused"
+                    DownloadManager.STATUS_SUCCESSFUL -> "complete"
+                    DownloadManager.STATUS_FAILED -> "failed"
+                    else -> "unknown"
+                }
+                val label = when (state) {
+                    "pending" -> "Waiting to download"
+                    "running" -> progress?.let { value -> "Downloading · $value%" } ?: "Downloading"
+                    "paused" -> "Paused by Android (reason $reason)"
+                    "complete" -> "Downloaded to app storage"
+                    "failed" -> "Download failed (reason $reason)"
+                    else -> "Status unavailable"
+                }
+                mapOf<String, Any?>("id" to ref.id, "file_name" to ref.fileName, "status" to state, "label" to label, "progress" to progress, "can_open" to (state == "complete"))
+            }
+        }
+        result.success(rows)
+    }
+
+    private fun removeUserDownload(rawId: Any?, result: MethodChannel.Result) {
+        val id = (rawId as? Number)?.toLong()?.takeIf { it > 0 } ?: run {
+            result.error("invalid_id", "Choose a download from this list.", null); return
+        }
+        if (downloadRefs().none { it.id == id }) {
+            result.error("unknown_id", "This download is not in Personal AI's list.", null); return
+        }
+        val manager = getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+        if (manager == null) { result.error("unavailable", "Android Download Manager is unavailable.", null); return }
+        try {
+            if (manager.remove(id) <= 0) {
+                result.error("remove_unconfirmed", "Android did not confirm that this download was removed.", null)
+                return
+            }
+            saveDownloadRefs(downloadRefs().filterNot { it.id == id })
+            result.success(true)
+        } catch (_: Exception) {
+            result.error("remove_failed", "Android could not remove this download.", null)
+        }
+    }
+
+    private fun openUserDownload(rawId: Any?, result: MethodChannel.Result) {
+        val id = (rawId as? Number)?.toLong()?.takeIf { it > 0 } ?: run {
+            result.error("invalid_id", "Choose a download from this list.", null); return
+        }
+        if (downloadRefs().none { it.id == id }) {
+            result.error("unknown_id", "This download is not in Personal AI's list.", null); return
+        }
+        val manager = getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+        if (manager == null) { result.error("unavailable", "Android Download Manager is unavailable.", null); return }
+        try {
+            val uri = manager.getUriForDownloadedFile(id)
+            if (uri == null) { result.error("not_ready", "Android has not made this download available yet.", null); return }
+            val mime = manager.getMimeTypeForDownloadedFile(id) ?: "application/octet-stream"
+            val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            startActivity(intent)
+            result.success(true)
+        } catch (_: android.content.ActivityNotFoundException) {
+            result.error("no_handler", "No installed app can open this downloaded file.", null)
+        } catch (_: Exception) {
+            result.error("open_failed", "Android could not open this download.", null)
+        }
+    }
+
     /** Run bundled, on-device Latin-script OCR over one explicitly selected image. */
     private fun extractImageTextLocally(args: Map<*, *>, result: MethodChannel.Result) {
         if (localOcrInFlight) {

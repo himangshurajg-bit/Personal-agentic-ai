@@ -15,6 +15,7 @@ import 'focus_timer_screen.dart';
 import 'system_clock_timer_screen.dart';
 import 'journal_screen.dart';
 import 'office_document.dart';
+import 'download_input.dart';
 
 const _featureVoiceEvents = MethodChannel('personal_assistant/feature_voice');
 
@@ -33,7 +34,7 @@ class FeaturesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DefaultTabController(
     initialIndex: initialTab,
-    length: 9,
+    length: 10,
     child: Scaffold(
       appBar: AppBar(
         title: const Text('Assistant tools'),
@@ -52,6 +53,7 @@ class FeaturesScreen extends StatelessWidget {
             Tab(icon: Icon(Icons.timer_outlined), text: 'Focus timer'),
             Tab(icon: Icon(Icons.edit_note_rounded), text: 'Journal'),
             Tab(icon: Icon(Icons.alarm_add_rounded), text: 'Clock timer'),
+            Tab(icon: Icon(Icons.download_outlined), text: 'Downloads'),
           ],
         ),
       ),
@@ -66,10 +68,283 @@ class FeaturesScreen extends StatelessWidget {
           FocusTimerScreen(state: state),
           JournalScreen(state: state),
           const SystemClockTimerScreen(),
+          const _DownloadsFeature(),
         ],
       ),
     ),
   );
+}
+
+class _DownloadsFeature extends StatefulWidget {
+  const _DownloadsFeature();
+  @override
+  State<_DownloadsFeature> createState() => _DownloadsFeatureState();
+}
+
+class _DownloadsFeatureState extends State<_DownloadsFeature> {
+  final _url = TextEditingController();
+  List<Map<String, dynamic>> _items = const [];
+  bool _loading = false;
+  bool _starting = false;
+  String _message = '';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
+  }
+
+  @override
+  void dispose() {
+    _url.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    if (_loading) return;
+    setState(() => _loading = true);
+    try {
+      final rows = await AssistantState.device.invokeListMethod<dynamic>(
+        'list_user_downloads',
+      );
+      if (!mounted) return;
+      setState(() {
+        _items = (rows ?? const [])
+            .whereType<Map>()
+            .map((row) => Map<String, dynamic>.from(row))
+            .toList();
+        _message = '';
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() => _message = 'Could not read the download list: $error');
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _start() async {
+    final parsed = DownloadInput.parse(_url.text);
+    if (parsed == null) {
+      setState(
+        () => _message =
+            'Enter a valid HTTP or HTTPS URL without a username or password.',
+      );
+      return;
+    }
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Review download'),
+        content: SelectableText(
+          'Download ${parsed.fileName} from:\n${parsed.url}\n\nThis uses network data and may incur charges. The file will be stored in Personal AI’s app-specific Downloads folder.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Start download'),
+          ),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+    setState(() {
+      _starting = true;
+      _message = 'Starting download…';
+    });
+    try {
+      final result = await AssistantState.device
+          .invokeMapMethod<String, dynamic>('enqueue_user_download', {
+            'url': parsed.url,
+            'file_name': parsed.fileName,
+          });
+      if (!mounted) return;
+      setState(() {
+        _message = result == null
+            ? 'Android did not confirm that the download started.'
+            : 'Android accepted ${result['file_name'] ?? parsed.fileName}. Completion is not verified.';
+        _url.clear();
+      });
+      await _refresh();
+    } catch (error) {
+      if (mounted) setState(() => _message = 'Download did not start: $error');
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
+
+  Future<void> _remove(Map<String, dynamic> item) async {
+    final complete = item['status'] == 'complete';
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(complete ? 'Delete downloaded file?' : 'Cancel download?'),
+        content: Text(
+          complete
+              ? 'Remove “${item['file_name']}” from Personal AI’s app downloads?'
+              : 'Cancel and remove “${item['file_name']}”?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Keep'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(complete ? 'Delete' : 'Cancel download'),
+          ),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+    try {
+      await AssistantState.device.invokeMethod<bool>('remove_user_download', {
+        'id': item['id'],
+      });
+      if (mounted) {
+        setState(
+          () => _message = complete
+              ? 'Downloaded file removed.'
+              : 'Download canceled.',
+        );
+      }
+      await _refresh();
+    } catch (error) {
+      if (mounted) {
+        setState(() => _message = 'Could not remove this download: $error');
+      }
+    }
+  }
+
+  Future<void> _open(Map<String, dynamic> item) async {
+    try {
+      await AssistantState.device.invokeMethod<bool>('open_user_download', {
+        'id': item['id'],
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() => _message = 'Could not open this file: $error');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final parsed = DownloadInput.parse(_url.text);
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Text(
+          'Download a file',
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Enter one direct HTTP or HTTPS link. Review the exact URL before Android starts a download. Files stay in this app’s storage and are not sent to an AI service.',
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _url,
+          keyboardType: TextInputType.url,
+          autocorrect: false,
+          enableSuggestions: false,
+          decoration: const InputDecoration(
+            labelText: 'Direct file URL',
+            hintText: 'https://example.com/file.pdf',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (_) => setState(() {}),
+          onSubmitted: (_) => _start(),
+        ),
+        if (parsed != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'File name: ${parsed.fileName}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        const SizedBox(height: 8),
+        FilledButton.icon(
+          onPressed: parsed == null || _starting ? null : _start,
+          icon: const Icon(Icons.download_outlined),
+          label: Text(_starting ? 'Starting…' : 'Review and download'),
+        ),
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Your downloads',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            IconButton(
+              onPressed: _loading ? null : _refresh,
+              tooltip: 'Refresh downloads',
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        if (_loading) const LinearProgressIndicator(),
+        if (_message.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(_message),
+          ),
+        if (!_loading && _items.isEmpty) const Text('No downloads yet.'),
+        for (final item in _items)
+          Card(
+            child: ListTile(
+              leading: Icon(
+                item['status'] == 'complete'
+                    ? Icons.check_circle_outline
+                    : Icons.downloading,
+              ),
+              title: Text(item['file_name']?.toString() ?? 'Download'),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(item['label']?.toString() ?? 'Status unavailable'),
+                  if (item['progress'] is int && item['status'] == 'running')
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: LinearProgressIndicator(
+                        value: (item['progress'] as int).clamp(0, 100) / 100,
+                      ),
+                    ),
+                ],
+              ),
+              isThreeLine:
+                  item['progress'] is int && item['status'] == 'running',
+              trailing: PopupMenuButton<String>(
+                onSelected: (value) =>
+                    value == 'open' ? _open(item) : _remove(item),
+                itemBuilder: (_) => [
+                  if (item['can_open'] == true)
+                    const PopupMenuItem(value: 'open', child: Text('Open')),
+                  PopupMenuItem(
+                    value: 'remove',
+                    child: Text(
+                      item['status'] == 'complete' ? 'Delete' : 'Cancel/remove',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        const SizedBox(height: 12),
+        const Text(
+          'Android manages the transfer and its notification. A queued request is not proof the file finished downloading. Downloads are stored in app-specific storage and disappear if Personal AI is uninstalled.',
+        ),
+      ],
+    );
+  }
 }
 
 class _DocumentFeature extends StatefulWidget {

@@ -15,3 +15,10 @@ The MYRA-specific debug artifact is `MYRA-Ultra-Android-debug-2026-10-28.apk` (1
 This is a source transfer, not an integration of every MYRA capability into Personal Agentic AI's existing Flutter app. Its public main branch already contains separate Personal AI-specific work; this transfer does not overwrite that app or claim feature parity. The supplied source excludes the original desktop/PyQt code, so full desktop parity cannot be claimed. No user-specific settings or API credentials are included. A source-pattern scan for common API keys, private keys, GitHub tokens, AWS access keys, and quoted credential assignments found no matches; this is a focused scan, not a guarantee that no sensitive value exists.
 
 See the preserved source's [`SOURCE-NOTICE.md`](../myra-ultra/SOURCE-NOTICE.md) and [`FEATURE_MATRIX.md`](../myra-ultra/FEATURE_MATRIX.md) for project-specific context and remaining feature gaps.
+
+
+## Targeted feature mapping
+
+The Personal AI app now has a user-started Android download manager for direct HTTP/HTTPS file URLs, adapted from the available MYRA Android Download Manager handoff. The Downloads tab shows Android DownloadManager status and progress, lets the owner open completed files or confirm cancel/delete, and stores them in Personal AI's app-specific Downloads folder without broad storage permission. The app asks the owner to review the exact URL before enqueueing; this implementation does not add Gemini/AI-triggered downloads, infer URLs, or claim a transfer of MYRA's unavailable desktop/backend behavior.
+
+This is a focused feature adaptation, not complete MYRA parity. The preserved `myra-ultra/FEATURE_MATRIX.md` remains the source inventory; its available Android functionality is not all implemented as Personal AI features. The original desktop/PyQt/backend source and the owner's actual MYRA settings export remain unavailable, and the Personal AI app has not been runtime-tested on the owner's Redmi device.
