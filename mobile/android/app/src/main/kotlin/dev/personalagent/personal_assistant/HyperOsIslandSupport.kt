@@ -55,7 +55,10 @@ internal fun buildHyperOsIslandPayload(
         else -> return null
     }
 
+    // Ask HyperOS for its documented expanded presentation on first appearance
+    // and on each genuine lifecycle update, so its native island transition follows
+    // real task stages rather than synthetic timer/progress frames.
     // Keep the vendor payload aligned with the ordinary notification's five-minute
     // expiry. No user-provided content is interpolated into this JSON.
-    return """{"param_v2":{"protocol":1,"business":"personal_ai_task","islandFirstFloat":false,"enableFloat":false,"updatable":true,"timeout":5,"filterWhenNoPermission":false,"param_island":{"islandProperty":1,"islandTimeout":300,"bigIslandArea":{"imageTextInfoLeft":{"type":1,"textInfo":{"title":"AI","content":"Task","showHighlightColor":false}},"textInfo":{"frontTitle":"Task","title":"$islandStatus","showHighlightColor":false}},"smallIslandArea":{"picInfo":{"type":1,"pic":"$HYPEROS_ISLAND_APP_ICON_KEY"}}},"baseInfo":{"type":2,"title":"Personal AI","content":"$islandStatus"}}}"""
+    return """{"param_v2":{"protocol":1,"business":"personal_ai_task","islandFirstFloat":true,"enableFloat":true,"updatable":true,"timeout":5,"filterWhenNoPermission":false,"param_island":{"islandProperty":1,"islandTimeout":300,"bigIslandArea":{"imageTextInfoLeft":{"type":1,"textInfo":{"title":"AI","content":"Task","showHighlightColor":false}},"textInfo":{"frontTitle":"Task","title":"$islandStatus","showHighlightColor":false}},"smallIslandArea":{"picInfo":{"type":1,"pic":"$HYPEROS_ISLAND_APP_ICON_KEY"}}},"baseInfo":{"type":2,"title":"Personal AI","content":"$islandStatus"}}}"""
 }

@@ -44,6 +44,8 @@ class HyperOsIslandSupportTest {
         assertTrue(json.contains("\"baseInfo\":{"))
         assertTrue(json.contains("\"timeout\":5"))
         assertTrue(json.contains("\"islandTimeout\":300"))
+        assertTrue(json.contains("\"islandFirstFloat\":true"))
+        assertTrue(json.contains("\"enableFloat\":true"))
         assertFalse(json.contains("\"progress\""))
     }
 
