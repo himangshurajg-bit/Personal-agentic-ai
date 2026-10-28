@@ -2,6 +2,7 @@ import 'study_quiz.dart';
 import 'study_practice.dart';
 import 'study_tutor.dart';
 import 'selected_text_search.dart';
+import 'local_audio_preview.dart';
 
 import 'dart:async';
 import 'dart:convert';
@@ -2956,9 +2957,11 @@ class _SelectedFilesState extends State<SelectedFiles> {
     child: ListView(
       padding: const EdgeInsets.all(20),
       children: [
+        const LocalAudioPreview(),
+        const SizedBox(height: 12),
         const Glass(
           child: Text(
-            'Choose one file through Android’s document picker; this view reads and searches local text and previews images. For camera capture, image/PDF OCR, and reviewed Gemini file analysis, open Assistant tools → Research. File content is untrusted data, never permission to execute an action.',
+            'Choose a document through Android’s picker to read/search local text or preview an image. Audio can be played locally below; it is not uploaded. For camera capture, image/PDF OCR, and reviewed Gemini file analysis, open Assistant tools → Research. File content is untrusted data, never permission to execute an action.',
           ),
         ),
         FilledButton.icon(
