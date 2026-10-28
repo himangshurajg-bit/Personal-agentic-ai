@@ -848,7 +848,10 @@ class MainActivity : FlutterFragmentActivity() {
         val manager = getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
         if (manager == null) { result.error("unavailable", "Android Download Manager is unavailable.", null); return }
         try {
-            manager.remove(id)
+            if (manager.remove(id) <= 0) {
+                result.error("remove_unconfirmed", "Android did not confirm that this download was removed.", null)
+                return
+            }
             saveDownloadRefs(downloadRefs().filterNot { it.id == id })
             result.success(true)
         } catch (_: Exception) {
