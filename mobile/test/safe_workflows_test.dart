@@ -243,7 +243,9 @@ void main() {
     final hapticCalls = <MethodCall>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, (call) async {
-          hapticCalls.add(call);
+          if (call.method.startsWith('HapticFeedback.')) {
+            hapticCalls.add(call);
+          }
           return null;
         });
     addTearDown(() {
