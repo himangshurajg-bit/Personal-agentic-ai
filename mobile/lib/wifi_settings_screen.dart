@@ -30,7 +30,7 @@ class _WifiSettingsScreenState extends State<WifiSettingsScreen> {
           .invokeMapMethod<String, Object?>('read_wifi_status');
       final enabled = response?['enabled'];
       if (enabled is! bool) {
-        throw const PlatformException(
+        throw PlatformException(
           code: 'invalid_response',
           message: 'Android did not return a Wi-Fi enabled state.',
         );
@@ -60,7 +60,7 @@ class _WifiSettingsScreenState extends State<WifiSettingsScreen> {
       final response = await AssistantState.device
           .invokeMapMethod<String, Object?>('open_wifi_settings');
       if (response?['opened'] != true) {
-        throw const PlatformException(
+        throw PlatformException(
           code: 'not_opened',
           message: 'Android did not confirm opening its Wi-Fi settings.',
         );
