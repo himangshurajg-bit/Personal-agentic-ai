@@ -65,6 +65,7 @@ void main() {
       ]) {
         await tester.tap(find.byTooltip('Open navigation menu'));
         await tester.pumpAndSettle();
+        await _scrollDrawerUntilVisible(tester, entry.$1);
         await tester.tap(find.text(entry.$1).last);
         await tester.pumpAndSettle();
         final screenEvidence = find.text(entry.$2);

@@ -121,12 +121,9 @@ class _InAppToastScreenState extends State<InAppToastScreen> {
           FilledButton.icon(
             key: const ValueKey('review-in-app-toast'),
             onPressed: valid && !_reviewing ? _reviewAndShow : null,
-            icon: _reviewing
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.message_outlined),
+            // The review dialog is modal, so an indeterminate spinner under it
+            // would keep widget tests (and screen readers) in a false loading state.
+            icon: const Icon(Icons.message_outlined),
             label: Text(_reviewing ? 'Reviewing…' : 'Review message'),
           ),
           if (_status case final status?) ...[
