@@ -80,27 +80,22 @@ void main() {
         expect(tester.takeException(), isNull, reason: 'Entering ${entry.$1}');
       }
 
-      var chatUsesDrawer = false;
       for (final label in ['Chat', 'Memory', 'Settings', 'Home', 'Memory']) {
-        if (chatUsesDrawer) {
-          await tester.tap(find.byTooltip('Open navigation menu'));
-          await tester.pumpAndSettle();
-          if (label == 'Memory' || label == 'Settings') {
-            await _scrollDrawerUntilVisible(tester, label);
-          }
-          await tester.tap(find.text(label).last);
-        } else {
-          await tester.tap(find.text(label).last);
-        }
+        await tester.tap(find.byTooltip('Open navigation menu'));
+        await tester.pumpAndSettle();
+        await _scrollDrawerUntilVisible(tester, label);
+        final drawerItem = find.descendant(
+          of: find.byKey(const Key('navigation-drawer-list')),
+          matching: find.text(label),
+        );
+        await tester.tap(drawerItem.last);
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull, reason: 'Entering $label');
         if (label == 'Chat') {
           expect(find.text('Chat'), findsNothing);
           expect(find.byTooltip('Start a voice conversation'), findsNothing);
-          chatUsesDrawer = true;
         } else if (label == 'Memory') {
           expect(find.text('Synthetic navigation memory'), findsOneWidget);
-          chatUsesDrawer = false;
         }
       }
       await tester.pumpWidget(const SizedBox());
