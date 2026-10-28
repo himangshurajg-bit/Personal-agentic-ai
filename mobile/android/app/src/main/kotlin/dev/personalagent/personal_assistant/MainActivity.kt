@@ -12,6 +12,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -53,6 +54,18 @@ import java.util.concurrent.TimeUnit
 
 internal fun isValidTextSharePayload(title: String?, text: String?): Boolean =
     !title.isNullOrBlank() && title.length <= 80 && !text.isNullOrBlank() && text.length <= 10000
+
+internal const val MAX_CLIPBOARD_PREVIEW_CHARS = 4000
+internal data class ClipboardPreviewText(val text: String, val truncated: Boolean)
+
+internal fun boundedClipboardPreview(text: CharSequence?): ClipboardPreviewText? {
+    if (text == null || text.isEmpty()) return null
+    val length = minOf(text.length, MAX_CLIPBOARD_PREVIEW_CHARS)
+    return ClipboardPreviewText(
+        text = text.subSequence(0, length).toString(),
+        truncated = text.length > MAX_CLIPBOARD_PREVIEW_CHARS,
+    )
+}
 
 internal fun canPostAssistantTaskNotification(sdk: Int, notificationsGranted: Boolean): Boolean =
     sdk < 33 || notificationsGranted
@@ -684,6 +697,7 @@ class MainActivity : FlutterFragmentActivity() {
                 ))
                 "request_access_permission" -> requestAccessPermission(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "share_text" -> shareText(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
+                "read_clipboard_text_preview" -> readClipboardTextPreview(result)
                 "voice_start" -> startVoice(call.arguments as? Map<*,*> ?: emptyMap<Any,Any>(),result)
                 "voice_cancel" -> {stopVoice();result.success(true)}
                 "list_launchable_apps" -> {
@@ -1277,6 +1291,22 @@ class MainActivity : FlutterFragmentActivity() {
             }
             .setOnCancelListener { result.success(mapOf("result" to "cancelled")) }
             .show()
+    }
+
+    private fun readClipboardTextPreview(result: MethodChannel.Result) {
+        try {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            val clip = clipboard?.primaryClip
+            val firstPlainText = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text
+            val preview = boundedClipboardPreview(firstPlainText)
+            if (preview == null) {
+                result.error("no_plain_text", "The clipboard has no plain text to preview.", null)
+                return
+            }
+            result.success(mapOf("text" to preview.text, "truncated" to preview.truncated))
+        } catch (_: Exception) {
+            result.error("unavailable", "Android could not read clipboard text.", null)
+        }
     }
 
     private fun shareText(args: Map<*, *>, result: MethodChannel.Result) {

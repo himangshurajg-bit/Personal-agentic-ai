@@ -28,3 +28,7 @@ This is a focused feature adaptation, not complete MYRA parity. The preserved `m
 Personal AI now adapts MYRA's source-backed `navigate_to` capability as a user-entered Android Skills & actions flow: the owner types one place/address (up to 120 characters), then Android shows that exact text in a confirmation dialog before opening a `geo:` search in an available map app. The app does not read location, infer a destination, start turn-by-turn navigation, or claim that a map result loaded. This is a manual, user-started handoff rather than MYRA's Gemini tool-call route. Parser encoding/bounds and the Flutter interaction have focused tests; physical map-app selection and Redmi behavior remain untested.
 
 - Wi-Fi: Personal AI has a separate user-tapped enabled-state read and Android connectivity-settings handoff; it does not toggle Wi-Fi, read network details, or claim post-settings state. See `docs/MYRA_WIFI.md`; runtime/device behavior remains unverified.
+
+### Reviewed clipboard excerpt
+
+Personal AI reads clipboard text only after the user taps **Review clipboard text**. It previews the first plain-text item (up to 4,000 characters) and, only after **Add to draft**, inserts a clearly marked quoted excerpt into the editable chat draft. It does not send, monitor, or retain the clipboard content automatically. The draft still requires the usual user Send action. This is a manual reviewed adaptation of MYRA's `read_clipboard_text` capability, not automatic Gemini function-call routing; Android device behavior remains unverified.
