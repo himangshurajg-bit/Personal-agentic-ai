@@ -31,6 +31,7 @@ import 'typing_indicator.dart';
 import 'visual_theme.dart';
 import 'voice_services.dart';
 import 'live_conversation.dart';
+import 'in_app_toast_screen.dart';
 import 'readable_math.dart';
 
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -264,6 +265,7 @@ class _AssistantAppState extends State<AssistantApp>
           '/automations': (_) => ActionHistory(state: widget.state),
           '/drafts': (_) => const OutboundDraftsScreen(),
           '/skills': (_) => SafeSkillsScreen(state: widget.state),
+          '/in-app-toast': (_) => const InAppToastScreen(),
           '/images': (_) => ImageGenerationScreen(
             endpoint: widget.state.endpoint,
             token: widget.state.token,
@@ -841,6 +843,12 @@ class _AssistantDrawer extends StatelessWidget {
                     label: 'Skills & actions',
                     selected: _selected('/skills'),
                     onTap: () => _go(context, '/skills'),
+                  ),
+                  _DrawerRow(
+                    icon: Icons.message_outlined,
+                    label: 'In-app toast',
+                    selected: _selected('/in-app-toast'),
+                    onTap: () => _go(context, '/in-app-toast'),
                   ),
                   _DrawerRow(
                     icon: Icons.edit_note_rounded,

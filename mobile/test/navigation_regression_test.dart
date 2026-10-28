@@ -61,6 +61,7 @@ void main() {
       for (final entry in [
         ('Skills & actions', 'What the team can and can’t do'),
         ('Message & social drafts', 'Write it here, send it yourself'),
+        ('In-app toast', 'Show a short message'),
       ]) {
         await tester.tap(find.byTooltip('Open navigation menu'));
         await tester.pumpAndSettle();
