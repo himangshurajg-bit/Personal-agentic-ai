@@ -32,6 +32,7 @@ import 'visual_theme.dart';
 import 'voice_services.dart';
 import 'live_conversation.dart';
 import 'in_app_toast_screen.dart';
+import 'clipboard_draft.dart';
 import 'readable_math.dart';
 
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -4498,6 +4499,81 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _reviewClipboardText() async {
+    if (_chatFeatureBusy) return;
+    setState(() {
+      _chatFeatureBusy = true;
+      _chatFeatureError = '';
+    });
+    try {
+      final result = await AssistantState.device
+          .invokeMapMethod<String, dynamic>('read_clipboard_text_preview');
+      if (!mounted) return;
+      final text = result?['text'];
+      final truncated = result?['truncated'];
+      if (text is! String || text.isEmpty || truncated is! bool) {
+        throw const FeatureServiceException(
+          'There is no plain-text clipboard excerpt to review.',
+        );
+      }
+      final reviewed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Review clipboard text'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  truncated
+                      ? 'Showing the first 4,000 characters. This excerpt will be quoted in your draft; it will not be sent until you tap Send.'
+                      : 'This excerpt will be quoted in your draft; it will not be sent until you tap Send.',
+                ),
+                const SizedBox(height: 12),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 320),
+                  child: SingleChildScrollView(
+                    child: SelectableText(text),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Add to draft'),
+            ),
+          ],
+        ),
+      );
+      if (reviewed != true || !mounted) return;
+      final updated = appendClipboardExcerptDraft(input.text, text);
+      input.value = TextEditingValue(
+        text: updated,
+        selection: TextSelection.collapsed(offset: updated.length),
+      );
+      _inputFocus.requestFocus();
+    } on PlatformException catch (error) {
+      if (mounted) {
+        setState(
+          () => _chatFeatureError =
+              error.message ?? 'Android could not read clipboard text.',
+        );
+      }
+    } catch (error) {
+      if (mounted) setState(() => _chatFeatureError = error.toString());
+    } finally {
+      if (mounted) setState(() => _chatFeatureBusy = false);
+    }
+  }
+
   Future<void> _openGoogleAiMode() async {
     if (_chatFeatureBusy) return;
     try {
@@ -5011,9 +5087,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ),
                       ),
                     ),
-                  Row(
+                  Wrap(
                     key: const ValueKey('chat-feature-actions'),
-                    mainAxisSize: MainAxisSize.min,
+                    spacing: 4,
+                    runSpacing: 4,
                     children: [
                       IconButton.filledTonal(
                         tooltip: 'Attach image or file',
@@ -5025,6 +5102,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             ? null
                             : _pickChatAttachment,
                         icon: const Icon(Icons.attach_file_rounded),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton.filledTonal(
+                        tooltip: 'Review clipboard text',
+                        constraints: const BoxConstraints.tightFor(
+                          width: 48,
+                          height: 48,
+                        ),
+                        onPressed: _chatFeatureBusy
+                            ? null
+                            : _reviewClipboardText,
+                        icon: const Icon(Icons.content_paste_go_rounded),
                       ),
                       const SizedBox(width: 4),
                       IconButton.filledTonal(
