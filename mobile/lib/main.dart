@@ -22,6 +22,9 @@ import 'phone_screens.dart';
 import 'safe_workflows.dart';
 import 'image_generation_screen.dart';
 import 'assistant_features_screen.dart';
+import 'download_input.dart';
+import 'download_review.dart';
+import 'spoken_download_command.dart';
 import 'feature_services.dart';
 import 'ui_motion.dart';
 import 'typing_indicator.dart';
@@ -3925,6 +3928,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       while (_liveConversationActive && _liveTurnQueue.isNotEmpty) {
         final turn = _liveTurnQueue.removeAt(0);
+        final download = SpokenDownloadCommand.parse(turn);
+        if (download != null) {
+          await _reviewAndStartLiveDownload(download);
+          continue;
+        }
         await widget.state.send(
           turn,
           shareMemories: widget.state.shareMemories,
@@ -3948,6 +3956,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     } finally {
       _liveTurnProcessing = false;
+    }
+  }
+
+  Future<void> _reviewAndStartLiveDownload(DownloadInput download) async {
+    final approved = await reviewDownload(context, download);
+    if (!approved || !mounted || !_liveConversationActive) return;
+    try {
+      final result = await AssistantState.device
+          .invokeMapMethod<String, dynamic>('enqueue_user_download', {
+            'url': download.url,
+            'file_name': download.fileName,
+          });
+      if (!mounted) return;
+      notice(
+        context,
+        result == null
+            ? 'Android did not confirm that the download started.'
+            : 'Android accepted ${result['file_name'] ?? download.fileName}. Completion is not verified.',
+      );
+    } catch (error) {
+      if (mounted) notice(context, 'Download did not start: $error');
     }
   }
 

@@ -16,6 +16,7 @@ import 'system_clock_timer_screen.dart';
 import 'journal_screen.dart';
 import 'office_document.dart';
 import 'download_input.dart';
+import 'download_review.dart';
 
 const _featureVoiceEvents = MethodChannel('personal_assistant/feature_voice');
 
@@ -133,26 +134,8 @@ class _DownloadsFeatureState extends State<_DownloadsFeature> {
       );
       return;
     }
-    final approved = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Review download'),
-        content: SelectableText(
-          'Download ${parsed.fileName} from:\n${parsed.url}\n\nThis uses network data and may incur charges. The file will be stored in Personal AI’s app-specific Downloads folder.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Start download'),
-          ),
-        ],
-      ),
-    );
-    if (approved != true || !mounted) return;
+    final approved = await reviewDownload(context, parsed);
+    if (!approved || !mounted) return;
     setState(() {
       _starting = true;
       _message = 'Starting download…';
