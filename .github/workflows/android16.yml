@@ -67,6 +67,24 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
           script: bash ci/android16-checks.sh
+      - name: Retain the exact API 36 APK
+        if: always()
+        run: |
+          apk="mobile/build/app/outputs/flutter-apk/app-debug.apk"
+          output_dir="evidence/android16"
+          mkdir -p "$output_dir"
+          if [[ -s "$apk" ]]; then
+            file="personal-agentic-ai-android16-${GITHUB_RUN_ID}-${GITHUB_SHA:0:12}.apk"
+            cp "$apk" "$output_dir/$file"
+            sha256="$(sha256sum "$output_dir/$file" | awk '{print $1}')"
+            printf 'workflow_run_id=%s\ncommit_sha=%s\nartifact_file=%s\nsha256=%s\n' \
+              "$GITHUB_RUN_ID" "$GITHUB_SHA" "$file" "$sha256" \
+              > "$output_dir/build-metadata.txt"
+          else
+            printf 'workflow_run_id=%s\ncommit_sha=%s\nresult=APK was not produced\n' \
+              "$GITHUB_RUN_ID" "$GITHUB_SHA" \
+              > "$output_dir/apk-unavailable.txt"
+          fi
       - name: Evidence
         if: always()
         uses: actions/upload-artifact@v4
