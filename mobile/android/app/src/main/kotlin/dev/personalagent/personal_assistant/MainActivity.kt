@@ -22,6 +22,7 @@ import android.graphics.pdf.PdfRenderer
 import android.graphics.Canvas
 import android.media.MediaPlayer
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.net.TrafficStats
 import android.os.Build
 import android.os.Bundle
@@ -635,6 +636,38 @@ class MainActivity : FlutterFragmentActivity() {
                     call.argument<Any>("message"),
                     result,
                 )
+                "read_wifi_status" -> {
+                    try {
+                        val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                        if (wifi == null) result.error("unavailable", "Wi-Fi status is unavailable on this device.", null)
+                        else result.success(mapOf("enabled" to wifi.isWifiEnabled))
+                    } catch (_: SecurityException) {
+                        result.error("unavailable", "Android did not allow reading Wi-Fi enabled state.", null)
+                    } catch (_: Exception) {
+                        result.error("unavailable", "Wi-Fi status is unavailable on this device.", null)
+                    }
+                }
+                "open_wifi_settings" -> {
+                    val primary = Intent(WifiActions.INTERNET_CONNECTIVITY_PANEL)
+                    try {
+                        startActivity(primary)
+                        result.success(mapOf("opened" to true, "destination" to "connectivity_panel"))
+                    } catch (_: android.content.ActivityNotFoundException) {
+                        try {
+                            startActivity(Intent(WifiActions.WIFI_SETTINGS))
+                            result.success(mapOf("opened" to true, "destination" to "wifi_settings"))
+                        } catch (_: Exception) {
+                            result.error("unavailable", "Android could not open Wi-Fi settings.", null)
+                        }
+                    } catch (_: Exception) {
+                        try {
+                            startActivity(Intent(WifiActions.WIFI_SETTINGS))
+                            result.success(mapOf("opened" to true, "destination" to "wifi_settings"))
+                        } catch (_: Exception) {
+                            result.error("unavailable", "Android could not open Wi-Fi settings.", null)
+                        }
+                    }
+                }
                 "read_system_metrics" -> result.success(readSystemMonitorMetrics())
                 "enqueue_user_download" -> enqueueUserDownload(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "list_user_downloads" -> listUserDownloads(result)

@@ -237,6 +237,32 @@ void main() {
     },
   );
 
+  testWidgets('haptic test requests feedback only after an explicit tap', (
+    tester,
+  ) async {
+    final hapticCalls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method.startsWith('HapticFeedback.')) {
+            hapticCalls.add(call);
+          }
+          return null;
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: HapticPulseAction())),
+    );
+    expect(hapticCalls, isEmpty);
+    await tester.tap(find.byKey(const ValueKey('haptic-pulse-action')));
+    await tester.pumpAndSettle();
+    expect(hapticCalls.map((call) => call.method), ['HapticFeedback.vibrate']);
+    expect(find.text('Requested one short haptic pulse.'), findsOneWidget);
+  });
+
   testWidgets(
     'skills page exposes local actions and a bounded multi-agent workflow',
     (tester) async {
@@ -247,6 +273,7 @@ void main() {
       expect(find.text('Open a study app'), findsOneWidget);
       expect(find.text('Prepare a study reminder'), findsOneWidget);
       expect(find.text('Turn flashlight off'), findsOneWidget);
+      expect(find.text('Test haptic feedback'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('map-search-destination')),
         findsOneWidget,
