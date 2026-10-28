@@ -16,6 +16,7 @@ import 'system_clock_timer_screen.dart';
 import 'journal_screen.dart';
 import 'office_document.dart';
 import 'download_input.dart';
+import 'clipboard_preview_screen.dart';
 
 const _featureVoiceEvents = MethodChannel('personal_assistant/feature_voice');
 
@@ -34,7 +35,7 @@ class FeaturesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DefaultTabController(
     initialIndex: initialTab,
-    length: 10,
+    length: 11,
     child: Scaffold(
       appBar: AppBar(
         title: const Text('Assistant tools'),
@@ -54,6 +55,7 @@ class FeaturesScreen extends StatelessWidget {
             Tab(icon: Icon(Icons.edit_note_rounded), text: 'Journal'),
             Tab(icon: Icon(Icons.alarm_add_rounded), text: 'Clock timer'),
             Tab(icon: Icon(Icons.download_outlined), text: 'Downloads'),
+            Tab(icon: Icon(Icons.content_paste_outlined), text: 'Clipboard'),
           ],
         ),
       ),
@@ -69,6 +71,7 @@ class FeaturesScreen extends StatelessWidget {
           JournalScreen(state: state),
           const SystemClockTimerScreen(),
           const _DownloadsFeature(),
+          const ClipboardPreviewScreen(),
         ],
       ),
     ),
