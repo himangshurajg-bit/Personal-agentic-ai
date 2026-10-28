@@ -111,10 +111,13 @@ Future<void> _scrollDrawerUntilVisible(
 ) async {
   final list = find.byKey(const Key('navigation-drawer-list'));
   final item = find.descendant(of: list, matching: find.text(label));
-  expect(item, findsOneWidget);
-  // The item may be within the overall screen bounds but clipped by the drawer's
-  // own viewport. Let its actual ancestor Scrollable reveal it before tapping.
-  await tester.ensureVisible(item);
+  // ListView lazily builds offscreen drawer rows, so scroll the drawer's own
+  // viewport until the requested item exists and is visible.
+  await tester.scrollUntilVisible(
+    item,
+    240,
+    scrollable: find.descendant(of: list, matching: find.byType(Scrollable)).first,
+  );
   await tester.pumpAndSettle();
   final listRect = tester.getRect(list);
   expect(listRect.contains(tester.getCenter(item)), isTrue);
