@@ -265,15 +265,22 @@ class _ScreenShareReceiverScreenState extends State<ScreenShareReceiverScreen>
     if (mounted) await _refresh();
   }
 
-  Future<void> _copyPairingCode() async {
+  String? get _pairingInvitation {
+    final id = _pairingId;
     final code = _pairingCode;
-    if (code == null) return;
-    await Clipboard.setData(ClipboardData(text: code));
+    if (id == null || code == null) return null;
+    return '{"pairing_id":"$id","pairing_code":"$code"}';
+  }
+
+  Future<void> _copyPairingInvitation() async {
+    final invitation = _pairingInvitation;
+    if (invitation == null) return;
+    await Clipboard.setData(ClipboardData(text: invitation));
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Temporary pairing code copied. Clear it after pairing.',
+            'Temporary pairing invitation copied. Paste it only into MYRA on the device you intend to pair.',
           ),
         ),
       );
@@ -624,6 +631,7 @@ class _ScreenShareReceiverScreenState extends State<ScreenShareReceiverScreen>
                   ),
                   if (_pairingCode != null) ...[
                     const SizedBox(height: 12),
+                    Text('Pairing ID: ${_pairingId ?? ''}'),
                     SelectableText(
                       _pairingCode!,
                       key: const Key('screen-share-pairing-code'),
@@ -634,9 +642,9 @@ class _ScreenShareReceiverScreenState extends State<ScreenShareReceiverScreen>
                       'One-time code · expires ${_pairingDeadline?.toLocal().toString().substring(11, 16) ?? 'soon'}',
                     ),
                     TextButton.icon(
-                      onPressed: _copyPairingCode,
+                      onPressed: _copyPairingInvitation,
                       icon: const Icon(Icons.copy_rounded),
-                      label: const Text('Copy temporary code'),
+                      label: const Text('Copy invitation for MYRA'),
                     ),
                   ],
                 ],

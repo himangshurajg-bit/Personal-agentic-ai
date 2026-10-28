@@ -1,6 +1,6 @@
 # Personal AI paired screen-share receiver (prototype contract)
 
-This receiver accepts an explicit stream from one paired sender. Personal AI now provides the receiver-side pairing, per-request approval, bounded latest-frame viewer, stop and revoke controls. It does not capture a screen or start Android `MediaProjection`; a sender must get Android's per-session approval and run its foreground service before it connects. A text field or client-supplied `media_projection_consent: true` is only a protocol assertion; the server cannot prove the Android system dialog was granted.
+This receiver accepts an explicit stream from one paired sender. Personal AI provides receiver-side pairing, per-request approval, a bounded latest-frame viewer, stop and revoke controls. The matching MYRA native Android source now includes pairing, approval polling, Android `MediaProjection` consent, and a visible foreground capture service. A text field or client-supplied `media_projection_consent: true` remains only a protocol assertion; the server cannot prove the Android system dialog was granted.
 
 ## Security and lifecycle
 
@@ -9,7 +9,8 @@ This receiver accepts an explicit stream from one paired sender. Personal AI now
 - The sender token is scoped to that pairing, stored only as a hash, expires after 30 days, and is revoked when the receiver revokes the pairing. It is not the service's owner token.
 - Pairing alone does not authorize screen content. Every sender-created session remains `awaiting_receiver_approval` until the receiver explicitly approves that exact session; an unstarted approval expires five minutes after the request. One pending/active session per paired sender; at most two pending/active sessions for this single-user process.
 - The stream route checks the pairing token in the WebSocket `Authorization` header before accepting. The first text message must declare an explicit start after OS consent and a foreground service; subsequent messages must be bounded JPEG binary frames. No frame is accepted before receiver approval.
-- The owner can stop one session or revoke a pairing. Both clear the in-memory latest frame and close the sending WebSocket. The sender must treat disconnect/close as a stop signal and call `MediaProjection.stop()` / stop its foreground service. Android's `MediaProjection.Callback.onStop` must likewise terminate its local encoder and socket.
+- The owner can stop one session or revoke a pairing. Both clear the in-memory latest frame and close the sending WebSocket. MYRA closes the local projection, encoder, socket and foreground service when the receiver closes the stream, Android revokes projection, the owner taps Stop, the user taps the notification Stop action, or the one-hour limit is reached.
+- MYRA stores the pairing-scoped token encrypted with an Android Keystore AES/GCM key in app-private preferences (backups are disabled). It uses HTTPS/WSS only, disables redirects, never logs the token or frames, downsamples to at most 1280 px on the long edge and sends 3 JPEG frames per second with no audio.
 - Pairings, sessions and the latest frame are held only in service-process memory. Restart clears them and disconnects streams; no frame is written to SQLite, a file or the model.
 
 ## HTTP contract
@@ -26,7 +27,7 @@ All URLs are relative to the private service origin. Use HTTPS/WSS whenever traf
 
 ## Still required before real use
 
-- The receiver UI can create/show a one-use code, list paired senders, review/approve an exact session, display bounded JPEG frames, stop sessions and revoke pairings. Implement the sender-side code entry plus MediaProjection foreground service in MYRA; no capture/sender implementation is included here.
-- Ensure transport is HTTPS/WSS on an owner-controlled reachable service, with firewall/network policy and token-safe logging; the current loopback dev service cannot receive from a separate Android device.
-- Validate Android 14+ MediaProjection consent, foreground service type, lifecycle stop callbacks, reconnection/rotation behavior, and display on the actual devices. No Android build, end-to-end test, emulator/device check, or live screen display is claimed by this contract.
+- The receiver now shows a copyable temporary invitation (`pairing_id` + one-use code) for MYRA. The MYRA sender UI can redeem it, request a session, poll state, stop a pending/active session and forget its local token. Pairing does not start capture: Personal AI must approve the exact request before MYRA can launch Android's system MediaProjection consent flow.
+- Android validation passed: Gradle `:app:testDebugUnitTest` completed 388 tests with no failures, and `:app:assembleDebug` built the debug APK. This confirms compilation and unit tests, not device operation. MediaProjection/foreground-service behavior on Android 14+, screen orientation/rotation, notification permissions, owner stop/revoke and actual frame display still need device testing.
+- Ensure transport is HTTPS/WSS on an owner-controlled reachable service, with firewall/network policy and token-safe logging; the current development service binds to loopback and cannot receive from a separate Android device. No deployment, public network exposure or HTTPS/WSS reachability is established by this branch.
 - Add integration tests for real TLS/network deployment and client decoding before enabling this in a release.

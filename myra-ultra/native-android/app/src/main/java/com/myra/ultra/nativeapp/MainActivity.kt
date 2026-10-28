@@ -3359,6 +3359,11 @@ private fun ToolsScreen() {
     var showClockTimer by remember { mutableStateOf(false) }
     var showTextTools by remember { mutableStateOf(false) }
     var showWebForge by remember { mutableStateOf(false) }
+    var showScreenShare by remember { mutableStateOf(false) }
+    if (showScreenShare) {
+        ScreenShareSenderScreen(onBack = { showScreenShare = false })
+        return
+    }
     if (showWebForge) {
         WebForgeScreen(onBack = { showWebForge = false })
         return
@@ -3437,6 +3442,7 @@ private fun ToolsScreen() {
     FeatureCard("Set timer", "Choose a duration, then review it in your Clock app", "T") { showClockTimer = true }
     FeatureCard("Text tools", "Encode Base64 or URL text; format or minify JSON offline", "X") { showTextTools = true }
     FeatureCard("WebForge projects", "Create and edit local HTML, CSS and JavaScript with an offline preview", "W") { showWebForge = true }
+    FeatureCard("Share screen with Personal AI", "Pair to your receiver; each request needs receiver approval and Android capture consent", "S") { showScreenShare = true }
     Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
         Column(Modifier.padding(16.dp)) {
             Text("Volume control", color = Color.White, fontWeight = FontWeight.SemiBold)
@@ -3701,7 +3707,7 @@ private fun ToolsScreen() {
         OutlinedTextField(value = query, onValueChange = { query = it }, modifier = Modifier.weight(1f), placeholder = { Text("Search the web") }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Mint))
         Spacer(Modifier.width(8.dp)); IconButton(onClick = { if (query.isNotBlank()) { val url = Uri.parse("https://www.google.com/search?q=" + Uri.encode(query.trim())); context.startActivity(Intent(Intent.ACTION_VIEW, url)) } }, enabled = query.isNotBlank()) { Icon(Icons.Default.Search, "Search in browser", tint = Mint) }
     }
-    Spacer(Modifier.height(14.dp)); Text("Not connected yet: MYRA AI tools, automations, messages/calls, location, screen capture and desktop controls. Share text opens Android’s chooser; MYRA does not send it until you select a destination. Web search opens your browser.", color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
+    Spacer(Modifier.height(14.dp)); Text("Not connected yet: MYRA AI tools, automations, messages/calls, location and desktop controls. Screen sharing is available above and starts only after separate receiver and Android approvals. Share text opens Android’s chooser; MYRA does not send it until you select a destination. Web search opens your browser.", color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
     }
 }
 

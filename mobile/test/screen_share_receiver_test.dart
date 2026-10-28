@@ -259,7 +259,9 @@ void main() {
 
     expect(find.byKey(const Key('screen-share-pairing-code')), findsOneWidget);
     expect(find.text(pairingCode), findsOneWidget);
+    expect(find.text('Pairing ID: $pairingId'), findsOneWidget);
     expect(find.textContaining('One-time code · expires'), findsOneWidget);
+    expect(find.text('Copy invitation for MYRA'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     state.dispose();
