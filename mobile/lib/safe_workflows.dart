@@ -347,6 +347,53 @@ class _TorchOffActionState extends State<TorchOffAction> {
   );
 }
 
+/// A user-started haptic test, adapted from MYRA's bounded vibration action.
+class HapticPulseAction extends StatefulWidget {
+  const HapticPulseAction({super.key});
+
+  @override
+  State<HapticPulseAction> createState() => _HapticPulseActionState();
+}
+
+class _HapticPulseActionState extends State<HapticPulseAction> {
+  bool _running = false;
+
+  Future<void> _pulse() async {
+    if (_running) return;
+    setState(() => _running = true);
+    try {
+      await HapticFeedback.vibrate();
+      if (mounted) {
+        notice(context, 'Requested one short haptic pulse.');
+      }
+    } on PlatformException {
+      if (mounted) {
+        notice(context, 'This device did not provide haptic feedback.');
+      }
+    } finally {
+      if (mounted) setState(() => _running = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+    key: const ValueKey('haptic-pulse-action'),
+    contentPadding: EdgeInsets.zero,
+    leading: _running
+        ? const SizedBox.square(
+            dimension: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : const Icon(Icons.vibration_outlined),
+    title: const Text('Test haptic feedback'),
+    subtitle: const Text(
+      'Tap to request one short pulse. Android may ignore it if vibration is unavailable or disabled.',
+    ),
+    trailing: const Icon(Icons.chevron_right_rounded),
+    onTap: _running ? null : _pulse,
+  );
+}
+
 /// First-party skills are limited to the already-reviewed local actions.
 class SafeSkillsScreen extends StatelessWidget {
   final AssistantState state;
@@ -398,6 +445,8 @@ class SafeSkillsScreen extends StatelessWidget {
               const MapSearchAction(),
               const Divider(),
               const TorchOffAction(),
+              const Divider(),
+              const HapticPulseAction(),
               const Divider(),
               ListTile(
                 key: const ValueKey('multi-agent-workflow-entry'),
