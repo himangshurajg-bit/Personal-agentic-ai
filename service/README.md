@@ -14,7 +14,7 @@ uv sync --project service --locked
 uv run --project service uvicorn service.app:create_app --factory --host 127.0.0.1 --port 8766 --no-access-log
 ```
 
-Keep this shell and local database private. The default database is `assistant.sqlite3` in the current directory; `ASSISTANT_DB` changes that path. SQLite messages, explicit memories and action receipts are plaintext at rest. Use your own private encrypted disk. There is one authenticated owner, not multiuser isolation. Do not put this development server on `0.0.0.0`, enable wildcard CORS or expose it publicly. Direct browser Origins are denied, API docs are disabled, and all routes require bearer authentication. Any production/network deployment needs a separate security and TLS review.
+Keep this shell and local database private. The default database is `assistant.sqlite3` in the current directory; `ASSISTANT_DB` changes that path. SQLite messages, explicit memories and action receipts are plaintext at rest. Use your own private encrypted disk. There is one authenticated owner, not multiuser isolation. Do not put this development server on `0.0.0.0`, enable wildcard CORS or expose it publicly. Direct browser Origins are denied and API docs are disabled. Standard routes require bearer authentication; screen-share pairing redemption instead requires its short-lived, one-use pairing capability. Any production/network deployment needs a separate security and TLS review.
 
 The Flutter client can reach loopback via USB `adb reverse tcp:8766 tcp:8766` or emulator `10.0.2.2`; otherwise it requires trusted HTTPS. The code does not set up a relay or public tunnel.
 

@@ -272,8 +272,9 @@ class ScreenShareRegistry:
             session = self._sessions.get(session_id)
             if session is None:
                 raise HTTPException(404, "Share session not found")
-            pairing = self._pairings.get(session.pairing_id)
             now = time.time()
+            self._clean_session(session, now)
+            pairing = self._pairings.get(session.pairing_id)
             if pairing:
                 self._clean_pairing(pairing, now)
             if (pairing is None or pairing.state != "paired" or not pairing.sender_token_hash
@@ -308,7 +309,18 @@ class ScreenShareRegistry:
     async def start_stream(self, session_id: str, pairing_id: str, ws: WebSocket) -> bool:
         async with self._lock:
             session = self._sessions.get(session_id)
-            if not session or session.pairing_id != pairing_id or session.state != "approved" or session.sender_socket is not None:
+            if session is None or session.pairing_id != pairing_id:
+                return False
+            now = time.time()
+            self._clean_session(session, now)
+            pairing = self._pairings.get(pairing_id)
+            if pairing is not None:
+                self._clean_pairing(pairing, now)
+            if (session.state != "approved" or session.sender_socket is not None
+                    or pairing is None or pairing.state != "paired"
+                    or pairing.sender_token_hash is None
+                    or pairing.sender_token_expires_at is None
+                    or pairing.sender_token_expires_at <= now):
                 return False
             session.state = "active"
             session.sender_socket = ws
@@ -374,8 +386,9 @@ class ScreenShareRegistry:
             session = self._sessions.get(session_id)
             if session is None:
                 raise HTTPException(404, "Share session not found")
-            pairing = self._pairings.get(session.pairing_id)
             now = time.time()
+            self._clean_session(session, now)
+            pairing = self._pairings.get(session.pairing_id)
             if pairing:
                 self._clean_pairing(pairing, now)
             if (pairing is None or pairing.state != "paired" or not pairing.sender_token_hash

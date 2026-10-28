@@ -1,3 +1,6 @@
+import asyncio
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -133,3 +136,67 @@ def test_pairing_revocation_stops_pending_session_and_sender_cannot_resume(tmp_p
         assert revoked.json()["state"] == "revoked"
         assert client.get(f"/screen-share/sessions/{session['session_id']}/status", headers=auth).status_code == 401
         assert client.post("/screen-share/sessions", json={"pairing_id": pairing["pairing_id"]}, headers=auth).status_code == 401
+
+
+def test_expired_receiver_approval_cannot_be_reused_for_stream(tmp_path):
+    app = create_app(tmp_path / "screen-share-expired-approval.sqlite", token=OWNER_TOKEN)
+    with TestClient(app) as client:
+        pairing, sender = _new_pair(client)
+        sender_auth = {"Authorization": f"Bearer {sender['sender_token']}"}
+        session = client.post(
+            "/screen-share/sessions",
+            json={"pairing_id": pairing["pairing_id"]},
+            headers=sender_auth,
+        ).json()
+        owner_auth = {"Authorization": f"Bearer {OWNER_TOKEN}"}
+        assert client.post(
+            f"/screen-share/sessions/{session['session_id']}/approve",
+            headers=owner_auth,
+        ).status_code == 200
+
+        # Model an old, abandoned approval without waiting five minutes.
+        internal = app.state.screen_share._sessions[session["session_id"]]
+        internal.created_at -= 301
+        status = client.get(
+            f"/screen-share/sessions/{session['session_id']}/status",
+            headers=sender_auth,
+        )
+        assert status.status_code == 200
+        assert status.json()["state"] == "expired"
+        assert client.get(
+            f"/screen-share/sessions/{session['session_id']}/frame",
+            headers=owner_auth,
+        ).status_code == 409
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect(
+                f"/screen-share/sessions/{session['session_id']}/stream",
+                headers=sender_auth,
+            ):
+                pass
+
+
+def test_stream_start_rechecks_pairing_expiry_after_initial_auth(tmp_path):
+    app = create_app(tmp_path / "screen-share-expired-pair.sqlite", token=OWNER_TOKEN)
+    with TestClient(app) as client:
+        pairing, sender = _new_pair(client)
+        sender_auth = {"Authorization": f"Bearer {sender['sender_token']}"}
+        session = client.post(
+            "/screen-share/sessions",
+            json={"pairing_id": pairing["pairing_id"]},
+            headers=sender_auth,
+        ).json()
+        assert client.post(
+            f"/screen-share/sessions/{session['session_id']}/approve",
+            headers={"Authorization": f"Bearer {OWNER_TOKEN}"},
+        ).status_code == 200
+
+        # Simulate expiry after stream authentication but before start_stream acquires its lock.
+        internal_pairing = app.state.screen_share._pairings[pairing["pairing_id"]]
+        internal_pairing.sender_token_expires_at = time.time() - 1
+        internal_session = app.state.screen_share._sessions[session["session_id"]]
+        assert asyncio.run(
+            app.state.screen_share.start_stream(
+                internal_session.id, internal_pairing.id, None,
+            )
+        ) is False
+        assert internal_session.state == "approved"
