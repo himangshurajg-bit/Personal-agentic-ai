@@ -34,6 +34,7 @@ import 'live_conversation.dart';
 import 'in_app_toast_screen.dart';
 import 'clipboard_draft.dart';
 import 'readable_math.dart';
+import 'screen_share_receiver.dart';
 
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -252,6 +253,8 @@ class _AssistantAppState extends State<AssistantApp>
               ChatScreen(state: widget.state, startWithVoiceCommand: true),
           '/settings': (_) => Settings(state: widget.state),
           '/connections': (_) => ApiMcpSettings(state: widget.state),
+          '/screen-share-receiver': (_) =>
+              ScreenShareReceiverScreen(state: widget.state),
           '/memory': (_) => Memories(state: widget.state),
           '/library': (_) => PhoneLibrary(state: widget.state),
           '/study': (_) => StudyScreen(state: widget.state),
@@ -7467,6 +7470,19 @@ class _SettingsState extends State<Settings> {
           subtitle: 'App lock, Android permissions and device access',
           icon: Icons.shield_outlined,
           children: [
+            Glass(
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.screen_share_outlined),
+                title: const Text('Screen-share receiver'),
+                subtitle: const Text(
+                  'Pair a sender, approve each request and view a temporary live preview.',
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () =>
+                    Navigator.pushNamed(context, '/screen-share-receiver'),
+              ),
+            ),
             const Glass(
               child: Text(
                 'Chat mode is chosen above. Online sends each prompt to the selected provider; offline uses the selected local Qwen3 or Gemma model only after opt-in and download/load, with no online fallback. Action, purchase, permission and other safety reviews remain separate. The private FastAPI adapter remains optional.',
