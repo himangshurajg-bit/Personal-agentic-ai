@@ -14,6 +14,10 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           calls.add(call);
+          if (call.method == 'set_temporary_brightness') {
+            return <String, Object?>{'applied': (call.arguments as Map)['level'], 'window_only': true};
+          }
+          if (call.method == 'restore_temporary_brightness') return true;
           if (call.method == 'share_text') {
             return <String, Object?>{'result': 'chooser_opened', 'sent': false};
           }
@@ -30,6 +34,41 @@ void main() {
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
+  });
+
+  testWidgets('temporary brightness requires review and fits narrow phones', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: TemporaryBrightnessAction())),
+    );
+    expect(calls, isEmpty);
+    expect(find.text('Temporary app brightness'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('review-temporary-brightness')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('brightness 128 of 255'), findsOneWidget);
+    expect(calls, isEmpty);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty);
+
+    await tester.tap(find.byKey(const ValueKey('review-temporary-brightness')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('approve-temporary-brightness')));
+    await tester.pumpAndSettle();
+    expect(calls.single.method, 'set_temporary_brightness');
+    expect(calls.single.arguments, {'level': 128});
+    expect(find.byKey(const ValueKey('restore-temporary-brightness')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byKey(const ValueKey('restore-temporary-brightness')));
+    await tester.pumpAndSettle();
+    expect(calls.last.method, 'restore_temporary_brightness');
   });
 
   testWidgets(

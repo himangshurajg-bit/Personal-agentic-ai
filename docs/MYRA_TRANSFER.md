@@ -36,3 +36,6 @@ Personal AI now has a manual, user-entered copy flow in Skills & actions, based 
 ### Reviewed clipboard excerpt
 
 Personal AI reads clipboard text only after the user taps **Review clipboard text**. It previews the first plain-text item (up to 4,000 characters) and, only after **Add to draft**, inserts a clearly marked quoted excerpt into the editable chat draft. It does not send, monitor, or retain the clipboard content automatically. The draft still requires the usual user Send action. This is a manual reviewed adaptation of MYRA's `read_clipboard_text` capability, not automatic Gemini function-call routing; Android device behavior remains unverified.
+
+### Reviewed temporary brightness
+Personal AI now adapts MYRA's bounded `set_brightness` feature as a user-started slider in Skills & actions. The selected 0–255 level is shown for approval and applied only to Personal AI's current Android window; the original window value is restored when the app pauses or the owner taps Restore now. It never changes system-wide brightness or requests `WRITE_SETTINGS`. Flutter interaction and range mapping have focused tests; physical screen behavior and lifecycle restoration remain unverified on a device. This is a manual app control, not Gemini function-call routing.
