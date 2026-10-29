@@ -12,7 +12,13 @@ This is the stable, direct-install ARM64 release; its Android `versionName` is e
 
 Navigation is Home, Chat, Automations, Memory & Library, Settings. Study and selected files are within those destinations, not separate primary tabs. Automations currently contains individual reviewed actions and receipts, **not** a workflow engine.
 
-### Check for app updates
+### HyperOS Super Island (gated prototype)
+
+The Android assistant-task notification now has a best-effort Xiaomi Super Island adapter. It attaches a small, generic OS3 payload only in an explicitly opted-in build when the device reports the island feature and focus protocol version 3. The default build flag is off; unsupported devices, OS2, missing system-property access, and all default builds keep the existing ordinary Android notification. The integration does not send task titles/prompts in the vendor payload. See [the integration and Xiaomi approval checklist](../docs/HYPEROS_SUPER_ISLAND.md).
+
+This is code support, not Xiaomi service approval or proof that an island appears. It has not been tested on a whitelisted HyperOS 3 device. Do not enable the build flag for a public release until the relevant Xiaomi review and device verification are complete.
+
+## Check for app updates
 
 Settings → **App updates** checks only when you tap, using the public GitHub latest-release API for `himangshurajg-bit/Personal-agentic-ai`. The checker accepts only a published stable release with the expected versioned tag and one uploaded `app-release.apk` asset at the exact HTTPS URL for this repository. This validates release metadata and the pinned download location, not the APK bytes or signature before download. It compares numeric Android version components and build number to the installed package; an equal/older release is never offered. It shows the release notes before a separate **Get update from GitHub** tap opens that official APK download. The app sends no account token, chat, memory or device data; GitHub receives the usual request metadata/IP.
 
