@@ -10,6 +10,11 @@ val releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
 val releaseStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
 val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
 val releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+// Xiaomi Super Island output is disabled in all default builds. Enable only for a
+// Xiaomi-approved, whitelisted development test; this flag does not grant permission.
+val hyperOsIslandOptIn = providers.gradleProperty("hyperosIslandOptIn")
+    .orNull?.toBooleanStrictOrNull() ?: false
+
 val hasReleaseSigning = listOf(
     releaseKeystorePath,
     releaseStorePassword,
@@ -27,6 +32,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "dev.personalagent.personal_assistant"
@@ -41,6 +50,7 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        buildConfigField("boolean", "HYPEROS_ISLAND_OPT_IN", hyperOsIslandOptIn.toString())
     }
 
     signingConfigs {

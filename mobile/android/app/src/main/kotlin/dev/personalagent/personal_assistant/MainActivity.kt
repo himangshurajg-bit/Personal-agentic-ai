@@ -12,12 +12,14 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.drawable.Icon
 import android.graphics.pdf.PdfRenderer
 import android.graphics.Canvas
 import android.media.MediaPlayer
@@ -32,6 +34,7 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.StatFs
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.speech.SpeechRecognizer
 import android.speech.RecognitionListener
 import android.speech.RecognitionSupport
@@ -56,6 +59,18 @@ internal fun isValidTextSharePayload(title: String?, text: String?): Boolean =
 
 internal fun temporaryWindowBrightness(level: Int): Float? =
     level.takeIf { it in 0..255 }?.div(255f)
+
+internal const val MAX_CLIPBOARD_PREVIEW_CHARS = 4000
+internal data class ClipboardPreviewText(val text: String, val truncated: Boolean)
+
+internal fun boundedClipboardPreview(text: CharSequence?): ClipboardPreviewText? {
+    if (text == null || text.isEmpty()) return null
+    val length = minOf(text.length, MAX_CLIPBOARD_PREVIEW_CHARS)
+    return ClipboardPreviewText(
+        text = text.subSequence(0, length).toString(),
+        truncated = text.length > MAX_CLIPBOARD_PREVIEW_CHARS,
+    )
+}
 
 internal fun canPostAssistantTaskNotification(sdk: Int, notificationsGranted: Boolean): Boolean =
     sdk < 33 || notificationsGranted
@@ -317,7 +332,57 @@ class MainActivity : FlutterFragmentActivity() {
             .setContentIntent(openChat)
             .addAction(android.app.Notification.Action.Builder(android.R.drawable.ic_btn_speak_now, "Voice command", openVoice).build())
             .build()
+
+        val islandPayload = if (BuildConfig.HYPEROS_ISLAND_OPT_IN) {
+            buildHyperOsIslandPayload(
+                buildOptIn = true,
+                manufacturer = Build.MANUFACTURER,
+                brand = Build.BRAND,
+                islandSystemFeature = hasHyperOsIslandSystemFeature(),
+                focusProtocolVersion = hyperOsFocusProtocolVersion(),
+                standardTaskStatus = status,
+            )
+        } else {
+            null
+        }
+        if (islandPayload != null) {
+            // The regular notification remains the source of truth and fallback.
+            // The vendor view receives only fixed, generic app/status strings.
+            notification.extras.putString(HYPEROS_ISLAND_PARAM_EXTRA, islandPayload)
+            notification.extras.putBundle(
+                HYPEROS_ISLAND_PICS_EXTRA,
+                Bundle().apply {
+                    putParcelable(
+                        HYPEROS_ISLAND_APP_ICON_KEY,
+                        Icon.createWithResource(this@MainActivity, R.mipmap.ic_launcher),
+                    )
+                },
+            )
+        }
         manager.notify(TASK_NOTIFICATION_ID, notification)
+    }
+
+    private fun hasHyperOsIslandSystemFeature(): Boolean {
+        if (Build.MANUFACTURER.lowercase() !in setOf("xiaomi", "redmi", "poco") &&
+            Build.BRAND.lowercase() !in setOf("xiaomi", "redmi", "poco")
+        ) return false
+        return try {
+            val properties = Class.forName("android.os.SystemProperties")
+            val getBoolean = properties.getDeclaredMethod(
+                "getBoolean",
+                String::class.java,
+                Boolean::class.javaPrimitiveType,
+            )
+            getBoolean.invoke(null, "persist.sys.feature.island", false) as? Boolean ?: false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun hyperOsFocusProtocolVersion(): Int = try {
+        Settings.System.getInt(contentResolver, "notification_focus_protocol", 0)
+    } catch (_: Exception) {
+        0
     }
 
     override fun onPause() {
@@ -693,6 +758,7 @@ class MainActivity : FlutterFragmentActivity() {
                 "share_text" -> shareText(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "set_temporary_brightness" -> setTemporaryWindowBrightness(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "restore_temporary_brightness" -> { restoreTemporaryWindowBrightness(); result.success(true) }
+                "read_clipboard_text_preview" -> readClipboardTextPreview(result)
                 "voice_start" -> startVoice(call.arguments as? Map<*,*> ?: emptyMap<Any,Any>(),result)
                 "voice_cancel" -> {stopVoice();result.success(true)}
                 "list_launchable_apps" -> {
@@ -1319,6 +1385,21 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
+    private fun readClipboardTextPreview(result: MethodChannel.Result) {
+        try {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            val clip = clipboard?.primaryClip
+            val firstPlainText = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text
+            val preview = boundedClipboardPreview(firstPlainText)
+            if (preview == null) {
+                result.error("no_plain_text", "The clipboard has no plain text to preview.", null)
+                return
+            }
+            result.success(mapOf("text" to preview.text, "truncated" to preview.truncated))
+        } catch (_: Exception) {
+            result.error("unavailable", "Android could not read clipboard text.", null)
+        }
+    }
     private fun shareText(args: Map<*, *>, result: MethodChannel.Result) {
         val title = (args["title"] as? String)?.trim()
         val text = args["text"] as? String
