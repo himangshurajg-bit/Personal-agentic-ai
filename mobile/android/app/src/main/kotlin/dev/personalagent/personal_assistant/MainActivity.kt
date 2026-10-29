@@ -13,6 +13,7 @@ import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ClipDescription
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -71,6 +72,9 @@ internal fun boundedClipboardPreview(text: CharSequence?): ClipboardPreviewText?
 
 internal fun canPostAssistantTaskNotification(sdk: Int, notificationsGranted: Boolean): Boolean =
     sdk < 33 || notificationsGranted
+
+internal fun plainClipboardText(hasPlainTextMimeType: Boolean, text: CharSequence?): String? =
+    if (hasPlainTextMimeType) text?.toString() else null
 
 internal const val GOOGLE_AI_MODE_URL = "https://www.google.com/ai"
 
@@ -545,6 +549,23 @@ class MainActivity : FlutterFragmentActivity() {
         voiceChannel=MethodChannel(engine.dartExecutor.binaryMessenger,"personal_assistant/voice")
         featureVoiceChannel=MethodChannel(engine.dartExecutor.binaryMessenger,"personal_assistant/feature_voice")
         audioChannel=MethodChannel(engine.dartExecutor.binaryMessenger,"personal_assistant/audio")
+        MethodChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/clipboard_preview")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "read_plain_text") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                try {
+                    val manager = getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                    val clip = manager?.primaryClip
+                    val isPlainText = manager?.primaryClipDescription
+                        ?.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) == true
+                    val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text
+                    result.success(plainClipboardText(isPlainText, text))
+                } catch (error: Exception) {
+                    result.error("clipboard_unavailable", error.message ?: "Clipboard text is unavailable.", null)
+                }
+            }
         audioChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
                 "play_audio" -> playAudio(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
