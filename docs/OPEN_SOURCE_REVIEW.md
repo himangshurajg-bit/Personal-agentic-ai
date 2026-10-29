@@ -80,3 +80,21 @@ After the fix: 51 default tests and all seven transport tests pass. See the veri
 record for the observed runs. This partially advances #2; live-model smoke checks remain
 open and opt-in. No real integration, send, new account, deployment, model download or paid
 call was introduced, and #3's external executor remains unimplemented.
+
+## 29 October 2026: SSE framing review
+
+LangGraph's MIT-licensed Python SDK recently fixed its SSE decoder after regressions in
+multiline/empty `data` fields, CR line endings, and event IDs across reconnects. The
+source change and focused tests are pinned at
+[`2f46bb3ca48f7e5d34eae000df7dfe77f9c0139d`](https://github.com/langchain-ai/langgraph/commit/2f46bb3ca48f7e5d34eae000df7dfe77f9c0139d), which
+references the WHATWG event-stream parsing rules. This is relevant to Personal-agentic-ai's
+Groq OpenAI-compatible stream, but LangGraph's reconnect cursor/backoff is not: this app
+intentionally does not retry a provider stream or resume a partial answer.
+
+The existing Groq adapter parsed each `data:` line as a separate JSON object, which did
+not follow SSE's rule to join multiple data lines within one blank-line-delimited event.
+The project now independently assembles those payload lines, tolerates comments/heartbeat
+lines, and still requires a complete `[DONE]` event before treating a response as complete.
+A mocked HTTP test covers multiline JSON plus CRLF framing; no credentials, external calls,
+retries, dependencies, or upstream code were added. This is a narrow standards-based
+hardening, not a port of LangGraph's decoder or claim of exhaustive SSE conformance.

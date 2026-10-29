@@ -84,6 +84,27 @@ class Ollama:
                         if obj.get("done") is True: completed=True
                 if not completed: raise RuntimeError("Local model stream ended before completion")
 
+async def _iter_sse_data(lines: AsyncIterator[str]) -> AsyncIterator[str]:
+    """Yield each blank-line-delimited SSE data payload, preserving multiline data."""
+    data_lines: list[str] = []
+    async for line in lines:
+        if not line:
+            if data_lines:
+                yield "\n".join(data_lines)
+                data_lines.clear()
+            continue
+        if line.startswith(":"):
+            continue  # SSE comment/heartbeat.
+        field, separator, value = line.partition(":")
+        if not separator:
+            value = ""
+        elif value.startswith(" "):
+            value = value[1:]
+        if field == "data":
+            data_lines.append(value)
+    # Per SSE framing, an event is dispatched only after its terminating blank line.
+
+
 class GroqProvider:
     """Optional server-side Groq adapter; its key never enters the Android app."""
     URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -118,10 +139,9 @@ class GroqProvider:
                 if not (response.headers.get("content-type", "").lower().startswith("text/event-stream")):
                     raise RuntimeError("Groq API returned an unexpected stream format")
                 completed = False
-                async for line in response.aiter_lines():
-                    if not line or line.startswith(":") or not line.startswith("data:"):
-                        continue
-                    event_data = line[5:].strip()
+                async for event_data in _iter_sse_data(response.aiter_lines()):
+                    if not event_data:
+                        continue  # Empty SSE data is not a JSON provider chunk.
                     if event_data == "[DONE]":
                         completed = True
                         break
