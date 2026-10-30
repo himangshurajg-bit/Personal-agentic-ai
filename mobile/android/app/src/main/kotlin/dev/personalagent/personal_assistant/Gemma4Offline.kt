@@ -159,6 +159,18 @@ internal object Gemma4FileIntegrity {
 
 internal data class QualificationPrompt(val id: String, val label: String, val text: String)
 
+internal object Gemma4QualificationPreflight {
+    // Android PowerManager thermal statuses are ordered from NONE (0) through SHUTDOWN (6).
+    // Do not start a long local model test when Android already reports SEVERE (3) or worse.
+    const val SEVERE_THERMAL_STATUS = 3
+
+    fun blockReason(lowMemory: Boolean, thermalStatus: Int): String? = when {
+        lowMemory -> "Android reports low memory, so screening did not start. The candidate remains unqualified."
+        thermalStatus >= SEVERE_THERMAL_STATUS -> "Android reports severe thermal stress, so screening did not start. Let the device cool before trying again."
+        else -> null
+    }
+}
+
 internal object Gemma4QualificationPrompts {
     val all = listOf(
         QualificationPrompt(
@@ -557,15 +569,19 @@ internal class Gemma4OfflineCoordinator(
                     emit("inference_state", "state" to "error", "message" to "Another local model operation is already running.")
                     return@withLock
                 }
-                if (memorySnapshot().lowMemory) {
-                    emit("inference_state", "state" to "error", "message" to "Android reports low memory, so screening did not start. The candidate remains unqualified.")
+                val thermalBefore = currentThermalStatus()
+                val preflightBlock = Gemma4QualificationPreflight.blockReason(
+                    lowMemory = memorySnapshot().lowMemory,
+                    thermalStatus = thermalBefore,
+                )
+                if (preflightBlock != null) {
+                    emit("inference_state", "state" to "error", "message" to preflightBlock)
                     return@withLock
                 }
                 inferenceActive = true
                 activePurpose = "screening"
                 inferenceCancelRequested = false
                 val memoryBefore = currentPssMb()
-                val thermalBefore = currentThermalStatus()
                 val startedAt = SystemClock.elapsedRealtime()
                 val output = StringBuilder()
                 var conversation: Conversation? = null
