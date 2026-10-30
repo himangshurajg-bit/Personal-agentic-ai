@@ -3,6 +3,7 @@ package dev.personalagent.personal_assistant
 import android.Manifest
 import android.app.AlarmManager
 import android.app.DownloadManager
+import android.app.Notification
 import android.app.ActivityManager
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
