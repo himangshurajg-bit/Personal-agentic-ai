@@ -22,7 +22,9 @@ void main() {
     expect(await s.local.searchChats('velocity'), isNotEmpty);
     expect(s.local.lastSearchUsedRust, isTrue);
     await tester.pumpWidget(AssistantApp(state: s));
-    await tester.pumpAndSettle();
+    // The home orb animates continuously, so pump bounded frames instead of settling.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
     expect(tester.takeException(), isNull);
   });
 }
