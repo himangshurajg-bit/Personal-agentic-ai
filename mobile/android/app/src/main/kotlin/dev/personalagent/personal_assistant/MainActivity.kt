@@ -35,6 +35,7 @@ import android.os.Environment
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.StatFs
+import android.provider.ContactsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.speech.SpeechRecognizer
@@ -187,6 +188,7 @@ class MainActivity : FlutterFragmentActivity() {
     private var exportText: String? = null
     private var exportBytes: ByteArray? = null
     private var backupImportResult: MethodChannel.Result? = null
+    private var contactPickerResult: MethodChannel.Result? = null
     private var voice: SpeechRecognizer? = null
     private var voiceChannel: MethodChannel? = null
     private var featureVoiceChannel: MethodChannel? = null
@@ -694,6 +696,7 @@ class MainActivity : FlutterFragmentActivity() {
                         }
                     }
                 }
+                "pick_one_contact" -> pickOneContact(result)
                 "open_media_search" -> openMediaSearch(
                     call.argument<Any>("service"),
                     call.argument<Any>("query"),
@@ -1521,6 +1524,43 @@ class MainActivity : FlutterFragmentActivity() {
                 .thenBy { it["package"].toString() })
     }
 
+    private fun pickOneContact(result: MethodChannel.Result) {
+        if (contactPickerResult != null) {
+            result.error("busy", "A contact selection is already open.", null)
+            return
+        }
+        val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        contactPickerResult = result
+        try {
+            startActivityForResult(intent, 48)
+        } catch (_: android.content.ActivityNotFoundException) {
+            contactPickerResult = null
+            result.error("unavailable", "Android's contact picker is unavailable; no contacts were read.", null)
+        } catch (_: Exception) {
+            contactPickerResult = null
+            result.error("unavailable", "Android could not open the contact picker; no contacts were read.", null)
+        }
+    }
+
+    private fun readSelectedContact(uri: Uri): PickedContactData? = try {
+        val projection = arrayOf(
+            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+            ContactsContract.CommonDataKinds.Phone.NUMBER,
+        )
+        contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+            if (!cursor.moveToFirst()) return null
+            val nameIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+            val numberIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+            if (nameIndex < 0 || numberIndex < 0) null
+            else PickedContactDataParser.parse(cursor.getString(nameIndex), cursor.getString(numberIndex))
+        }
+    } catch (_: SecurityException) {
+        null
+    } catch (_: Exception) {
+        null
+    }
+
     private fun openMediaSearch(serviceValue: Any?, rawQuery: Any?, result: MethodChannel.Result) {
         val request = MediaSearchRequestParser.parse(serviceValue, rawQuery)
         if (request == null) {
@@ -1725,6 +1765,22 @@ class MainActivity : FlutterFragmentActivity() {
     @Deprecated("Android activity result bridge for Flutter document export")
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
         super.onActivityResult(requestCode,resultCode,data)
+        if (requestCode == 48) {
+            val result = contactPickerResult
+            contactPickerResult = null
+            val uri = data?.data
+            if (resultCode != RESULT_OK || uri == null) {
+                result?.success(null)
+            } else {
+                val contact = readSelectedContact(uri)
+                if (contact == null) {
+                    result?.error("invalid_contact", "No usable name and phone number were available; nothing was saved or shared.", null)
+                } else {
+                    result?.success(mapOf("display_name" to contact.displayName, "phone_number" to contact.phoneNumber))
+                }
+            }
+            return
+        }
         if (requestCode == 45) {
             val result = cameraResult
             cameraResult = null
