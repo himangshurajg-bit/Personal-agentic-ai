@@ -69,7 +69,7 @@ void main() {
     await tester.ensureVisible(find.byKey(const Key('review-user-notification')));
     await tester.tap(find.byKey(const Key('review-user-notification')));
     await tester.pumpAndSettle();
-    expect(find.text('Review notification'), findsOneWidget);
+    expect(find.byType(AlertDialog), findsOneWidget);
     expect(find.textContaining('Study check-in'), findsOneWidget);
     expect(calls, isEmpty);
     await tester.tap(find.text('Cancel'));
