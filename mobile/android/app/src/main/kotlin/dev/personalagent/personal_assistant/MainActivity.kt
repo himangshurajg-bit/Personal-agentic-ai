@@ -24,6 +24,7 @@ import android.graphics.drawable.Icon
 import android.graphics.pdf.PdfRenderer
 import android.graphics.Canvas
 import android.media.MediaPlayer
+import android.media.AudioManager
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.net.TrafficStats
@@ -693,6 +694,17 @@ class MainActivity : FlutterFragmentActivity() {
                         }
                     }
                 }
+                "open_media_search" -> openMediaSearch(
+                    call.argument<Any>("service"),
+                    call.argument<Any>("query"),
+                    result,
+                )
+                "read_volume_state" -> readVolumeState(call.argument<Any>("stream"), result)
+                "set_reviewed_volume" -> setReviewedVolume(
+                    call.argument<Any>("stream"),
+                    call.argument<Any>("percent"),
+                    result,
+                )
                 "set_system_timer" -> {
                     val request = SystemClockTimerRequestParser.parse(
                         call.argument<Any>("seconds"),
@@ -1507,6 +1519,102 @@ class MainActivity : FlutterFragmentActivity() {
             }
             .sortedWith(compareBy<Map<String, Any?>> { it["label"].toString().lowercase() }
                 .thenBy { it["package"].toString() })
+    }
+
+    private fun openMediaSearch(serviceValue: Any?, rawQuery: Any?, result: MethodChannel.Result) {
+        val request = MediaSearchRequestParser.parse(serviceValue, rawQuery)
+        if (request == null) {
+            result.error("invalid_argument", "Choose YouTube or Spotify and enter a search up to 120 characters.", null)
+            return
+        }
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(request.uri))
+            startActivity(Intent.createChooser(intent, "Search ${request.service}"))
+            result.success(mapOf(
+                "opened" to true,
+                "service" to request.service,
+                "query" to request.query,
+                "playback_started" to false,
+            ))
+        } catch (_: android.content.ActivityNotFoundException) {
+            result.error("unavailable", "Android could not open the media search.", null)
+        } catch (_: Exception) {
+            result.error("unavailable", "Android could not open the media search.", null)
+        }
+    }
+
+    private fun audioStream(value: Any?): Int? = when (value as? String) {
+        "music" -> AudioManager.STREAM_MUSIC
+        "ring" -> AudioManager.STREAM_RING
+        "alarm" -> AudioManager.STREAM_ALARM
+        "notification" -> AudioManager.STREAM_NOTIFICATION
+        "system" -> AudioManager.STREAM_SYSTEM
+        "call" -> AudioManager.STREAM_VOICE_CALL
+        else -> null
+    }
+
+    private fun readVolumeState(rawStream: Any?, result: MethodChannel.Result) {
+        if (!SafeVolumeRequest.isValidStream(rawStream)) {
+            result.error("invalid_argument", "Choose a supported audio stream.", null)
+            return
+        }
+        val key = rawStream as String
+        val stream = audioStream(key) ?: run {
+            result.error("invalid_argument", "Choose a supported audio stream.", null)
+            return
+        }
+        try {
+            val audio = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                ?: throw IllegalStateException("Android audio controls are unavailable.")
+            val max = audio.getStreamMaxVolume(stream)
+            val min = if (Build.VERSION.SDK_INT >= 28) audio.getStreamMinVolume(stream) else 0
+            val current = audio.getStreamVolume(stream)
+            val percent = SafeVolumeRequest.percentForLevel(current, min, max)
+                ?: throw IllegalStateException("Android returned an invalid volume range.")
+            result.success(mapOf("stream" to key, "current" to current, "min" to min, "max" to max, "percent" to percent))
+        } catch (_: SecurityException) {
+            result.error("unavailable", "Android did not allow reading this volume stream.", null)
+        } catch (_: Exception) {
+            result.error("unavailable", "Android volume state is unavailable.", null)
+        }
+    }
+
+    private fun setReviewedVolume(rawStream: Any?, rawPercent: Any?, result: MethodChannel.Result) {
+        if (!SafeVolumeRequest.isValidStream(rawStream)) {
+            result.error("invalid_argument", "Choose a supported audio stream.", null)
+            return
+        }
+        val key = rawStream as String
+        val percent = SafeVolumeRequest.percent(rawPercent)
+        val stream = audioStream(key)
+        if (percent == null || stream == null) {
+            result.error("invalid_argument", "Choose a volume from 0 to 100 percent.", null)
+            return
+        }
+        try {
+            val audio = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                ?: throw IllegalStateException("Android audio controls are unavailable.")
+            val max = audio.getStreamMaxVolume(stream)
+            val min = if (Build.VERSION.SDK_INT >= 28) audio.getStreamMinVolume(stream) else 0
+            val level = SafeVolumeRequest.levelForPercent(percent, min, max)
+                ?: throw IllegalStateException("Android returned an invalid volume range.")
+            audio.setStreamVolume(stream, level, AudioManager.FLAG_SHOW_UI)
+            val actual = audio.getStreamVolume(stream)
+            val actualPercent = SafeVolumeRequest.percentForLevel(actual, min, max)
+            result.success(mapOf(
+                "stream" to key,
+                "requested_percent" to percent,
+                "actual_percent" to actualPercent,
+                "current" to actual,
+                "min" to min,
+                "max" to max,
+                "applied" to (actual == level),
+            ))
+        } catch (_: SecurityException) {
+            result.error("not_allowed", "Android did not allow changing this volume stream; it was not confirmed.", null)
+        } catch (_: Exception) {
+            result.error("unavailable", "Android could not confirm the requested volume change.", null)
+        }
     }
 
     private fun execute(args:Map<*, *>,result:MethodChannel.Result) {

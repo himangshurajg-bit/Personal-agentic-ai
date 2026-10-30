@@ -20,6 +20,7 @@ import 'office_document.dart';
 import 'download_input.dart';
 import 'download_review.dart';
 import 'clipboard_preview_screen.dart';
+import 'media_controls_screen.dart';
 
 const _featureVoiceEvents = MethodChannel('personal_assistant/feature_voice');
 
@@ -38,7 +39,7 @@ class FeaturesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DefaultTabController(
     initialIndex: initialTab,
-    length: 13,
+    length: 14,
     child: Scaffold(
       appBar: AppBar(
         title: const Text('Assistant tools'),
@@ -61,6 +62,7 @@ class FeaturesScreen extends StatelessWidget {
             Tab(icon: Icon(Icons.download_outlined), text: 'Downloads'),
             Tab(icon: Icon(Icons.wifi_rounded), text: 'Wi-Fi'),
             Tab(icon: Icon(Icons.content_paste_outlined), text: 'Clipboard'),
+            Tab(icon: Icon(Icons.graphic_eq_rounded), text: 'Media & volume'),
           ],
         ),
       ),
@@ -79,6 +81,7 @@ class FeaturesScreen extends StatelessWidget {
           const _DownloadsFeature(),
           const WifiSettingsScreen(),
           const ClipboardPreviewScreen(),
+          const MediaControlsScreen(),
         ],
       ),
     ),
