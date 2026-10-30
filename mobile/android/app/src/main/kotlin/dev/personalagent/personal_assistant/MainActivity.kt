@@ -762,6 +762,7 @@ class MainActivity : FlutterFragmentActivity() {
                     }
                 }
                 "read_system_metrics" -> result.success(readSystemMonitorMetrics())
+                "read_device_status_snapshot" -> result.success(DeviceStatusSnapshot.read(applicationContext))
                 "enqueue_user_download" -> enqueueUserDownload(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "list_user_downloads" -> listUserDownloads(result)
                 "remove_user_download" -> removeUserDownload(call.argument<Any>("id"), result)

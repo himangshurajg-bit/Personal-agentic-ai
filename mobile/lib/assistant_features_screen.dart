@@ -11,6 +11,7 @@ import 'feature_services.dart';
 import 'text_tools_screen.dart';
 import 'local_web_projects_screen.dart';
 import 'system_monitor_screen.dart';
+import 'device_status_screen.dart';
 import 'focus_timer_screen.dart';
 import 'system_clock_timer_screen.dart';
 import 'wifi_settings_screen.dart';
@@ -37,7 +38,7 @@ class FeaturesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DefaultTabController(
     initialIndex: initialTab,
-    length: 12,
+    length: 13,
     child: Scaffold(
       appBar: AppBar(
         title: const Text('Assistant tools'),
@@ -53,6 +54,7 @@ class FeaturesScreen extends StatelessWidget {
               icon: Icon(Icons.monitor_heart_outlined),
               text: 'System monitor',
             ),
+            Tab(icon: Icon(Icons.phone_android_rounded), text: 'Device status'),
             Tab(icon: Icon(Icons.timer_outlined), text: 'Focus timer'),
             Tab(icon: Icon(Icons.edit_note_rounded), text: 'Journal'),
             Tab(icon: Icon(Icons.alarm_add_rounded), text: 'Clock timer'),
@@ -70,6 +72,7 @@ class FeaturesScreen extends StatelessWidget {
           const TextToolsScreen(),
           LocalWebProjectsScreen(state: state),
           const SystemMonitorScreen(),
+          const DeviceStatusScreen(),
           FocusTimerScreen(state: state),
           JournalScreen(state: state),
           const SystemClockTimerScreen(),

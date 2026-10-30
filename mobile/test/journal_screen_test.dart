@@ -60,7 +60,7 @@ void main() {
       MaterialApp(
         home: FeaturesScreen(
           state: state,
-          initialTab: 7,
+          initialTab: 8,
           onReminder: (context, value) async {},
         ),
       ),

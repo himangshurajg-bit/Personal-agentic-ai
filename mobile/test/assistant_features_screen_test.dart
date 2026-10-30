@@ -40,7 +40,7 @@ void main() {
         home: FeaturesScreen(
           state: AssistantState(),
           onReminder: (context, value) async {},
-          initialTab: 9,
+          initialTab: 10,
         ),
       ),
     );

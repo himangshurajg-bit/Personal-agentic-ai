@@ -23,6 +23,36 @@ void main() {
     expect(parseSystemClockTimerRequest('60', '')?.label, isEmpty);
   });
 
+  test('spoken timer shortcut requires a direct single exact duration', () {
+    expect(
+      parseExplicitSpokenTimerCommand('Set a timer for 5 minutes')?.seconds,
+      300,
+    );
+    expect(
+      parseExplicitSpokenTimerCommand('Please start a timer for 90 seconds')
+          ?.seconds,
+      90,
+    );
+    expect(
+      parseExplicitSpokenTimerCommand('Create a timer of 2 hours')?.seconds,
+      7200,
+    );
+    for (final phrase in [
+      'What is a timer for 5 minutes?',
+      'If I ask, set a timer for 5 minutes',
+      'Do not set a timer for 5 minutes',
+      'Set a timer for 5 minutes tomorrow',
+      'Set a timer for 5 minutes or 10 minutes',
+      'Set a repeating timer for 5 minutes',
+      'Set an alarm for 7:30 and a timer for 5 minutes',
+      'Set a timer for 25 hours',
+      'Set a timer for 5 minutes for tea',
+      'Could you set a timer for 5 minutes',
+    ]) {
+      expect(parseExplicitSpokenTimerCommand(phrase), isNull, reason: phrase);
+    }
+  });
+
   test('duration parser rejects malformed values and unsafe labels', () {
     for (final value in ['0', '86401', '-2', '1.5', '1e2', '', '1000000']) {
       expect(parseSystemClockTimerRequest(value, ''), isNull, reason: value);
@@ -119,7 +149,7 @@ void main() {
         home: FeaturesScreen(
           state: state,
           onReminder: _ignoreReminder,
-          initialTab: 8,
+          initialTab: 9,
         ),
       ),
     );

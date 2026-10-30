@@ -33,6 +33,7 @@ import 'voice_services.dart';
 import 'live_conversation.dart';
 import 'in_app_toast_screen.dart';
 import 'clipboard_draft.dart';
+import 'system_clock_timer.dart';
 import 'readable_math.dart';
 
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -3947,6 +3948,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       while (_liveConversationActive && _liveTurnQueue.isNotEmpty) {
         final turn = _liveTurnQueue.removeAt(0);
+        final timer = parseExplicitSpokenTimerCommand(turn);
+        if (timer != null) {
+          await _reviewAndStartLiveTimer(timer);
+          continue;
+        }
         final download = SpokenDownloadCommand.parse(turn);
         if (download != null) {
           await _reviewAndStartLiveDownload(download);
@@ -3976,6 +3982,62 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } finally {
       _liveTurnProcessing = false;
     }
+  }
+
+  Future<void> _reviewAndStartLiveTimer(SystemClockTimerRequest request) async {
+    final duration = _spokenTimerDuration(request.seconds);
+    final approved =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Review timer'),
+            content: Text(
+              'Open Android Clock with a $duration timer? It will not start until you confirm it in Clock.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Open Clock'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!approved || !mounted || !_liveConversationActive) return;
+    try {
+      await AssistantState.device.invokeMethod<void>('set_system_timer', {
+        'seconds': request.seconds,
+        'label': request.label,
+      });
+      if (mounted) {
+        notice(
+          context,
+          'Clock opened with a $duration timer. Confirm and start it in Clock; Personal AI cannot verify it is running.',
+        );
+      }
+    } on PlatformException catch (error) {
+      if (mounted) {
+        notice(context, error.message ?? 'Android could not open Clock.');
+      }
+    } catch (_) {
+      if (mounted) notice(context, 'Android could not open Clock.');
+    }
+  }
+
+  String _spokenTimerDuration(int seconds) {
+    if (seconds % 3600 == 0) {
+      final hours = seconds ~/ 3600;
+      return '$hours ${hours == 1 ? 'hour' : 'hours'}';
+    }
+    if (seconds % 60 == 0) {
+      final minutes = seconds ~/ 60;
+      return '$minutes ${minutes == 1 ? 'minute' : 'minutes'}';
+    }
+    return '$seconds ${seconds == 1 ? 'second' : 'seconds'}';
   }
 
   Future<void> _reviewAndStartLiveDownload(DownloadInput download) async {
@@ -4534,9 +4596,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 const SizedBox(height: 12),
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxHeight: 320),
-                  child: SingleChildScrollView(
-                    child: SelectableText(text),
-                  ),
+                  child: SingleChildScrollView(child: SelectableText(text)),
                 ),
               ],
             ),
