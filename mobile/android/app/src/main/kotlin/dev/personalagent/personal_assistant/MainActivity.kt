@@ -95,6 +95,7 @@ class MainActivity : FlutterFragmentActivity() {
     companion object {
         private const val ACTION_TASK_VOICE_COMMAND = "dev.personalagent.personal_assistant.TASK_VOICE_COMMAND"
         private const val TASK_NOTIFICATION_CHANNEL = "assistant_task_progress"
+        private const val USER_NOTIFICATION_CHANNEL = "user_created_notifications"
         private const val TASK_NOTIFICATION_ID = 6107
     }
 
@@ -792,6 +793,7 @@ class MainActivity : FlutterFragmentActivity() {
                     "system_recognizer" to SpeechRecognizer.isRecognitionAvailable(this)
                 ))
                 "request_access_permission" -> requestAccessPermission(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
+                "post_user_notification" -> postUserNotification(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "share_text" -> shareText(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "set_temporary_brightness" -> setTemporaryWindowBrightness(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>(), result)
                 "restore_temporary_brightness" -> { restoreTemporaryWindowBrightness(); result.success(true) }
@@ -1697,6 +1699,51 @@ class MainActivity : FlutterFragmentActivity() {
             }
         } catch(e:Exception) { result.success(mapOf("result" to "failed","detail" to (e.message ?: "Action failed; outcome not verified").take(300))) }
     }
+    private fun postUserNotification(args: Map<*, *>, result: MethodChannel.Result) {
+        val request = UserNotificationRequestParser.parse(args)
+        if (request == null) {
+            result.error("invalid_argument", "Enter a title up to 80 characters and text up to 300 characters.", null)
+            return
+        }
+        if (!canPostAssistantTaskNotification(
+                Build.VERSION.SDK_INT,
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED,
+            )) {
+            result.success(mapOf("posted" to false, "reason" to "permission_denied"))
+            return
+        }
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        if (manager == null) {
+            result.success(mapOf("posted" to false, "reason" to "unavailable"))
+            return
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                manager.createNotificationChannel(
+                    NotificationChannel(
+                        USER_NOTIFICATION_CHANNEL,
+                        "Personal AI notifications",
+                        NotificationManager.IMPORTANCE_DEFAULT,
+                    ),
+                )
+            }
+            val notification = Notification.Builder(this, USER_NOTIFICATION_CHANNEL)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(request.title)
+                .setContentText(request.text)
+                .setStyle(Notification.BigTextStyle().bigText(request.text))
+                .setAutoCancel(true)
+                .build()
+            val notificationId = (System.currentTimeMillis() and 0x7fffffff).toInt()
+            manager.notify(notificationId, notification)
+            result.success(mapOf("posted" to true))
+        } catch (_: SecurityException) {
+            result.success(mapOf("posted" to false, "reason" to "not_allowed"))
+        } catch (_: Exception) {
+            result.success(mapOf("posted" to false, "reason" to "unavailable"))
+        }
+    }
+
     private fun requestAccessPermission(args: Map<*, *>, result: MethodChannel.Result) {
         val kind = args["permission"] as? String
         val permission = when (kind) {

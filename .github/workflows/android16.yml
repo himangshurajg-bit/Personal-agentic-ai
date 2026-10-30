@@ -54,6 +54,9 @@ jobs:
       - name: Release shrinker check for LiteRT-LM JNI callbacks
         working-directory: mobile/android
         run: ./gradlew :app:verifyLiteRtLmJniCallbackNames --no-daemon
+      - name: Android JVM unit tests
+        working-directory: mobile/android
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
       - name: API36 instrumented local-first checks
         uses: reactivecircus/android-emulator-runner@v2
         with:

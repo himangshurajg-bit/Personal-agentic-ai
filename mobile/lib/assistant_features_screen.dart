@@ -22,6 +22,7 @@ import 'download_review.dart';
 import 'clipboard_preview_screen.dart';
 import 'media_controls_screen.dart';
 import 'contact_picker_screen.dart';
+import 'user_notification_screen.dart';
 
 const _featureVoiceEvents = MethodChannel('personal_assistant/feature_voice');
 
@@ -40,7 +41,7 @@ class FeaturesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DefaultTabController(
     initialIndex: initialTab,
-    length: 15,
+    length: 16,
     child: Scaffold(
       appBar: AppBar(
         title: const Text('Assistant tools'),
@@ -65,6 +66,7 @@ class FeaturesScreen extends StatelessWidget {
             Tab(icon: Icon(Icons.content_paste_outlined), text: 'Clipboard'),
             Tab(icon: Icon(Icons.graphic_eq_rounded), text: 'Media & volume'),
             Tab(icon: Icon(Icons.contact_phone_outlined), text: 'Contacts'),
+            Tab(icon: Icon(Icons.notifications_active_outlined), text: 'Notifications'),
           ],
         ),
       ),
@@ -85,6 +87,7 @@ class FeaturesScreen extends StatelessWidget {
           const ClipboardPreviewScreen(),
           const MediaControlsScreen(),
           const ContactPickerScreen(),
+          const UserNotificationScreen(),
         ],
       ),
     ),
