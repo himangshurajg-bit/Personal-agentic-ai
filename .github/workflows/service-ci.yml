@@ -1,0 +1,35 @@
+name: Python service checks
+
+on:
+  pull_request:
+    paths:
+      - 'service/**'
+      - '.github/workflows/service-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'service/**'
+      - '.github/workflows/service-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  service-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: service/uv.lock
+      - name: Install locked service dependencies
+        run: uv sync --project service --locked
+      - name: Run service tests
+        run: uv run --project service --locked pytest service/tests -q
+      - name: Compile service sources
+        run: uv run --project service --locked python -m compileall -q service/app.py service/tests/test_service.py

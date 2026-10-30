@@ -188,6 +188,33 @@ async def test_groq_adapter_streams_from_fixed_endpoint_without_live_calls(monke
     assert len(seen) == 1
 
 
+async def test_groq_adapter_assembles_multiline_sse_data_and_ignores_comments(monkeypatch):
+    import httpx
+    original = httpx.AsyncClient
+    body = (
+        ": heartbeat\r\n"
+        "event: message\r\n"
+        'data: {"choices":[\r\n'
+        'data: {"delta":{"content":"Hello"},"finish_reason":"stop"}\r\n'
+        "data: ]}\r\n\r\n"
+        "data: [DONE]\r\n\r\n"
+    )
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: original(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200, content=body, headers={"content-type": "text/event-stream"}
+                )
+            ),
+            **kwargs,
+        ),
+    )
+    provider = GroqProvider("unit-test-key", "openai/gpt-oss-120b")
+    assert [part async for part in provider.stream([{"role": "user", "content": "hello"}])] == ["Hello"]
+
+
 async def test_groq_adapter_fails_closed_on_http_errors_and_truncated_streams(monkeypatch):
     import httpx
     original = httpx.AsyncClient
