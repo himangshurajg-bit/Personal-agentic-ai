@@ -95,6 +95,20 @@ class Gemma4OfflineTest {
     }
 
     @Test
+    fun qualificationPreflightStopsForLowMemoryAndSevereThermalStress() {
+        assertTrue(Gemma4QualificationPreflight.blockReason(lowMemory = true, thermalStatus = 0)!!.contains("low memory"))
+        assertTrue(Gemma4QualificationPreflight.blockReason(lowMemory = false, thermalStatus = 3)!!.contains("thermal"))
+        assertTrue(Gemma4QualificationPreflight.blockReason(lowMemory = false, thermalStatus = 6)!!.contains("cool"))
+    }
+
+    @Test
+    fun qualificationPreflightAllowsModerateOrUnavailableThermalReadings() {
+        assertEquals(null, Gemma4QualificationPreflight.blockReason(lowMemory = false, thermalStatus = -1))
+        assertEquals(null, Gemma4QualificationPreflight.blockReason(lowMemory = false, thermalStatus = 0))
+        assertEquals(null, Gemma4QualificationPreflight.blockReason(lowMemory = false, thermalStatus = 2))
+    }
+
+    @Test
     fun qualificationPromptsAreFixedAndCoverTheRequiredDomains() {
         assertTrue(Gemma4QualificationPrompts.find("english")!!.text.contains("Class 12/JEE"))
         assertTrue(Gemma4QualificationPrompts.find("assamese")!!.text.contains("অসমীয়াত"))
