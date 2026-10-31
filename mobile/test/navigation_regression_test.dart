@@ -45,7 +45,10 @@ void main() {
       await tester.scrollUntilVisible(
         find.text('Open tasks'),
         280,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: find.descendant(
+          of: find.byType(Home),
+          matching: find.byType(Scrollable),
+        ).first,
       );
       expect(find.text('Open tasks'), findsOneWidget);
 
@@ -60,7 +63,7 @@ void main() {
 
       for (final entry in [
         ('Skills & actions', 'What the team can and can’t do'),
-        ('Message & social drafts', 'Write it here, send it yourself'),
+        ('Message & social drafts', 'Prepare it here, finish it yourself'),
         ('In-app toast', 'Show a short message'),
       ]) {
         await tester.tap(find.byTooltip('Open navigation menu'));
@@ -73,7 +76,10 @@ void main() {
           screenEvidence,
           240,
           // Skills now contains a horizontal TextField scrollable; target the page list.
-          scrollable: find.byType(Scrollable).first,
+          scrollable: find.descendant(
+            of: find.byType(ListView).last,
+            matching: find.byType(Scrollable),
+          ).first,
         );
         await tester.pumpAndSettle();
         expect(screenEvidence, findsOneWidget);

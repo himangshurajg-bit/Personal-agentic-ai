@@ -33,6 +33,7 @@ import 'voice_services.dart';
 import 'live_conversation.dart';
 import 'in_app_toast_screen.dart';
 import 'clipboard_draft.dart';
+import 'task_excerpt_draft.dart';
 import 'system_clock_timer.dart';
 import 'readable_math.dart';
 
@@ -4634,6 +4635,56 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _reviewLocalTasksForDraft() async {
+    if (_chatFeatureBusy) return;
+    final excerpt = taskExcerptDraft(widget.state.local.rows('tasks'));
+    if (excerpt == null) {
+      setState(() => _chatFeatureError = 'There are no local tasks to add.');
+      return;
+    }
+    setState(() => _chatFeatureError = '');
+    final reviewed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Review local task excerpt'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Only these task titles, completion states, and due dates will be quoted in your editable draft. Nothing is sent until you tap Send.',
+              ),
+              const SizedBox(height: 12),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 320),
+                child: SingleChildScrollView(child: SelectableText(excerpt)),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Add to draft'),
+          ),
+        ],
+      ),
+    );
+    if (reviewed != true || !mounted) return;
+    final updated = appendTaskExcerptDraft(input.text, excerpt);
+    input.value = TextEditingValue(
+      text: updated,
+      selection: TextSelection.collapsed(offset: updated.length),
+    );
+    _inputFocus.requestFocus();
+  }
+
   Future<void> _openGoogleAiMode() async {
     if (_chatFeatureBusy) return;
     try {
@@ -5174,6 +5225,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             ? null
                             : _reviewClipboardText,
                         icon: const Icon(Icons.content_paste_go_rounded),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton.filledTonal(
+                        tooltip: 'Review local tasks',
+                        constraints: const BoxConstraints.tightFor(
+                          width: 48,
+                          height: 48,
+                        ),
+                        onPressed: _chatFeatureBusy
+                            ? null
+                            : _reviewLocalTasksForDraft,
+                        icon: const Icon(Icons.checklist_rounded),
                       ),
                       const SizedBox(width: 4),
                       IconButton.filledTonal(

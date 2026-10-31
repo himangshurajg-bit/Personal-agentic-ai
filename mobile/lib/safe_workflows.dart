@@ -17,19 +17,30 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
   static const _device = MethodChannel('personal_assistant/device');
   final _text = TextEditingController();
   final _number = TextEditingController();
+  final _recipient = TextEditingController();
+  final _subject = TextEditingController();
   String _kind = 'whatsapp';
   bool _opening = false;
 
-  bool get _needsNumber => _kind != 'social';
+  bool get _needsNumber => _kind != 'social' && _kind != 'email';
+  bool get _needsRecipient => _kind == 'email';
+  bool get _needsSubject => _kind == 'email';
   bool get _needsText => _kind != 'phone';
   bool get _isWhatsApp => _kind == 'whatsapp';
   bool get _isSms => _kind == 'sms';
-  int get _textLimit => _kind == 'social' ? 10000 : 1600;
+  int get _textLimit => _kind == 'social' || _kind == 'email' ? 10000 : 1600;
+  bool get _hasValidRecipient => RegExp(
+    r"""^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$""",
+  ).hasMatch(_recipient.text.trim());
   bool get _hasValidNumber =>
       RegExp(r'^\+[1-9][0-9]{6,14}$').hasMatch(_number.text.trim());
   bool get _canSubmit =>
       !_opening &&
       (!_needsNumber || _hasValidNumber) &&
+      (!_needsRecipient || _hasValidRecipient) &&
+      (!_needsSubject ||
+          (_subject.text.length <= 200 &&
+              !_subject.text.contains(RegExp(r'[\x00-\x1f\x7f]')))) &&
       (!_needsText ||
           (_text.text.trim().isNotEmpty && _text.text.length <= _textLimit));
 
@@ -37,6 +48,8 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
   void dispose() {
     _text.dispose();
     _number.dispose();
+    _recipient.dispose();
+    _subject.dispose();
     super.dispose();
   }
 
@@ -44,6 +57,7 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
     'whatsapp' => 'Review WhatsApp draft',
     'sms' => 'Review SMS draft',
     'phone' => 'Review number in dialer',
+    'email' => 'Review email draft',
     _ => 'Choose app to review caption',
   };
 
@@ -51,6 +65,8 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
     if (!_canSubmit) return;
     final number = _number.text.trim();
     final body = _text.text;
+    final recipient = _recipient.text.trim();
+    final subject = _subject.text;
     setState(() => _opening = true);
     try {
       final response = switch (_kind) {
@@ -64,6 +80,11 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
         }),
         'phone' => await _device.invokeMethod<Object?>('open_phone_dialer', {
           'number': number,
+        }),
+        'email' => await _device.invokeMethod<Object?>('open_email_draft', {
+          'recipient': recipient,
+          'subject': subject,
+          'body': body,
         }),
         _ => await _device.invokeMethod<Object?>('share_text', {
           'title': 'Review social caption',
@@ -84,6 +105,11 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
         );
       } else if (_kind == 'phone' && result == 'dialer_opened') {
         notice(context, 'Android opened the dialer. No call was placed.');
+      } else if (_kind == 'email' && result == 'composer_opened') {
+        notice(
+          context,
+          'Your email app opened with the draft. Nothing was sent.',
+        );
       }
     } on PlatformException catch (error) {
       if (mounted) {
@@ -96,7 +122,7 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
       if (mounted) {
         notice(
           context,
-          'Phone and text handoffs are available in the Android app only.',
+          'Phone, email and text handoffs are available in the Android app only.',
         );
       }
     } finally {
@@ -118,7 +144,7 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Phone numbers and message text stay in this screen until you choose a handoff. SMS and WhatsApp show the exact recipient and draft for approval first; Android opens the dialer for calls. Nothing is sent or called automatically.',
+            'Phone numbers and message text stay in this screen until you choose a handoff. Email, SMS and WhatsApp show the exact recipient and draft for approval first; Android opens the dialer for calls. Nothing is sent or called automatically.',
             style: Theme.of(context).textTheme.bodyMedium
                 ?.copyWith(color: colors.onSurfaceVariant),
           ),
@@ -138,6 +164,10 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
                     ),
                     DropdownMenuItem(value: 'sms', child: Text('SMS draft')),
                     DropdownMenuItem(
+                      value: 'email',
+                      child: Text('Email draft'),
+                    ),
+                    DropdownMenuItem(
                       value: 'phone',
                       child: Text('Phone dialer'),
                     ),
@@ -149,6 +179,30 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
                   onChanged: (value) =>
                       setState(() => _kind = value ?? 'whatsapp'),
                 ),
+                if (_needsRecipient) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: const ValueKey('outbound-draft-recipient'),
+                    controller: _recipient,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: const InputDecoration(
+                      labelText: 'Email recipient',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: const ValueKey('outbound-draft-subject'),
+                    controller: _subject,
+                    maxLength: 200,
+                    decoration: const InputDecoration(
+                      labelText: 'Subject (optional)',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ],
                 if (_needsNumber) ...[
                   const SizedBox(height: 12),
                   TextField(
@@ -176,12 +230,16 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
                     keyboardType: TextInputType.multiline,
                     textCapitalization: TextCapitalization.sentences,
                     decoration: InputDecoration(
-                      labelText: _isWhatsApp
+                      labelText: _kind == 'email'
+                          ? 'Email message'
+                          : _isWhatsApp
                           ? 'WhatsApp message'
                           : _isSms
                           ? 'SMS message'
                           : 'Caption draft',
-                      hintText: _isWhatsApp
+                      hintText: _kind == 'email'
+                          ? 'Write an email to review in your email app…'
+                          : _isWhatsApp
                           ? 'Write a reply to review in WhatsApp…'
                           : _isSms
                           ? 'Write a text message to review in your messaging app…'
@@ -214,7 +272,7 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
           const SizedBox(height: 12),
           const Glass(
             child: Text(
-              'Phone actions need an international number you enter yourself. Android opens the dialer without placing a call; SMS and WhatsApp open the reviewed draft for you to send. Social sharing does not choose a recipient or publish a post. Drafts are not saved after you leave.',
+              'Android asks you to review each recipient and draft before opening an email, messaging app or dialer. It never sends a message or places a call for you. Social sharing does not choose a recipient or publish a post. Drafts are not saved after you leave.',
             ),
           ),
         ],
@@ -389,19 +447,27 @@ class HapticPulseAction extends StatefulWidget {
 }
 
 class _HapticPulseActionState extends State<HapticPulseAction> {
+  static const _device = MethodChannel('personal_assistant/device');
   bool _running = false;
 
   Future<void> _pulse() async {
     if (_running) return;
     setState(() => _running = true);
     try {
-      await HapticFeedback.vibrate();
-      if (mounted) {
-        notice(context, 'Requested one short haptic pulse.');
+      final outcome = await _device.invokeMapMethod<String, dynamic>(
+        'request_haptic_pulse',
+      );
+      if (mounted && outcome?['requested'] == true) {
+        notice(
+          context,
+          'Android accepted one 80 ms vibration request; the physical effect is not confirmed.',
+        );
+      } else if (mounted && outcome == null) {
+        notice(context, 'Android did not confirm the vibration request.');
       }
-    } on PlatformException {
+    } on PlatformException catch (error) {
       if (mounted) {
-        notice(context, 'This device did not provide haptic feedback.');
+        notice(context, error.message ?? 'Haptic feedback is unavailable.');
       }
     } finally {
       if (mounted) setState(() => _running = false);
@@ -420,7 +486,7 @@ class _HapticPulseActionState extends State<HapticPulseAction> {
         : const Icon(Icons.vibration_outlined),
     title: const Text('Test haptic feedback'),
     subtitle: const Text(
-      'Tap to request one short pulse. Android may ignore it if vibration is unavailable or disabled.',
+      'Android shows a confirmation before requesting one fixed 80 ms pulse. It may be ignored if unavailable or disabled.',
     ),
     trailing: const Icon(Icons.chevron_right_rounded),
     onTap: _running ? null : _pulse,
@@ -488,13 +554,15 @@ class _CopyTextActionState extends State<CopyTextAction> {
     setState(() => _copying = true);
     try {
       await Clipboard.setData(ClipboardData(text: exactText));
-      if (mounted)
+      if (mounted) {
         notice(context, 'Copied the reviewed text to the clipboard.');
+      }
     } on PlatformException {
       if (mounted) notice(context, 'Android could not copy the text.');
     } on MissingPluginException {
-      if (mounted)
+      if (mounted) {
         notice(context, 'Clipboard copy is available on Android only.');
+      }
     } finally {
       if (mounted) setState(() => _copying = false);
     }
@@ -610,11 +678,13 @@ class _TemporaryBrightnessActionState extends State<TemporaryBrightnessAction>
         notice(context, 'Applied brightness $selected to Personal AI only.');
       }
     } on PlatformException catch (error) {
-      if (mounted)
+      if (mounted) {
         notice(context, error.message ?? 'Could not change brightness.');
+      }
     } on MissingPluginException {
-      if (mounted)
+      if (mounted) {
         notice(context, 'Temporary brightness is available on Android only.');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -630,11 +700,13 @@ class _TemporaryBrightnessActionState extends State<TemporaryBrightnessAction>
         notice(context, 'Restored the original app brightness.');
       }
     } on PlatformException catch (error) {
-      if (mounted)
+      if (mounted) {
         notice(context, error.message ?? 'Could not restore brightness.');
+      }
     } on MissingPluginException {
-      if (mounted)
+      if (mounted) {
         notice(context, 'Temporary brightness is available on Android only.');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

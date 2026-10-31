@@ -32,6 +32,9 @@ import android.net.TrafficStats
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.os.Environment
 import android.os.Looper
 import android.os.ParcelFileDescriptor
@@ -58,8 +61,17 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
+internal data class TextShareRequest(val title: String, val text: String)
+
+internal fun parseTextSharePayload(title: String?, text: String?): TextShareRequest? {
+    if (title.isNullOrBlank() || title.length > 80 || text.isNullOrBlank() || text.length > 10000) {
+        return null
+    }
+    return TextShareRequest(title, text)
+}
+
 internal fun isValidTextSharePayload(title: String?, text: String?): Boolean =
-    !title.isNullOrBlank() && title.length <= 80 && !text.isNullOrBlank() && text.length <= 10000
+    parseTextSharePayload(title, text) != null
 
 internal fun temporaryWindowBrightness(level: Int): Float? =
     level.takeIf { it in 0..255 }?.div(255f)
@@ -710,6 +722,32 @@ class MainActivity : FlutterFragmentActivity() {
                     call.argument<Any>("percent"),
                     result,
                 )
+                "request_haptic_pulse" -> requestReviewedHapticPulse(call.arguments, result)
+                "set_system_alarm" -> {
+                    val request = SystemClockAlarmRequestParser.parse(
+                        call.argument<Any>("hour"),
+                        call.argument<Any>("minute"),
+                    )
+                    if (request == null) {
+                        result.error("invalid_argument", "Use an hour from 0–23 and a minute from 0–59", null)
+                    } else {
+                        val intent = Intent(android.provider.AlarmClock.ACTION_SET_ALARM).apply {
+                            putExtra(android.provider.AlarmClock.EXTRA_HOUR, request.hour)
+                            putExtra(android.provider.AlarmClock.EXTRA_MINUTES, request.minute)
+                            putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, "Personal AI")
+                            // Keep the Clock UI visible; the user confirms the alarm there.
+                            putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, false)
+                        }
+                        try {
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (_: android.content.ActivityNotFoundException) {
+                            result.error("unavailable", "No Android Clock app can handle alarm requests", null)
+                        } catch (_: Exception) {
+                            result.error("unavailable", "Android could not open the Clock alarm screen", null)
+                        }
+                    }
+                }
                 "set_system_timer" -> {
                     val request = SystemClockTimerRequestParser.parse(
                         call.argument<Any>("seconds"),
@@ -753,6 +791,12 @@ class MainActivity : FlutterFragmentActivity() {
                 "open_sms_draft" -> reviewAndOpenSmsDraft(
                     call.argument<Any>("number"),
                     call.argument<Any>("message"),
+                    result,
+                )
+                "open_email_draft" -> reviewAndOpenEmailDraft(
+                    call.argument<Any>("recipient"),
+                    call.argument<Any>("subject"),
+                    call.argument<Any>("body"),
                     result,
                 )
                 "read_wifi_status" -> {
@@ -1217,6 +1261,42 @@ class MainActivity : FlutterFragmentActivity() {
         )
     }
 
+    private fun requestReviewedHapticPulse(arguments: Any?, result: MethodChannel.Result) {
+        val request = FixedVibrationRequestParser.parse(arguments)
+        if (request == null) {
+            result.error("invalid_argument", "This action accepts no settings; it requests one fixed short pulse.", null)
+            return
+        }
+        val vibrator = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                getSystemService(VibratorManager::class.java)?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+        } catch (_: Exception) {
+            null
+        }
+        if (vibrator == null || !vibrator.hasVibrator()) {
+            result.error("unavailable", "This device does not report a usable vibrator.", null)
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Review haptic pulse")
+            .setMessage("Request one short ${request.durationMillis} ms vibration? Android may ignore it if vibration is unavailable or disabled.")
+            .setNegativeButton("Cancel") { _, _ -> result.success(mapOf("requested" to false)) }
+            .setPositiveButton("Request pulse") { _, _ ->
+                try {
+                    vibrator.vibrate(VibrationEffect.createOneShot(request.durationMillis, VibrationEffect.DEFAULT_AMPLITUDE))
+                    result.success(mapOf("requested" to true, "duration_ms" to request.durationMillis, "physical_effect_confirmed" to false))
+                } catch (_: Exception) {
+                    result.error("unavailable", "Android did not accept the vibration request.", null)
+                }
+            }
+            .setOnCancelListener { result.success(mapOf("requested" to false)) }
+            .show()
+    }
+
     private fun reviewAndOpenWhatsAppDraft(number: Any?, message: Any?, result: MethodChannel.Result) {
         val request = WhatsAppDraftPolicy.parse(number, message)
         if (request == null) {
@@ -1310,6 +1390,30 @@ class MainActivity : FlutterFragmentActivity() {
             }
             .create()
         dialog.setOnCancelListener { cancelled() }
+        dialog.show()
+    }
+
+    private fun reviewAndOpenEmailDraft(recipient: Any?, subject: Any?, body: Any?, result: MethodChannel.Result) {
+        val request = EmailDraftPolicy.parse(recipient, subject, body)
+        if (request == null) {
+            result.error("invalid_argument", "Enter one valid recipient, a subject up to 200 characters, and a message up to 10,000 characters.", null)
+            return
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Review email draft")
+            .setMessage("To: ${request.recipient}\nSubject: ${request.subject}\n\n${request.body}\n\nAndroid will open your email app with this exact draft. Nothing is sent; review it and tap Send in that app.")
+            .setNegativeButton("Cancel") { _, _ -> result.success(mapOf("result" to "cancelled", "sent" to false)) }
+            .setPositiveButton("Open email draft") { _, _ ->
+                val intent = Intent(Intent.ACTION_SENDTO, Uri.parse(EmailDraftPolicy.mailto(request)))
+                try {
+                    startActivity(intent)
+                    result.success(mapOf("result" to "composer_opened", "sent" to false))
+                } catch (_: Exception) {
+                    result.error("unavailable", "Android could not open an email composer; nothing was sent.", null)
+                }
+            }
+            .create()
+        dialog.setOnCancelListener { result.success(mapOf("result" to "cancelled", "sent" to false)) }
         dialog.show()
     }
 
@@ -1508,22 +1612,39 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
     private fun shareText(args: Map<*, *>, result: MethodChannel.Result) {
-        val title = (args["title"] as? String)?.trim()
-        val text = args["text"] as? String
-        if (!isValidTextSharePayload(title, text)) {
+        val request = parseTextSharePayload(args["title"] as? String, args["text"] as? String)
+        if (request == null) {
             result.error("invalid_argument", "A short title and non-empty text up to 10,000 characters are required", null)
             return
         }
-        val send = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, text)
+        var completed = false
+        fun cancelled() {
+            if (completed) return
+            completed = true
+            result.success(mapOf("result" to "cancelled", "sent" to false))
         }
-        try {
-            startActivity(Intent.createChooser(send, title))
-            result.success(mapOf("result" to "chooser_opened", "sent" to false))
-        } catch (_: Exception) {
-            result.error("unavailable", "Android could not open the text share sheet", null)
-        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Review text to share")
+            .setMessage("${request.title}\n\n${request.text}\n\nAndroid will open the Sharesheet. Nothing is sent until you choose a recipient and confirm in that app.")
+            .setNegativeButton("Cancel") { _, _ -> cancelled() }
+            .setPositiveButton("Open Sharesheet") { _, _ ->
+                if (completed) return@setPositiveButton
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, request.text)
+                }
+                try {
+                    startActivity(Intent.createChooser(send, request.title))
+                    completed = true
+                    result.success(mapOf("result" to "chooser_opened", "sent" to false))
+                } catch (_: Exception) {
+                    completed = true
+                    result.error("unavailable", "Android could not open the text share sheet; nothing was sent.", null)
+                }
+            }
+            .create()
+        dialog.setOnCancelListener { cancelled() }
+        dialog.show()
     }
 
     private fun safeDocumentExportName(requested: String?, extension: String): String {

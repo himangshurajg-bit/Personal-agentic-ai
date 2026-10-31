@@ -4,7 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-class PhoneActionRequestsTest {
+class SmsDialActionRequestsTest {
     @Test fun dialRequiresOneE164NumberWithoutReformatting() {
         assertEquals(PhoneDialRequest("+14155550123"), PhoneHandoffPolicy.parseDial("+14155550123"))
         listOf("4155550123", "+01234567", "+123456", "+1234567890123456", "+1 4155550123", null, 7)

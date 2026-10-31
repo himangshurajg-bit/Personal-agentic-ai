@@ -27,7 +27,8 @@ void main() {
           if (call.method == 'open_whatsapp_draft') {
             return <String, Object?>{'result': 'handoff_opened', 'sent': false};
           }
-          if (call.method == 'open_sms_draft') {
+          if (call.method == 'open_sms_draft' ||
+              call.method == 'open_email_draft') {
             return <String, Object?>{
               'result': 'composer_opened',
               'sent': false,
@@ -91,6 +92,58 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(calls.last.method, 'restore_temporary_brightness');
+  });
+
+  testWidgets('email draft requires a valid recipient and message', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(const MaterialApp(home: OutboundDraftsScreen()));
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Email draft').last);
+    await tester.pumpAndSettle();
+
+    final button = find.byKey(const ValueKey('review-outbound-handoff'));
+    expect(tester.widget<FilledButton>(button).onPressed, isNull);
+    expect(calls, isEmpty);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('outbound-draft-recipient')),
+      'not-an-email',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('outbound-draft-text')),
+      'A reviewed note.',
+    );
+    await tester.pump();
+    expect(tester.widget<FilledButton>(button).onPressed, isNull);
+    expect(calls, isEmpty);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('outbound-draft-recipient')),
+      'student+jee@example.com',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('outbound-draft-subject')),
+      'Schedule',
+    );
+    await tester.pump();
+    expect(tester.widget<FilledButton>(button).onPressed, isNotNull);
+    expect(calls, isEmpty);
+
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(calls.single.method, 'open_email_draft');
+    expect(calls.single.arguments, {
+      'recipient': 'student+jee@example.com',
+      'subject': 'Schedule',
+      'body': 'A reviewed note.',
+    });
   });
 
   testWidgets(
@@ -223,7 +276,11 @@ void main() {
     );
     await tester.pump();
     final button = find.byKey(const ValueKey('review-outbound-handoff'));
-    await tester.ensureVisible(button);
+    await tester.scrollUntilVisible(
+      button,
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(button);
     await tester.pumpAndSettle();
     expect(calls.single.method, 'open_phone_dialer');
@@ -277,7 +334,11 @@ void main() {
     await tester.pump();
     expect(calls, isEmpty);
     final button = find.byKey(const ValueKey('review-map-search'));
-    await tester.ensureVisible(button);
+    await tester.scrollUntilVisible(
+      button,
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(button);
     await tester.pumpAndSettle();
     expect(calls, hasLength(1));
@@ -487,30 +548,21 @@ void main() {
     },
   );
 
-  testWidgets('haptic test requests feedback only after an explicit tap', (
+  testWidgets('haptic pulse is requested only after an explicit tap', (
     tester,
   ) async {
-    final hapticCalls = <MethodCall>[];
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
-          if (call.method.startsWith('HapticFeedback.')) {
-            hapticCalls.add(call);
-          }
-          return null;
-        });
-    addTearDown(() {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(SystemChannels.platform, null);
-    });
-
     await tester.pumpWidget(
       const MaterialApp(home: Scaffold(body: HapticPulseAction())),
     );
-    expect(hapticCalls, isEmpty);
+    expect(calls, isEmpty);
     await tester.tap(find.byKey(const ValueKey('haptic-pulse-action')));
     await tester.pumpAndSettle();
-    expect(hapticCalls.map((call) => call.method), ['HapticFeedback.vibrate']);
-    expect(find.text('Requested one short haptic pulse.'), findsOneWidget);
+    expect(calls.map((call) => call.method), ['request_haptic_pulse']);
+    expect(calls.single.arguments, isNull);
+    expect(
+      find.textContaining('confirmation before requesting'),
+      findsOneWidget,
+    );
   });
 
   testWidgets(

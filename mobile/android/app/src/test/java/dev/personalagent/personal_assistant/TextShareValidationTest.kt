@@ -1,5 +1,6 @@
 package dev.personalagent.personal_assistant
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -8,6 +9,14 @@ class TextShareValidationTest {
     @Test fun acceptsNonEmptyTextWithinLimits() {
         assertTrue(isValidTextSharePayload("Review reply", "Hello"))
         assertTrue(isValidTextSharePayload("x".repeat(80), "y".repeat(10000)))
+    }
+
+    @Test fun preservesExactReviewedTextAndTitle() {
+        val exactText = "  first line\nsecond line  "
+        assertEquals(
+            TextShareRequest("Review reply", exactText),
+            parseTextSharePayload("Review reply", exactText),
+        )
     }
 
     @Test fun rejectsMissingOrOversizedShareData() {
