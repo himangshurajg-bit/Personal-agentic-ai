@@ -98,3 +98,22 @@ lines, and still requires a complete `[DONE]` event before treating a response a
 A mocked HTTP test covers multiline JSON plus CRLF framing; no credentials, external calls,
 retries, dependencies, or upstream code were added. This is a narrow standards-based
 hardening, not a port of LangGraph's decoder or claim of exhaustive SSE conformance.
+
+## 31 October 2026: initial UTF-8 BOM in server-sent events
+
+LangGraph's MIT-licensed Python SDK PR [#9402](https://github.com/langchain-ai/langgraph/pull/9402)
+fixed SSE-spec handling for repeated `data:` fields, empty event IDs, and a UTF-8 BOM at
+stream start. This service already joins repeated data fields with newlines and does not use
+SSE IDs or reconnect cursors. Its `_iter_sse_data()` did, however, treat an initial BOM as
+part of the first field name (`\ufeffdata`), silently dropping the first provider event.
+
+The service now strips a BOM only at the start of a stream, with a `MockTransport`
+regression test that first failed by returning no content and now verifies the first event
+is preserved. No upstream code or dependency was copied or added; this narrow change needs
+no third-party notice. FastAPI 0.162.0's new boolean-form defaults do not apply to this
+service's JSON-body routes. CrewAI's security fixes concern framework-specific code the
+service does not use; MCP Python SDK 2.3.0 predates this review and is not used by the
+Android MCP client. No dependency or lockfile changes are warranted.
+
+`uv run --frozen --group dev pytest -q` in `service/`: 29 tests passed. No live provider,
+network service, credentials, or paid call was used.
