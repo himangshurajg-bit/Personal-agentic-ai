@@ -13,6 +13,48 @@ Uint8List _docx(String documentXml) {
 }
 
 void main() {
+  group('DOCX text generation', () {
+    test(
+      'creates a valid local OOXML package and preserves Unicode and text',
+      () {
+        final source = """A&B <word> "quoted" 'ok'
+অসমীয়া 😀
+Next""";
+        final bytes = createDocxFromText(
+          title: 'Personal AI response',
+          text: source,
+        );
+        final archive = ZipDecoder().decodeBytes(bytes);
+        expect(archive.findFile('[Content_Types].xml'), isNotNull);
+        expect(archive.findFile('_rels/.rels'), isNotNull);
+        final document = archive.findFile('word/document.xml');
+        expect(document, isNotNull);
+        final xml = utf8.decode(List<int>.from(document!.content as List<int>));
+        expect(xml, contains('A&amp;B &lt;word&gt;'));
+        expect(extractDocxText(bytes).text, 'Personal AI response\n$source');
+        expect(bytes.length, lessThanOrEqualTo(maxGeneratedDocxBytes));
+      },
+    );
+
+    test('rejects empty content and invalid titles', () {
+      expect(
+        () => createDocxFromText(title: 'Title', text: '  \n  '),
+        throwsA(isA<FormatException>()),
+      );
+      expect(
+        () => createDocxFromText(title: '', text: 'Answer'),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('removes XML-invalid control characters', () {
+      final result = extractDocxText(
+        createDocxFromText(title: 'Title', text: 'A\u0001B'),
+      );
+      expect(result.text, 'Title\nAB');
+    });
+  });
+
   group('DOCX text extraction', () {
     test(
       'extracts paragraph and table-cell text locally in document order',

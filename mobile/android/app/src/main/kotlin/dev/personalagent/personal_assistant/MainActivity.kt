@@ -107,12 +107,15 @@ internal fun assistantTaskStatusLabel(status: String): String? = when (status) {
 class MainActivity : FlutterFragmentActivity() {
     companion object {
         private const val ACTION_TASK_VOICE_COMMAND = "dev.personalagent.personal_assistant.TASK_VOICE_COMMAND"
+        private const val ACTION_TASK_CANCEL = "dev.personalagent.personal_assistant.TASK_CANCEL"
+        private const val EXTRA_TASK_ID = "assistant_task_id"
         private const val TASK_NOTIFICATION_CHANNEL = "assistant_task_progress"
         private const val USER_NOTIFICATION_CHANNEL = "user_created_notifications"
         private const val TASK_NOTIFICATION_ID = 6107
     }
 
     private var pendingTaskVoiceCommand = false
+    private var pendingTaskCancellationId: String? = null
     private var taskTrackerChannel: MethodChannel? = null
     private var activeTaskNotificationId: String? = null
     private var hasTemporaryWindowBrightness = false
@@ -120,6 +123,9 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         if (intent?.action == ACTION_TASK_VOICE_COMMAND) pendingTaskVoiceCommand = true
+        if (intent?.action == ACTION_TASK_CANCEL) {
+            pendingTaskCancellationId = intent.getStringExtra(EXTRA_TASK_ID)
+        }
         super.onCreate(savedInstanceState)
     }
 
@@ -129,6 +135,18 @@ class MainActivity : FlutterFragmentActivity() {
         if (intent.action == ACTION_TASK_VOICE_COMMAND) {
             pendingTaskVoiceCommand = true
             taskTrackerChannel?.invokeMethod("voice_command_requested", null)
+        } else if (intent.action == ACTION_TASK_CANCEL) {
+            val taskId = intent.getStringExtra(EXTRA_TASK_ID)
+            if (taskId != null && taskId == activeTaskNotificationId) {
+                val channel = taskTrackerChannel
+                if (channel != null) {
+                    channel.invokeMethod("task_cancel_requested", taskId)
+                } else {
+                    pendingTaskCancellationId = taskId
+                }
+            } else if (taskTrackerChannel == null) {
+                pendingTaskCancellationId = taskId
+            }
         }
     }
 
@@ -331,6 +349,15 @@ class MainActivity : FlutterFragmentActivity() {
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val cancelTask = PendingIntent.getActivity(
+            this,
+            TASK_NOTIFICATION_ID + 2,
+            Intent(this, MainActivity::class.java)
+                .setAction(ACTION_TASK_CANCEL)
+                .putExtra(EXTRA_TASK_ID, activeTaskNotificationId)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val privateTitle = title.replace(Regex("[\\r\\n\\t]+"), " ").trim().take(100)
         val notification = android.app.Notification.Builder(this, TASK_NOTIFICATION_CHANNEL)
             .setSmallIcon(android.R.drawable.ic_popup_sync)
@@ -352,6 +379,7 @@ class MainActivity : FlutterFragmentActivity() {
             .setTimeoutAfter(5 * 60 * 1000L)
             .setContentIntent(openChat)
             .addAction(android.app.Notification.Action.Builder(android.R.drawable.ic_btn_speak_now, "Voice command", openVoice).build())
+            .addAction(android.app.Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, "Stop task", cancelTask).build())
             .build()
 
         val islandPayload = if (BuildConfig.HYPEROS_ISLAND_OPT_IN) {
@@ -607,6 +635,11 @@ class MainActivity : FlutterFragmentActivity() {
                     "consume_voice_command_request" -> {
                         val requested = pendingTaskVoiceCommand
                         pendingTaskVoiceCommand = false
+                        result.success(requested)
+                    }
+                    "consume_task_cancel_request" -> {
+                        val requested = pendingTaskCancellationId
+                        pendingTaskCancellationId = null
                         result.success(requested)
                     }
                     "show_task", "update_task" -> {
@@ -958,6 +991,24 @@ class MainActivity : FlutterFragmentActivity() {
                         val filename = safeDocumentExportName(call.argument<String>("filename"), ".zip")
                         try { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="application/zip"; putExtra(Intent.EXTRA_TITLE,filename) },42) }
                         catch(_:Exception) { exportResult=null; exportBytes=null; result.error("unavailable","No document picker is available",null) }
+                    }
+                }
+                "export_docx_bytes" -> {
+                    if (exportResult != null) { result.error("busy", "An export is already open", null) }
+                    else {
+                        val bytes = call.argument<ByteArray>("bytes")
+                        if (bytes == null || bytes.isEmpty() || bytes.size > 256 * 1024) {
+                            result.error("invalid_argument", "Word export must be between 1 byte and 256 KB", null)
+                            return@setMethodCallHandler
+                        }
+                        exportText = null; exportBytes = bytes.copyOf(); exportResult = result
+                        val filename = safeDocumentExportName(call.argument<String>("filename"), ".docx")
+                        try { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            putExtra(Intent.EXTRA_TITLE, filename)
+                        }, 42) }
+                        catch (_: Exception) { exportResult = null; exportBytes = null; result.error("unavailable", "No document picker is available", null) }
                     }
                 }
                 else -> result.notImplemented()
@@ -1658,6 +1709,7 @@ class MainActivity : FlutterFragmentActivity() {
         val base = name.removeSuffix(".json").removeSuffix(".JSON")
             .removeSuffix(".csv").removeSuffix(".CSV")
             .removeSuffix(".zip").removeSuffix(".ZIP")
+            .removeSuffix(".docx").removeSuffix(".DOCX")
         return "$base$extension"
     }
 

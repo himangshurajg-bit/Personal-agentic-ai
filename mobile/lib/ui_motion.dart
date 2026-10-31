@@ -397,6 +397,81 @@ class _HolographicAssistantOrbPainter extends CustomPainter {
     HolographicOrbState.speaking => .75,
   };
 
+  void _drawOrbitalGyre(
+    Canvas canvas, {
+    required Offset center,
+    required double radius,
+    required double phase,
+    required double activity,
+    required double pulse,
+    required List<Color> colors,
+    required bool foreground,
+  }) {
+    const tilt = -.34;
+    final orbitRadius = radius * 1.27;
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(tilt);
+    canvas.scale(1, .39);
+    final orbit = Rect.fromCircle(center: Offset.zero, radius: orbitRadius);
+    final tint = colors[0];
+    if (foreground) {
+      canvas.drawArc(
+        orbit,
+        0,
+        math.pi,
+        false,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeWidth = radius * .045
+          ..color = tint.withValues(alpha: .24 + .16 * activity)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
+      );
+      canvas.drawArc(
+        orbit,
+        0,
+        math.pi,
+        false,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeWidth = radius * .012
+          ..color = Color.lerp(
+            tint,
+            Colors.white,
+            .48,
+          )!.withValues(alpha: .52 + .26 * pulse),
+      );
+    } else {
+      canvas.drawOval(
+        orbit,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = radius * .014
+          ..color = colors[1].withValues(alpha: .27 + .12 * activity),
+      );
+      final nodeAngle = phase * (state == HolographicOrbState.idle ? .42 : .9);
+      final node = Offset(
+        math.cos(nodeAngle) * orbitRadius,
+        math.sin(nodeAngle) * orbitRadius,
+      );
+      canvas.drawCircle(
+        node,
+        radius * .045,
+        Paint()
+          ..color = colors[2].withValues(alpha: .58 + .32 * pulse)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+      );
+      canvas.drawCircle(
+        node,
+        radius * .016,
+        Paint()..color = Colors.white.withValues(alpha: .88),
+      );
+    }
+    canvas.restore();
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     final shortest = size.shortestSide;
@@ -416,6 +491,19 @@ class _HolographicAssistantOrbPainter extends CustomPainter {
     final radius = shortest * .345;
     final breathing = 1 + (.026 + .024 * activity) * pulse;
     final orbRadius = radius * breathing;
+
+    // Original glass-orbit treatment: a fine, tilted gyre and a moving
+    // light node give the sphere a crafted instrument-like silhouette.
+    _drawOrbitalGyre(
+      canvas,
+      center: center,
+      radius: orbRadius,
+      phase: angle,
+      activity: activity,
+      pulse: pulse,
+      colors: colors,
+      foreground: false,
+    );
 
     // A broad, softly colored bloom sits behind the dark glass sphere.
     final auraRect = Rect.fromCircle(center: center, radius: radius * 1.65);
@@ -731,6 +819,19 @@ class _HolographicAssistantOrbPainter extends CustomPainter {
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
     );
     canvas.restore();
+
+    // The lower sweep catches the light in front of the sphere, completing
+    // the gyre's depth cue without obscuring the central glass detail.
+    _drawOrbitalGyre(
+      canvas,
+      center: center,
+      radius: orbRadius,
+      phase: angle,
+      activity: activity,
+      pulse: pulse,
+      colors: colors,
+      foreground: true,
+    );
 
     // Bright partial rim: cool on top, violet through the middle, warm below.
     final rimRect = Rect.fromCircle(center: center, radius: orbRadius * .985);

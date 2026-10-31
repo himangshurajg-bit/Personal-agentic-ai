@@ -18,6 +18,7 @@ import 'system_clock_alarm_screen.dart';
 import 'wifi_settings_screen.dart';
 import 'journal_screen.dart';
 import 'office_document.dart';
+import 'markdown_table_csv.dart';
 import 'download_input.dart';
 import 'download_review.dart';
 import 'clipboard_preview_screen.dart';
@@ -610,6 +611,34 @@ class _DocumentFeatureState extends State<_DocumentFeature> {
     }
   }
 
+  Future<void> _saveAnswerAsDocx() async {
+    final answer = _answer?.text;
+    if (answer == null || answer.trim().isEmpty) return;
+    try {
+      final bytes = createDocxFromText(
+        title: 'Personal AI response',
+        text: answer,
+      );
+      await AssistantState.device.invokeMethod<void>('export_docx_bytes', {
+        'bytes': bytes,
+        'filename': 'personal-ai-response.docx',
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Word document saved.')));
+      }
+    } on PlatformException catch (error) {
+      if (error.code != 'cancelled' && mounted) {
+        setState(
+          () => _error = error.message ?? 'Could not save the Word document.',
+        );
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
   Future<void> _ask() async {
     final bytes = _bytes;
     if (bytes == null) {
@@ -903,6 +932,15 @@ class _DocumentFeatureState extends State<_DocumentFeature> {
             child: MarkdownBody(data: _answer!.text),
           ),
         ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: _saveAnswerAsDocx,
+            icon: const Icon(Icons.description_outlined),
+            label: const Text('Save response as Word'),
+          ),
+        ),
+        _MarkdownTableExportButtons(markdown: _answer!.text),
         if (_answer!.sources.isNotEmpty) _SourceList(sources: _answer!.sources),
       ],
     ],
@@ -1451,4 +1489,71 @@ class _ErrorPanel extends StatelessWidget {
       child: Padding(padding: const EdgeInsets.all(12), child: Text(text)),
     ),
   );
+}
+
+class _MarkdownTableExportButtons extends StatelessWidget {
+  final String markdown;
+
+  const _MarkdownTableExportButtons({required this.markdown});
+
+  @override
+  Widget build(BuildContext context) {
+    final tables = parseMarkdownCsvTables(markdown);
+    if (tables.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(top: 4, bottom: 6),
+          child: Text(
+            'Save a table from this answer as CSV. Formula-like cells are saved as text.',
+          ),
+        ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (var index = 0; index < tables.length; index++)
+              OutlinedButton.icon(
+                key: ValueKey('save-markdown-table-$index'),
+                onPressed: () => _save(context, tables[index], index + 1),
+                icon: const Icon(Icons.table_chart_outlined),
+                label: Text('Save table ${index + 1} as CSV'),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Future<void> _save(
+    BuildContext context,
+    MarkdownCsvTable table,
+    int tableNumber,
+  ) async {
+    try {
+      await AssistantState.device.invokeMethod<void>('export', {
+        'text': table.toCsv(),
+        'mime_type': 'text/csv',
+        'filename': 'personal-ai-table-$tableNumber.csv',
+      });
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('CSV table saved.')));
+      }
+    } on PlatformException catch (error) {
+      if (error.code != 'cancelled' && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error.message ?? 'Could not save the CSV table.'),
+          ),
+        );
+      }
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    }
+  }
 }

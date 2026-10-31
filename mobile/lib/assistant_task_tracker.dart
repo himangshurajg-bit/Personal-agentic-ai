@@ -10,6 +10,19 @@ enum AssistantTaskStatus {
   receivingReply,
 }
 
+/// Prevents a stale notification action from stopping a newer chat request.
+bool shouldCancelCurrentAssistantTask({
+  required String? activeTaskId,
+  required Object? requestId,
+  required bool busy,
+}) =>
+    busy &&
+    activeTaskId != null &&
+    activeTaskId.isNotEmpty &&
+    requestId is String &&
+    requestId.isNotEmpty &&
+    requestId == activeTaskId;
+
 extension AssistantTaskStatusLabel on AssistantTaskStatus {
   String get label => switch (this) {
     AssistantTaskStatus.preparing => 'Preparing your request',

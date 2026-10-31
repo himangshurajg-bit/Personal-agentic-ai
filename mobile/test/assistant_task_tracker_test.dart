@@ -93,4 +93,57 @@ void main() {
       expect(taskVoiceEntryRoute(ready: true, locked: false), '/task-voice');
     });
   });
+
+  group('notification task cancellation', () {
+    test('only accepts the id of the currently active task', () {
+      expect(
+        shouldCancelCurrentAssistantTask(
+          activeTaskId: 'chat-2',
+          requestId: 'chat-2',
+          busy: true,
+        ),
+        isTrue,
+      );
+      expect(
+        shouldCancelCurrentAssistantTask(
+          activeTaskId: 'chat-2',
+          requestId: 'chat-1',
+          busy: true,
+        ),
+        isFalse,
+      );
+      expect(
+        shouldCancelCurrentAssistantTask(
+          activeTaskId: null,
+          requestId: 'chat-2',
+          busy: true,
+        ),
+        isFalse,
+      );
+      expect(
+        shouldCancelCurrentAssistantTask(
+          activeTaskId: 'chat-2',
+          requestId: null,
+          busy: true,
+        ),
+        isFalse,
+      );
+      expect(
+        shouldCancelCurrentAssistantTask(
+          activeTaskId: 'chat-2',
+          requestId: 2,
+          busy: true,
+        ),
+        isFalse,
+      );
+      expect(
+        shouldCancelCurrentAssistantTask(
+          activeTaskId: 'chat-2',
+          requestId: 'chat-2',
+          busy: false,
+        ),
+        isFalse,
+      );
+    });
+  });
 }
