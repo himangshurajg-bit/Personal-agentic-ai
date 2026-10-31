@@ -215,6 +215,29 @@ async def test_groq_adapter_assembles_multiline_sse_data_and_ignores_comments(mo
     assert [part async for part in provider.stream([{"role": "user", "content": "hello"}])] == ["Hello"]
 
 
+async def test_groq_adapter_ignores_utf8_bom_before_first_sse_field(monkeypatch):
+    import httpx
+    original = httpx.AsyncClient
+    body = (
+        '\ufeffdata: {"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}\n\n'
+        'data: [DONE]\n\n'
+    ).encode("utf-8")
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: original(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200, content=body, headers={"content-type": "text/event-stream"}
+                )
+            ),
+            **kwargs,
+        ),
+    )
+    provider = GroqProvider("unit-test-key", "openai/gpt-oss-120b")
+    assert [part async for part in provider.stream([{"role": "user", "content": "hello"}])] == ["Hello"]
+
+
 async def test_groq_adapter_fails_closed_on_http_errors_and_truncated_streams(monkeypatch):
     import httpx
     original = httpx.AsyncClient

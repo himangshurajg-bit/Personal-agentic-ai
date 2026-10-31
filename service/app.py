@@ -87,7 +87,12 @@ class Ollama:
 async def _iter_sse_data(lines: AsyncIterator[str]) -> AsyncIterator[str]:
     """Yield each blank-line-delimited SSE data payload, preserving multiline data."""
     data_lines: list[str] = []
+    at_stream_start = True
     async for line in lines:
+        if at_stream_start:
+            at_stream_start = False
+            if line.startswith("\ufeff"):
+                line = line[1:]
         if not line:
             if data_lines:
                 yield "\n".join(data_lines)
