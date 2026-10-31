@@ -2,6 +2,7 @@ name: Android16 phone preview qualification
 on:
   workflow_dispatch:
   push:
+    branches: ['**']
     paths: ['mobile/**', 'ci/android16-checks.sh', '.github/workflows/android16.yml']
 permissions:
   contents: read
