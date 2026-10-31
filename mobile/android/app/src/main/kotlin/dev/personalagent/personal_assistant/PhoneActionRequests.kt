@@ -26,6 +26,29 @@ internal object WhatsAppDraftPolicy {
     }
 }
 
+
+internal data class PhoneDialRequest(val number: String)
+internal data class SmsDraftRequest(val number: String, val message: String)
+
+internal object PhoneHandoffPolicy {
+    const val MAX_SMS_LENGTH = 1_600
+    private val internationalNumber = Regex("^\\+[1-9][0-9]{6,14}$")
+
+    fun parseDial(numberValue: Any?): PhoneDialRequest? {
+        val number = numberValue as? String ?: return null
+        if (!internationalNumber.matches(number)) return null
+        return PhoneDialRequest(number)
+    }
+
+    fun parseSms(numberValue: Any?, messageValue: Any?): SmsDraftRequest? {
+        val number = numberValue as? String ?: return null
+        val message = messageValue as? String ?: return null
+        if (!internationalNumber.matches(number) || message.isBlank() ||
+            message.length > MAX_SMS_LENGTH || message.any { it.code == 0 }) return null
+        return SmsDraftRequest(number, message)
+    }
+}
+
 internal data class TorchCameraCandidate(
     val id: String,
     val hasFlash: Boolean,

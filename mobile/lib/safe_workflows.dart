@@ -5,7 +5,7 @@ import 'assistant_state.dart';
 import 'multi_agent_workflow.dart';
 import 'main.dart' show Glass, Home, Shell, notice;
 
-/// User-edited text handed to Android's chooser only after an explicit tap.
+/// User-entered phone and social drafts require a deliberate handoff.
 class OutboundDraftsScreen extends StatefulWidget {
   const OutboundDraftsScreen({super.key});
 
@@ -20,6 +20,19 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
   String _kind = 'whatsapp';
   bool _opening = false;
 
+  bool get _needsNumber => _kind != 'social';
+  bool get _needsText => _kind != 'phone';
+  bool get _isWhatsApp => _kind == 'whatsapp';
+  bool get _isSms => _kind == 'sms';
+  int get _textLimit => _kind == 'social' ? 10000 : 1600;
+  bool get _hasValidNumber =>
+      RegExp(r'^\+[1-9][0-9]{6,14}$').hasMatch(_number.text.trim());
+  bool get _canSubmit =>
+      !_opening &&
+      (!_needsNumber || _hasValidNumber) &&
+      (!_needsText ||
+          (_text.text.trim().isNotEmpty && _text.text.length <= _textLimit));
+
   @override
   void dispose() {
     _text.dispose();
@@ -27,44 +40,64 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
     super.dispose();
   }
 
-  Future<void> _openShareSheet() async {
-    final body = _text.text;
+  String get _buttonLabel => switch (_kind) {
+    'whatsapp' => 'Review WhatsApp draft',
+    'sms' => 'Review SMS draft',
+    'phone' => 'Review number in dialer',
+    _ => 'Choose app to review caption',
+  };
+
+  Future<void> _openHandoff() async {
+    if (!_canSubmit) return;
     final number = _number.text.trim();
-    final isWhatsApp = _kind == 'whatsapp';
-    final validNumber = RegExp(r'^\+[1-9][0-9]{6,14}$').hasMatch(number);
-    if (body.trim().isEmpty || _opening) return;
-    if (isWhatsApp && (!validNumber || body.length > 1600)) return;
-    if (!isWhatsApp && body.length > 10000) return;
+    final body = _text.text;
     setState(() => _opening = true);
     try {
-      final response = isWhatsApp
-          ? await _device.invokeMethod<Object?>('open_whatsapp_draft', {
-              'number': number,
-              'message': body,
-            })
-          : await _device.invokeMethod<Object?>('share_text', {
-              'title': 'Review social caption',
-              'text': body,
-            });
-      if (isWhatsApp &&
-          mounted &&
-          response is Map &&
-          response['result'] == 'handoff_opened') {
+      final response = switch (_kind) {
+        'whatsapp' => await _device.invokeMethod<Object?>(
+          'open_whatsapp_draft',
+          {'number': number, 'message': body},
+        ),
+        'sms' => await _device.invokeMethod<Object?>('open_sms_draft', {
+          'number': number,
+          'message': body,
+        }),
+        'phone' => await _device.invokeMethod<Object?>('open_phone_dialer', {
+          'number': number,
+        }),
+        _ => await _device.invokeMethod<Object?>('share_text', {
+          'title': 'Review social caption',
+          'text': body,
+        }),
+      };
+      if (!mounted || response is! Map) return;
+      final result = response['result'];
+      if (_kind == 'whatsapp' && result == 'handoff_opened') {
         notice(
           context,
-          'Android accepted the WhatsApp-link handoff. Nothing was sent; review the draft and tap Send in WhatsApp.',
+          'WhatsApp opened with the draft. Nothing was sent; tap Send there if you choose.',
         );
+      } else if (_isSms && result == 'composer_opened') {
+        notice(
+          context,
+          'Your messaging app opened with the draft. Nothing was sent.',
+        );
+      } else if (_kind == 'phone' && result == 'dialer_opened') {
+        notice(context, 'Android opened the dialer. No call was placed.');
       }
     } on PlatformException catch (error) {
       if (mounted) {
         notice(
           context,
-          error.message ?? 'Android could not open the share sheet.',
+          error.message ?? 'Android could not open that handoff.',
         );
       }
     } on MissingPluginException {
       if (mounted) {
-        notice(context, 'Text sharing is available in the Android app only.');
+        notice(
+          context,
+          'Phone and text handoffs are available in the Android app only.',
+        );
       }
     } finally {
       if (mounted) setState(() => _opening = false);
@@ -75,17 +108,17 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return Shell(
-      title: 'Message & social drafts',
+      title: 'Phone & message drafts',
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 118),
         children: [
           Text(
-            'Write it here, send it yourself',
+            'Prepare it here, finish it yourself',
             style: Theme.of(context).textTheme.headlineSmall,
           ),
           const SizedBox(height: 8),
           Text(
-            'Nothing is sent or published by this app. For WhatsApp, enter one full international number; Personal AI shows the exact recipient and message in an approval dialog before opening a prefilled link. You must tap Send in WhatsApp. Social captions open Android’s share sheet.',
+            'Phone numbers and message text stay in this screen until you choose a handoff. SMS and WhatsApp show the exact recipient and draft for approval first; Android opens the dialer for calls. Nothing is sent or called automatically.',
             style: Theme.of(context).textTheme.bodyMedium
                 ?.copyWith(color: colors.onSurfaceVariant),
           ),
@@ -97,11 +130,16 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
                 DropdownButtonFormField<String>(
                   initialValue: _kind,
                   isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Draft type'),
+                  decoration: const InputDecoration(labelText: 'Handoff'),
                   items: const [
                     DropdownMenuItem(
                       value: 'whatsapp',
-                      child: Text('WhatsApp reply'),
+                      child: Text('WhatsApp draft'),
+                    ),
+                    DropdownMenuItem(value: 'sms', child: Text('SMS draft')),
+                    DropdownMenuItem(
+                      value: 'phone',
+                      child: Text('Phone dialer'),
                     ),
                     DropdownMenuItem(
                       value: 'social',
@@ -111,56 +149,55 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
                   onChanged: (value) =>
                       setState(() => _kind = value ?? 'whatsapp'),
                 ),
-                if (_kind == 'whatsapp') ...[
+                if (_needsNumber) ...[
                   const SizedBox(height: 12),
                   TextField(
                     key: const ValueKey('outbound-draft-number'),
                     controller: _number,
                     keyboardType: TextInputType.phone,
                     maxLength: 16,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'International phone number',
                       hintText: '+<country code><number>',
                       helperText: 'Include + and the country code; no spaces.',
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ],
+                if (_needsText) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: const ValueKey('outbound-draft-text'),
+                    controller: _text,
+                    minLines: 4,
+                    maxLines: 14,
+                    maxLength: _textLimit,
+                    keyboardType: TextInputType.multiline,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      labelText: _isWhatsApp
+                          ? 'WhatsApp message'
+                          : _isSms
+                          ? 'SMS message'
+                          : 'Caption draft',
+                      hintText: _isWhatsApp
+                          ? 'Write a reply to review in WhatsApp…'
+                          : _isSms
+                          ? 'Write a text message to review in your messaging app…'
+                          : 'Write a caption to review in your social app…',
+                      alignLabelWithHint: true,
+                      border: const OutlineInputBorder(),
                     ),
                     onChanged: (_) => setState(() {}),
                   ),
                 ],
                 const SizedBox(height: 12),
-                TextField(
-                  key: const ValueKey('outbound-draft-text'),
-                  controller: _text,
-                  minLines: 7,
-                  maxLines: 14,
-                  maxLength: _kind == 'whatsapp' ? 1600 : 10000,
-                  keyboardType: TextInputType.multiline,
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: InputDecoration(
-                    labelText: _kind == 'whatsapp'
-                        ? 'Reply draft'
-                        : 'Caption draft',
-                    hintText: _kind == 'whatsapp'
-                        ? 'Write a reply to review in your messaging app…'
-                        : 'Write a caption to review in your social app…',
-                    alignLabelWithHint: true,
-                    border: const OutlineInputBorder(),
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
-                const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed:
-                        _text.text.trim().isEmpty ||
-                            _opening ||
-                            (_kind == 'whatsapp' &&
-                                (!RegExp(r'^\+[1-9][0-9]{6,14}$')
-                                        .hasMatch(_number.text.trim()) ||
-                                    _text.text.length > 1600))
-                        ? null
-                        : _openShareSheet,
+                    key: const ValueKey('review-outbound-handoff'),
+                    onPressed: _canSubmit ? _openHandoff : null,
                     icon: _opening
                         ? const SizedBox(
                             width: 18,
@@ -168,11 +205,7 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.ios_share_rounded),
-                    label: Text(
-                      _kind == 'whatsapp'
-                          ? 'Review WhatsApp draft'
-                          : 'Choose app to review caption',
-                    ),
+                    label: Text(_buttonLabel),
                   ),
                 ),
               ],
@@ -181,7 +214,7 @@ class _OutboundDraftsScreenState extends State<OutboundDraftsScreen> {
           const SizedBox(height: 12),
           const Glass(
             child: Text(
-              'WhatsApp requires a number you enter yourself and a separate approval step. The app never sends the message. Social sharing still does not choose a recipient, attach media, or publish a post. Drafts are not saved after you leave.',
+              'Phone actions need an international number you enter yourself. Android opens the dialer without placing a call; SMS and WhatsApp open the reviewed draft for you to send. Social sharing does not choose a recipient or publish a post. Drafts are not saved after you leave.',
             ),
           ),
         ],
@@ -415,50 +448,53 @@ class _CopyTextActionState extends State<CopyTextAction> {
   Future<void> _reviewAndCopy() async {
     final exactText = _text.text;
     if (_copying || exactText.isEmpty || exactText.length > 4000) return;
-    final approved = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Review clipboard text'),
-        scrollable: true,
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Copy this exact text to Android’s clipboard?'),
-            const SizedBox(height: 12),
-            SelectableText(
-              exactText,
-              key: const ValueKey('clipboard-review-text'),
+    final approved =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Review clipboard text'),
+            scrollable: true,
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Copy this exact text to Android’s clipboard?'),
+                const SizedBox(height: 12),
+                SelectableText(
+                  exactText,
+                  key: const ValueKey('clipboard-review-text'),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Other apps may be able to read clipboard contents. Personal AI will not save this text.',
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            const Text(
-              'Other apps may be able to read clipboard contents. Personal AI will not save this text.',
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                key: const ValueKey('approve-clipboard-copy'),
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Copy this text'),
+              ),
+            ],
           ),
-          FilledButton(
-            key: const ValueKey('approve-clipboard-copy'),
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Copy this text'),
-          ),
-        ],
-      ),
-    ) ??
-    false;
+        ) ??
+        false;
     if (!approved || !mounted) return;
     setState(() => _copying = true);
     try {
       await Clipboard.setData(ClipboardData(text: exactText));
-      if (mounted) notice(context, 'Copied the reviewed text to the clipboard.');
+      if (mounted)
+        notice(context, 'Copied the reviewed text to the clipboard.');
     } on PlatformException {
       if (mounted) notice(context, 'Android could not copy the text.');
     } on MissingPluginException {
-      if (mounted) notice(context, 'Clipboard copy is available on Android only.');
+      if (mounted)
+        notice(context, 'Clipboard copy is available on Android only.');
     } finally {
       if (mounted) setState(() => _copying = false);
     }
@@ -541,41 +577,44 @@ class _TemporaryBrightnessActionState extends State<TemporaryBrightnessAction>
   Future<void> _apply() async {
     if (_busy) return;
     final selected = _level;
-    final approved = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Review temporary brightness'),
-        content: Text(
-          'Set this app window to brightness $selected of 255? The rest of your screen is unchanged. Android’s original setting will be restored when Personal AI leaves the foreground.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
+    final approved =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Review temporary brightness'),
+            content: Text(
+              'Set this app window to brightness $selected of 255? The rest of your screen is unchanged. Android’s original setting will be restored when Personal AI leaves the foreground.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                key: const ValueKey('approve-temporary-brightness'),
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Apply to this app'),
+              ),
+            ],
           ),
-          FilledButton(
-            key: const ValueKey('approve-temporary-brightness'),
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Apply to this app'),
-          ),
-        ],
-      ),
-    ) ?? false;
+        ) ??
+        false;
     if (!approved || !mounted) return;
     setState(() => _busy = true);
     try {
-      await _device.invokeMethod<Object?>(
-        'set_temporary_brightness',
-        {'level': selected},
-      );
+      await _device.invokeMethod<Object?>('set_temporary_brightness', {
+        'level': selected,
+      });
       if (mounted) {
         setState(() => _active = true);
         notice(context, 'Applied brightness $selected to Personal AI only.');
       }
     } on PlatformException catch (error) {
-      if (mounted) notice(context, error.message ?? 'Could not change brightness.');
+      if (mounted)
+        notice(context, error.message ?? 'Could not change brightness.');
     } on MissingPluginException {
-      if (mounted) notice(context, 'Temporary brightness is available on Android only.');
+      if (mounted)
+        notice(context, 'Temporary brightness is available on Android only.');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -591,9 +630,11 @@ class _TemporaryBrightnessActionState extends State<TemporaryBrightnessAction>
         notice(context, 'Restored the original app brightness.');
       }
     } on PlatformException catch (error) {
-      if (mounted) notice(context, error.message ?? 'Could not restore brightness.');
+      if (mounted)
+        notice(context, error.message ?? 'Could not restore brightness.');
     } on MissingPluginException {
-      if (mounted) notice(context, 'Temporary brightness is available on Android only.');
+      if (mounted)
+        notice(context, 'Temporary brightness is available on Android only.');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -618,7 +659,9 @@ class _TemporaryBrightnessActionState extends State<TemporaryBrightnessAction>
         max: 255,
         divisions: 255,
         label: '$_level',
-        onChanged: _busy ? null : (value) => setState(() => _level = value.round()),
+        onChanged: _busy
+            ? null
+            : (value) => setState(() => _level = value.round()),
       ),
       Wrap(
         alignment: WrapAlignment.spaceBetween,

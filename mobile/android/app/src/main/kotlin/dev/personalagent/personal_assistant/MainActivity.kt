@@ -746,6 +746,15 @@ class MainActivity : FlutterFragmentActivity() {
                     call.argument<Any>("message"),
                     result,
                 )
+                "open_phone_dialer" -> reviewAndOpenPhoneDialer(
+                    call.argument<Any>("number"),
+                    result,
+                )
+                "open_sms_draft" -> reviewAndOpenSmsDraft(
+                    call.argument<Any>("number"),
+                    call.argument<Any>("message"),
+                    result,
+                )
                 "read_wifi_status" -> {
                     try {
                         val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
@@ -1239,6 +1248,64 @@ class MainActivity : FlutterFragmentActivity() {
                 } catch (_: Exception) {
                     completed = true
                     result.error("unavailable", "WhatsApp could not open this link; nothing was sent.", null)
+                }
+            }
+            .create()
+        dialog.setOnCancelListener { cancelled() }
+        dialog.show()
+    }
+
+    private fun reviewAndOpenPhoneDialer(number: Any?, result: MethodChannel.Result) {
+        val request = PhoneHandoffPolicy.parseDial(number)
+        if (request == null) {
+            result.error("invalid_argument", "Enter one full international phone number (+ and country code).", null)
+            return
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Review phone number")
+            .setMessage("Open Android’s dialer with this number?\n\n${request.number}\n\nNo call will be placed. You choose whether to call in the dialer.")
+            .setNegativeButton("Cancel") { _, _ -> result.success(mapOf("result" to "cancelled", "called" to false)) }
+            .setPositiveButton("Open dialer") { _, _ ->
+                val intent = Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", request.number, null))
+                try {
+                    startActivity(intent)
+                    result.success(mapOf("result" to "dialer_opened", "called" to false))
+                } catch (_: Exception) {
+                    result.error("unavailable", "Android could not open the dialer; no call was placed.", null)
+                }
+            }
+            .create()
+        dialog.setOnCancelListener { result.success(mapOf("result" to "cancelled", "called" to false)) }
+        dialog.show()
+    }
+
+    private fun reviewAndOpenSmsDraft(number: Any?, message: Any?, result: MethodChannel.Result) {
+        val request = PhoneHandoffPolicy.parseSms(number, message)
+        if (request == null) {
+            result.error("invalid_argument", "Enter one full international number and a message up to 1,600 characters.", null)
+            return
+        }
+        var completed = false
+        fun cancelled() {
+            if (completed) return
+            completed = true
+            result.success(mapOf("result" to "cancelled", "sent" to false))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Review SMS draft")
+            .setMessage("To: ${request.number}\n\n${request.message}\n\nPersonal AI will open your messaging app with this exact draft. Nothing is sent here; review it and tap Send in that app.")
+            .setNegativeButton("Cancel") { _, _ -> cancelled() }
+            .setPositiveButton("Open message draft") { _, _ ->
+                if (completed) return@setPositiveButton
+                val intent = Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", request.number, null))
+                    .putExtra("sms_body", request.message)
+                try {
+                    startActivity(intent)
+                    completed = true
+                    result.success(mapOf("result" to "composer_opened", "sent" to false))
+                } catch (_: Exception) {
+                    completed = true
+                    result.error("unavailable", "Android could not open the SMS composer; nothing was sent.", null)
                 }
             }
             .create()
