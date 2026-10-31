@@ -14,6 +14,7 @@ import 'system_monitor_screen.dart';
 import 'device_status_screen.dart';
 import 'focus_timer_screen.dart';
 import 'system_clock_timer_screen.dart';
+import 'system_clock_alarm_screen.dart';
 import 'wifi_settings_screen.dart';
 import 'journal_screen.dart';
 import 'office_document.dart';
@@ -41,7 +42,7 @@ class FeaturesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DefaultTabController(
     initialIndex: initialTab,
-    length: 16,
+    length: 17,
     child: Scaffold(
       appBar: AppBar(
         title: const Text('Assistant tools'),
@@ -61,12 +62,16 @@ class FeaturesScreen extends StatelessWidget {
             Tab(icon: Icon(Icons.timer_outlined), text: 'Focus timer'),
             Tab(icon: Icon(Icons.edit_note_rounded), text: 'Journal'),
             Tab(icon: Icon(Icons.alarm_add_rounded), text: 'Clock timer'),
+            Tab(icon: Icon(Icons.alarm_rounded), text: 'Clock alarm'),
             Tab(icon: Icon(Icons.download_outlined), text: 'Downloads'),
             Tab(icon: Icon(Icons.wifi_rounded), text: 'Wi-Fi'),
             Tab(icon: Icon(Icons.content_paste_outlined), text: 'Clipboard'),
             Tab(icon: Icon(Icons.graphic_eq_rounded), text: 'Media & volume'),
             Tab(icon: Icon(Icons.contact_phone_outlined), text: 'Contacts'),
-            Tab(icon: Icon(Icons.notifications_active_outlined), text: 'Notifications'),
+            Tab(
+              icon: Icon(Icons.notifications_active_outlined),
+              text: 'Notifications',
+            ),
           ],
         ),
       ),
@@ -82,6 +87,7 @@ class FeaturesScreen extends StatelessWidget {
           FocusTimerScreen(state: state),
           JournalScreen(state: state),
           const SystemClockTimerScreen(),
+          const SystemClockAlarmScreen(),
           const _DownloadsFeature(),
           const WifiSettingsScreen(),
           const ClipboardPreviewScreen(),

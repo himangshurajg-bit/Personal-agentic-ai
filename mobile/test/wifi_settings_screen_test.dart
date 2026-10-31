@@ -87,7 +87,7 @@ void main() {
         home: FeaturesScreen(
           state: state,
           onReminder: _ignoreReminder,
-          initialTab: 11,
+          initialTab: 12,
         ),
       ),
     );

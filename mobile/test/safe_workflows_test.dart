@@ -15,7 +15,10 @@ void main() {
         .setMockMethodCallHandler(channel, (call) async {
           calls.add(call);
           if (call.method == 'set_temporary_brightness') {
-            return <String, Object?>{'applied': (call.arguments as Map)['level'], 'window_only': true};
+            return <String, Object?>{
+              'applied': (call.arguments as Map)['level'],
+              'window_only': true,
+            };
           }
           if (call.method == 'restore_temporary_brightness') return true;
           if (call.method == 'share_text') {
@@ -23,6 +26,19 @@ void main() {
           }
           if (call.method == 'open_whatsapp_draft') {
             return <String, Object?>{'result': 'handoff_opened', 'sent': false};
+          }
+          if (call.method == 'open_sms_draft' ||
+              call.method == 'open_email_draft') {
+            return <String, Object?>{
+              'result': 'composer_opened',
+              'sent': false,
+            };
+          }
+          if (call.method == 'open_phone_dialer') {
+            return <String, Object?>{
+              'result': 'dialer_opened',
+              'called': false,
+            };
           }
           if (call.method == 'open_map_search') {
             return <String, Object?>{'result': 'opened_search'};
@@ -59,16 +75,75 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('review-temporary-brightness')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('approve-temporary-brightness')));
+    await tester.tap(
+      find.byKey(const ValueKey('approve-temporary-brightness')),
+    );
     await tester.pumpAndSettle();
     expect(calls.single.method, 'set_temporary_brightness');
     expect(calls.single.arguments, {'level': 128});
-    expect(find.byKey(const ValueKey('restore-temporary-brightness')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('restore-temporary-brightness')),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
 
-    await tester.tap(find.byKey(const ValueKey('restore-temporary-brightness')));
+    await tester.tap(
+      find.byKey(const ValueKey('restore-temporary-brightness')),
+    );
     await tester.pumpAndSettle();
     expect(calls.last.method, 'restore_temporary_brightness');
+  });
+
+  testWidgets('email draft requires a valid recipient and message', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(const MaterialApp(home: OutboundDraftsScreen()));
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Email draft').last);
+    await tester.pumpAndSettle();
+
+    final button = find.byKey(const ValueKey('review-outbound-handoff'));
+    expect(tester.widget<FilledButton>(button).onPressed, isNull);
+    expect(calls, isEmpty);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('outbound-draft-recipient')),
+      'not-an-email',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('outbound-draft-text')),
+      'A reviewed note.',
+    );
+    await tester.pump();
+    expect(tester.widget<FilledButton>(button).onPressed, isNull);
+    expect(calls, isEmpty);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('outbound-draft-recipient')),
+      'student+jee@example.com',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('outbound-draft-subject')),
+      'Schedule',
+    );
+    await tester.pump();
+    expect(tester.widget<FilledButton>(button).onPressed, isNotNull);
+    expect(calls, isEmpty);
+
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(calls.single.method, 'open_email_draft');
+    expect(calls.single.arguments, {
+      'recipient': 'student+jee@example.com',
+      'subject': 'Schedule',
+      'body': 'A reviewed note.',
+    });
   });
 
   testWidgets(
@@ -77,7 +152,7 @@ void main() {
       await tester.pumpWidget(const MaterialApp(home: OutboundDraftsScreen()));
 
       expect(
-        find.textContaining('Nothing is sent or published by this app.'),
+        find.textContaining('Nothing is sent or called automatically.'),
         findsOneWidget,
       );
       expect(find.text('Review WhatsApp draft'), findsOneWidget);
@@ -136,6 +211,82 @@ void main() {
     expect(calls, isEmpty);
   });
 
+  testWidgets(
+    'SMS draft requires a full number and exact message before native review',
+    (tester) async {
+      await tester.pumpWidget(const MaterialApp(home: OutboundDraftsScreen()));
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('SMS draft').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Review SMS draft'), findsOneWidget);
+      expect(calls, isEmpty);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('outbound-draft-number')),
+        '+14155550123',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('outbound-draft-text')),
+        'Running five minutes late.',
+      );
+      await tester.pump();
+      final button = find.byKey(const ValueKey('review-outbound-handoff'));
+      await tester.ensureVisible(button);
+      await tester.pumpAndSettle();
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      expect(calls.single.method, 'open_sms_draft');
+      expect(calls.single.arguments, {
+        'number': '+14155550123',
+        'message': 'Running five minutes late.',
+      });
+    },
+  );
+
+  testWidgets('phone dialer handoff never runs without a valid number', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const MaterialApp(home: OutboundDraftsScreen()));
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Phone dialer').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Review number in dialer'), findsOneWidget);
+    expect(calls, isEmpty);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('outbound-draft-number')),
+      '4155550123',
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const ValueKey('review-outbound-handoff')),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(calls, isEmpty);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('outbound-draft-number')),
+      '+14155550123',
+    );
+    await tester.pump();
+    final button = find.byKey(const ValueKey('review-outbound-handoff'));
+    await tester.scrollUntilVisible(
+      button,
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(calls.single.method, 'open_phone_dialer');
+    expect(calls.single.arguments, {'number': '+14155550123'});
+  });
+
   testWidgets('social caption uses the same explicit text-only chooser', (
     tester,
   ) async {
@@ -183,7 +334,11 @@ void main() {
     await tester.pump();
     expect(calls, isEmpty);
     final button = find.byKey(const ValueKey('review-map-search'));
-    await tester.ensureVisible(button);
+    await tester.scrollUntilVisible(
+      button,
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(button);
     await tester.pumpAndSettle();
     expect(calls, hasLength(1));
@@ -216,63 +371,63 @@ void main() {
     expect(calls, isEmpty);
   });
 
-  testWidgets(
-    'clipboard is written only after exact-text approval',
-    (tester) async {
-      final clipboardWrites = <String>[];
+  testWidgets('clipboard is written only after exact-text approval', (
+    tester,
+  ) async {
+    final clipboardWrites = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'Clipboard.setData') {
+            clipboardWrites.add((call.arguments as Map)['text'] as String);
+          }
+          return null;
+        });
+    addTearDown(() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(SystemChannels.platform, (call) async {
-            if (call.method == 'Clipboard.setData') {
-              clipboardWrites.add((call.arguments as Map)['text'] as String);
-            }
-            return null;
-          });
-      addTearDown(() {
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-            .setMockMethodCallHandler(SystemChannels.platform, null);
-      });
+          .setMockMethodCallHandler(SystemChannels.platform, null);
+    });
 
-      await tester.pumpWidget(
-        const MaterialApp(home: Scaffold(body: CopyTextAction())),
-      );
-      expect(clipboardWrites, isEmpty);
-      expect(
-        tester
-            .widget<OutlinedButton>(
-              find.byKey(const ValueKey('review-clipboard-copy')),
-            )
-            .onPressed,
-        isNull,
-      );
-      const exactText = '  Keep this exact\nline.  ';
-      await tester.enterText(
-        find.byKey(const ValueKey('clipboard-copy-text')),
-        exactText,
-      );
-      await tester.pump();
-      expect(clipboardWrites, isEmpty);
-      await tester.ensureVisible(
-        find.byKey(const ValueKey('review-clipboard-copy')),
-      );
-      await tester.tap(find.byKey(const ValueKey('review-clipboard-copy')));
-      await tester.pumpAndSettle();
-      expect(
-        find.text('Copy this exact text to Android’s clipboard?'),
-        findsOneWidget,
-      );
-      expect(find.byKey(const ValueKey('clipboard-review-text')), findsOneWidget);
-      expect(clipboardWrites, isEmpty);
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: CopyTextAction())),
+    );
+    expect(clipboardWrites, isEmpty);
+    expect(
+      tester
+          .widget<OutlinedButton>(
+            find.byKey(const ValueKey('review-clipboard-copy')),
+          )
+          .onPressed,
+      isNull,
+    );
+    const exactText = '  Keep this exact\nline.  ';
+    await tester.enterText(
+      find.byKey(const ValueKey('clipboard-copy-text')),
+      exactText,
+    );
+    await tester.pump();
+    expect(clipboardWrites, isEmpty);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('review-clipboard-copy')),
+    );
+    await tester.tap(find.byKey(const ValueKey('review-clipboard-copy')));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Copy this exact text to Android’s clipboard?'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('clipboard-review-text')), findsOneWidget);
+    expect(clipboardWrites, isEmpty);
 
-      await tester.tap(find.byKey(const ValueKey('approve-clipboard-copy')));
-      await tester.pumpAndSettle();
-      expect(clipboardWrites, [exactText]);
-      expect(find.text('Copied the reviewed text to the clipboard.'), findsOneWidget);
-    },
-  );
+    await tester.tap(find.byKey(const ValueKey('approve-clipboard-copy')));
+    await tester.pumpAndSettle();
+    expect(clipboardWrites, [exactText]);
+    expect(
+      find.text('Copied the reviewed text to the clipboard.'),
+      findsOneWidget,
+    );
+  });
 
-  testWidgets(
-    'clipboard cancellation makes no system write',
-    (tester) async {
+  testWidgets('clipboard cancellation makes no system write', (tester) async {
     final writes = <String>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, (call) async {
@@ -301,41 +456,37 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-      expect(writes, isEmpty);
-    },
-  );
+    expect(writes, isEmpty);
+  });
 
-  testWidgets(
-    'clipboard text input is bounded to 4000 characters',
-    (tester) async {
-      await tester.pumpWidget(
-        const MaterialApp(home: Scaffold(body: CopyTextAction())),
-      );
-      await tester.enterText(
-        find.byKey(const ValueKey('clipboard-copy-text')),
-        'x' * 4001,
-      );
-      await tester.pump();
-      expect(
-        tester
-            .widget<TextField>(
-              find.byKey(const ValueKey('clipboard-copy-text')),
-            )
-            .controller!
-            .text
-            .length,
-        4000,
-      );
-      expect(
-        tester
-            .widget<OutlinedButton>(
-              find.byKey(const ValueKey('review-clipboard-copy')),
-            )
-            .onPressed,
-        isNotNull,
-      );
-    },
-  );
+  testWidgets('clipboard text input is bounded to 4000 characters', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: CopyTextAction())),
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('clipboard-copy-text')),
+      'x' * 4001,
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('clipboard-copy-text')))
+          .controller!
+          .text
+          .length,
+      4000,
+    );
+    expect(
+      tester
+          .widget<OutlinedButton>(
+            find.byKey(const ValueKey('review-clipboard-copy')),
+          )
+          .onPressed,
+      isNotNull,
+    );
+  });
 
   testWidgets(
     'workflow steps can be reordered and optional steps removed/restored',
@@ -397,30 +548,21 @@ void main() {
     },
   );
 
-  testWidgets('haptic test requests feedback only after an explicit tap', (
+  testWidgets('haptic pulse is requested only after an explicit tap', (
     tester,
   ) async {
-    final hapticCalls = <MethodCall>[];
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
-          if (call.method.startsWith('HapticFeedback.')) {
-            hapticCalls.add(call);
-          }
-          return null;
-        });
-    addTearDown(() {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(SystemChannels.platform, null);
-    });
-
     await tester.pumpWidget(
       const MaterialApp(home: Scaffold(body: HapticPulseAction())),
     );
-    expect(hapticCalls, isEmpty);
+    expect(calls, isEmpty);
     await tester.tap(find.byKey(const ValueKey('haptic-pulse-action')));
     await tester.pumpAndSettle();
-    expect(hapticCalls.map((call) => call.method), ['HapticFeedback.vibrate']);
-    expect(find.text('Requested one short haptic pulse.'), findsOneWidget);
+    expect(calls.map((call) => call.method), ['request_haptic_pulse']);
+    expect(calls.single.arguments, isNull);
+    expect(
+      find.textContaining('confirmation before requesting'),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
