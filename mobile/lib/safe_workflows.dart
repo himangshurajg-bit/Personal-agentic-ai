@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'assistant_state.dart';
 import 'multi_agent_workflow.dart';
+import 'circuit_guide.dart';
 import 'main.dart' show Glass, Home, Shell, notice;
 
 /// User-entered phone and social drafts require a deliberate handoff.
@@ -820,6 +821,20 @@ class SafeSkillsScreen extends StatelessWidget {
               const TemporaryBrightnessAction(),
               const Divider(),
               const CopyTextAction(),
+              const Divider(),
+              ListTile(
+                key: const ValueKey('circuit-guide-entry'),
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.electric_bolt_outlined),
+                title: const Text('Circuit guide'),
+                subtitle: const Text(
+                  'Learn basic Ohm’s law and resistor combinations with a local calculator.',
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const CircuitGuideScreen()),
+                ),
+              ),
               const Divider(),
               ListTile(
                 key: const ValueKey('multi-agent-workflow-entry'),

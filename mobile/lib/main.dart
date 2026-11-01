@@ -30,11 +30,13 @@ import 'ui_motion.dart';
 import 'typing_indicator.dart';
 import 'visual_theme.dart';
 import 'voice_services.dart';
+import 'voice_spectrum.dart';
 import 'live_conversation.dart';
 import 'in_app_toast_screen.dart';
 import 'clipboard_draft.dart';
 import 'task_excerpt_draft.dart';
 import 'system_clock_timer.dart';
+import 'prompt_templates.dart';
 import 'readable_math.dart';
 
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -88,8 +90,10 @@ class _AssistantAppState extends State<AssistantApp>
     with WidgetsBindingObserver {
   bool _leftForeground = false;
   bool _pendingTaskVoiceCommand = false;
+  String? _pendingTaskCancellationId;
 
   void _assistantStateChanged() {
+    _cancelPendingTaskIfCurrent();
     if (_pendingTaskVoiceCommand && widget.state.ready) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _openTaskVoiceCommand(),
@@ -133,6 +137,43 @@ class _AssistantAppState extends State<AssistantApp>
     }
   }
 
+  void _queueTaskCancellation(Object? requestId) {
+    if (requestId is! String || requestId.isEmpty) return;
+    _pendingTaskCancellationId = requestId;
+    _cancelPendingTaskIfCurrent();
+  }
+
+  void _cancelPendingTaskIfCurrent() {
+    if (!mounted || !widget.state.ready) return;
+    final requestId = _pendingTaskCancellationId;
+    if (requestId == null) return;
+    final activeTaskId = widget.state.taskTracker.active?.id;
+    if (!shouldCancelCurrentAssistantTask(
+      activeTaskId: activeTaskId,
+      requestId: requestId,
+      busy: widget.state.busy,
+    )) {
+      // A stale notification must never stop a later request.
+      _pendingTaskCancellationId = null;
+      return;
+    }
+    _pendingTaskCancellationId = null;
+    widget.state.stop();
+  }
+
+  Future<void> _consumeTaskCancellation() async {
+    try {
+      final requestId = await _assistantTaskChannel.invokeMethod<String>(
+        'consume_task_cancel_request',
+      );
+      if (requestId != null) _queueTaskCancellation(requestId);
+    } on PlatformException {
+      // Older builds and notification permission failures keep ordinary chat usable.
+    } on MissingPluginException {
+      // The Android notification bridge is optional on non-Android platforms.
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -143,10 +184,17 @@ class _AssistantAppState extends State<AssistantApp>
         _queueTaskVoiceCommand();
         return true;
       }
+      if (call.method == 'task_cancel_requested') {
+        _queueTaskCancellation(call.arguments);
+        return true;
+      }
       return null;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_consumeTaskVoiceCommand());
+      if (mounted) {
+        unawaited(_consumeTaskVoiceCommand());
+        unawaited(_consumeTaskCancellation());
+      }
     });
     _assistantAudioChannel.setMethodCallHandler((call) async {
       if (call.method != 'audio_event') return;
@@ -3446,6 +3494,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _handsFreeOnlineApproved = false;
   bool _initialVoiceStarted = false;
   double level = 0;
+  List<double> _voiceSpectrum = List<double>.filled(9, 0);
+  bool _hasPcmSpectrum = false;
+  DateTime? _lastSpectrumUpdate;
 
   @override
   void didChangeDependencies() {
@@ -3588,6 +3639,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  void _updateVoiceSpectrum(Uint8List pcm16le) {
+    final now = DateTime.now();
+    final last = _lastSpectrumUpdate;
+    if (last != null && now.difference(last).inMilliseconds < 40) return;
+    _lastSpectrumUpdate = now;
+    final bands = voiceSpectrumBands(pcm16le);
+    if (!mounted) return;
+    setState(() {
+      _voiceSpectrum = bands;
+      _hasPcmSpectrum = true;
+    });
+  }
+
+  void _resetVoiceSpectrum() {
+    _lastSpectrumUpdate = null;
+    _voiceSpectrum = List<double>.filled(9, 0);
+    _hasPcmSpectrum = false;
+  }
+
   Future<void> _cancelDeepgramRecording() async {
     _deepgramLimit?.cancel();
     _deepgramLimit = null;
@@ -3602,6 +3672,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _deepgramChunks.clear();
     _deepgramBytes = 0;
     _deepgramLimitHit = false;
+    _resetVoiceSpectrum();
     if (mounted) {
       setState(() {
         listening = false;
@@ -3654,6 +3725,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _deepgramChunks.clear();
       _deepgramBytes = 0;
       _deepgramLimitHit = false;
+      _resetVoiceSpectrum();
       final stream = await _deepgramRecorder.startStream(
         const RecordConfig(
           encoder: AudioEncoder.pcm16bits,
@@ -3668,6 +3740,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _deepgramSubscription = stream.listen(
         (chunk) {
           if (!mounted || _deepgramLimitHit) return;
+          _updateVoiceSpectrum(chunk);
           _deepgramBytes += chunk.length;
           // 60 seconds of 16 kHz mono PCM16 is about 1.9 MB.
           if (_deepgramBytes > 16000 * 2 * 60) {
@@ -3745,6 +3818,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       _deepgramChunks.clear();
       _deepgramBytes = 0;
+      _resetVoiceSpectrum();
       setState(() {
         listening = false;
         level = 0;
@@ -3883,6 +3957,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
       await session.start();
       _liveDeepgram = session;
+      _resetVoiceSpectrum();
       final stream = await _deepgramRecorder.startStream(
         const RecordConfig(
           encoder: AudioEncoder.pcm16bits,
@@ -3899,6 +3974,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       _liveAudioSubscription = stream.listen(
         (frame) {
+          if (_liveConversationActive) _updateVoiceSpectrum(frame);
           if (_liveConversationActive && !speaking && !widget.state.busy) {
             _liveDeepgram?.addAudio(frame);
           }
@@ -4079,6 +4155,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     await session?.close();
     await LiveConversationService.stop();
     if (wasActive) widget.state.stop();
+    _resetVoiceSpectrum();
     try {
       await tts.stop();
     } catch (_) {}
@@ -4685,6 +4762,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _inputFocus.requestFocus();
   }
 
+  Future<void> _openPromptTemplates() async {
+    final repository = PromptTemplateRepository(
+      SharedPreferencesPromptTemplateStorage(),
+    );
+    final draft = await showDialog<String>(
+      context: context,
+      builder: (_) => PromptTemplateDialog(repository: repository),
+    );
+    if (!mounted || draft == null) return;
+    input.value = TextEditingValue(
+      text: draft,
+      selection: TextSelection.collapsed(offset: draft.length),
+    );
+    _inputFocus.requestFocus();
+  }
+
+
   Future<void> _openGoogleAiMode() async {
     if (_chatFeatureBusy) return;
     try {
@@ -5144,12 +5238,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             SizedBox(
                               width: 110,
                               height: 28,
-                              child: CustomPaint(
-                                painter: WavePainter(
-                                  level,
-                                  Theme.of(context).colorScheme.primary,
-                                ),
-                              ),
+                              child: _hasPcmSpectrum
+                                  ? VoiceSpectrumBars(levels: _voiceSpectrum)
+                                  : CustomPaint(
+                                      painter: WavePainter(
+                                        level,
+                                        Theme.of(context).colorScheme.primary,
+                                      ),
+                                    ),
                             ),
                           ],
                         ),
@@ -5255,6 +5351,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 _chatFeatureError = '';
                               }),
                         icon: const Icon(Icons.travel_explore_rounded),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton.filledTonal(
+                        tooltip: 'Prompt templates',
+                        constraints: const BoxConstraints.tightFor(
+                          width: 48,
+                          height: 48,
+                        ),
+                        onPressed: _chatFeatureBusy
+                            ? null
+                            : _openPromptTemplates,
+                        icon: const Icon(Icons.bookmarks_outlined),
                       ),
                       const SizedBox(width: 4),
                       IconButton.filledTonal(
@@ -5444,6 +5552,179 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       );
     },
+  );
+}
+
+class PromptTemplateDialog extends StatefulWidget {
+  final PromptTemplateRepository repository;
+  const PromptTemplateDialog({super.key, required this.repository});
+
+  @override
+  State<PromptTemplateDialog> createState() => _PromptTemplateDialogState();
+}
+
+class _PromptTemplateDialogState extends State<PromptTemplateDialog> {
+  List<PromptTemplate> _templates = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    final templates = await widget.repository.list();
+    if (!mounted) return;
+    setState(() {
+      _templates = templates;
+      _loading = false;
+    });
+  }
+
+  Future<void> _edit([PromptTemplate? existing]) async {
+    final title = TextEditingController(text: existing?.title ?? '');
+    final prompt = TextEditingController(text: existing?.prompt ?? '');
+    final values = await showDialog<(String, String)>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(existing == null ? 'New prompt template' : 'Edit template'),
+        content: SizedBox(
+          width: 480,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: title,
+                maxLength: promptTemplateTitleLimit,
+                decoration: const InputDecoration(labelText: 'Name'),
+              ),
+              TextField(
+                controller: prompt,
+                minLines: 3,
+                maxLines: 8,
+                maxLength: promptTemplateTextLimit,
+                decoration: const InputDecoration(labelText: 'Prompt text'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, (title.text, prompt.text)),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    title.dispose();
+    prompt.dispose();
+    if (values == null || !mounted) return;
+    try {
+      if (existing == null) {
+        await widget.repository.create(title: values.$1, prompt: values.$2);
+      } else {
+        await widget.repository.update(
+          existing.id,
+          title: values.$1,
+          prompt: values.$2,
+        );
+      }
+      await _reload();
+    } on FormatException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    } on StateError catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    }
+  }
+
+  Future<void> _delete(PromptTemplate template) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete template?'),
+        content: Text('“${template.title}” will be removed from this device.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Keep'),
+          ),
+          FilledButton.tonal(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await widget.repository.delete(template.id);
+    await _reload();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Prompt templates'),
+    content: SizedBox(
+      width: 520,
+      child: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _templates.isEmpty
+          ? const Text(
+              'Save reusable prompts here. Choosing one only fills your draft; it never sends or runs actions.',
+            )
+          : ListView.builder(
+              shrinkWrap: true,
+              itemCount: _templates.length,
+              itemBuilder: (context, index) {
+                final template = _templates[index];
+                return ListTile(
+                  title: Text(template.title),
+                  subtitle: Text(
+                    template.prompt,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () => Navigator.pop(
+                    context,
+                    widget.repository.prepareDraft(template),
+                  ),
+                  trailing: PopupMenuButton<String>(
+                    tooltip: 'Template options',
+                    onSelected: (action) {
+                      if (action == 'edit') _edit(template);
+                      if (action == 'delete') _delete(template);
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'edit', child: Text('Edit')),
+                      PopupMenuItem(value: 'delete', child: Text('Delete')),
+                    ],
+                  ),
+                );
+              },
+            ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Close'),
+      ),
+      TextButton.icon(
+        onPressed: _templates.length >= promptTemplateLimit ? null : _edit,
+        icon: const Icon(Icons.add),
+        label: const Text('New'),
+      ),
+    ],
   );
 }
 
