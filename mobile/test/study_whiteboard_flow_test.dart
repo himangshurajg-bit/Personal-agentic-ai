@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:personal_assistant/assistant_state.dart';
 import 'package:personal_assistant/main.dart';
+import 'package:personal_assistant/myra_task_routing.dart';
 import 'package:personal_assistant/phone_screens.dart';
 
 const _lesson = '''## Topic explanation
@@ -336,6 +337,7 @@ class _ImmediateStudyState extends AssistantState {
     bool retryLastMessage = false,
     bool spokenConversation = false,
     String? providerMessageOverride,
+    Future<String?> Function(MyraTaskListRequest request)? reviewMyraTaskList,
   }) async {
     lastStudyLessonId = studyModeEnabled ? lessonId : null;
     messages.add({'role': 'user', 'text': text, 'state': 'complete'});

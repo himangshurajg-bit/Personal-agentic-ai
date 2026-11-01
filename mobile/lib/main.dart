@@ -35,6 +35,7 @@ import 'live_conversation.dart';
 import 'in_app_toast_screen.dart';
 import 'clipboard_draft.dart';
 import 'task_excerpt_draft.dart';
+import 'myra_task_routing.dart';
 import 'system_clock_timer.dart';
 import 'prompt_templates.dart';
 import 'readable_math.dart';
@@ -4712,6 +4713,49 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<String?> _reviewMyraTaskList(MyraTaskListRequest request) async {
+    if (!mounted) return null;
+    final excerpt = MyraTaskListPolicy.prepareExcerpt(
+      widget.state.local.rows('tasks'),
+      request,
+    );
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Review local tasks for Gemini'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Only this excerpt (up to 20 task titles, statuses, and due dates) will be shared once with Gemini. Task titles are treated as data, not instructions. Your tasks will not be changed.',
+              ),
+              const SizedBox(height: 12),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 320),
+                child: SingleChildScrollView(child: SelectableText(excerpt)),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Share with Gemini'),
+          ),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return null;
+    return excerpt;
+  }
+
   Future<void> _reviewLocalTasksForDraft() async {
     if (_chatFeatureBusy) return;
     final excerpt = taskExcerptDraft(widget.state.local.rows('tasks'));
@@ -4777,7 +4821,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
     _inputFocus.requestFocus();
   }
-
 
   Future<void> _openGoogleAiMode() async {
     if (_chatFeatureBusy) return;
@@ -4902,6 +4945,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       shareHistory: jeeRequest == null && widget.state.shareHistory,
       retryLastMessage: retry != null,
       spokenConversation: speakThisReply,
+      reviewMyraTaskList: _reviewMyraTaskList,
     );
     final lessonId = widget.state.lastStudyLessonId;
     if (studyModeForRequest && lessonId != null && mounted) {
