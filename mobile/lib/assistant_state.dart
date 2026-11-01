@@ -19,6 +19,7 @@ import 'visual_theme.dart';
 import 'assistant_task_tracker.dart';
 import 'study_whiteboard.dart';
 import 'study_tutor.dart';
+import 'myra_task_routing.dart';
 
 class LaunchableApp {
   final String packageName;
@@ -1947,6 +1948,7 @@ class AssistantState extends ChangeNotifier {
     bool retryLastMessage = false,
     bool spokenConversation = false,
     String? providerMessageOverride,
+    Future<String?> Function(MyraTaskListRequest request)? reviewMyraTaskList,
   }) async {
     if (busy || text.trim().isEmpty) {
       return;
@@ -2058,58 +2060,122 @@ class AssistantState extends ChangeNotifier {
         }
       } else {
         await taskTracker.update(taskId, AssistantTaskStatus.waitingForReply);
-        final req = selectedConfig!.request(conversation, prompt);
-        final res = await client!
-            .send(req)
-            .timeout(const Duration(seconds: 10));
-        if (res.statusCode >= 300) {
-          if (res.statusCode == 429) {
-            throw ServiceException(
-              describeStatus(
-                res.statusCode,
-                engine: selectedEngine,
-                retryAfter: res.headers['retry-after'],
-              ),
-            );
-          }
-          if (selectedEngine == 'gemini') {
-            final message = switch (res.statusCode) {
-              401 || 403 =>
-                'Google rejected the key or this project cannot access $selectedModel. Check the key and model eligibility; no fallback was used.',
-              404 =>
-                'Google did not find $selectedModel for this key. Check the selected model ID and project access; no other model was selected.',
-              429 => 'Google Gemini quota or rate limit reached. Check your available quota; no other model was selected or retried.',
-              _ =>
-                'Gemini API request failed (${res.statusCode}). No other model was selected or retried.',
-            };
-            throw ServiceException(message);
-          }
-          throw ServiceException(describeStatus(res.statusCode));
-        }
+        final canOfferMyraTaskTool =
+            selectedEngine == 'gemini' && reviewMyraTaskList != null;
+        var req = selectedConfig!.request(
+          conversation,
+          prompt,
+          enableMyraTaskListTool: canOfferMyraTaskTool,
+        );
+        var taskToolRound = 0;
         var done = false;
-        var announcedReply = false;
-        await for (final event
-            in selectedConfig
-                .events(res.stream)
-                .timeout(const Duration(seconds: 65))) {
-          if (generation != _generation) break;
-          if (event['type'] == 'delta') {
-            if (!announcedReply) {
-              announcedReply = true;
-              await taskTracker.update(
-                taskId,
-                AssistantTaskStatus.receivingReply,
+        while (true) {
+          final res = await client!
+              .send(req)
+              .timeout(const Duration(seconds: 10));
+          if (res.statusCode >= 300) {
+            if (res.statusCode == 429) {
+              throw ServiceException(
+                describeStatus(
+                  res.statusCode,
+                  engine: selectedEngine,
+                  retryAfter: res.headers['retry-after'],
+                ),
               );
             }
-            partial += event['text'] as String;
-            notifyListeners();
+            if (selectedEngine == 'gemini') {
+              final message = switch (res.statusCode) {
+                401 || 403 =>
+                  'Google rejected the key or this project cannot access $selectedModel. Check the key and model eligibility; no fallback was used.',
+                404 =>
+                  'Google did not find $selectedModel for this key. Check the selected model ID and project access; no other model was selected.',
+                429 => 'Google Gemini quota or rate limit reached. Check your available quota; no other model was selected or retried.',
+                _ =>
+                  'Gemini API request failed (${res.statusCode}). No other model was selected or retried.',
+              };
+              throw ServiceException(message);
+            }
+            throw ServiceException(describeStatus(res.statusCode));
           }
-          if (event['type'] == 'error') {
-            throw ServiceException(event['message'] as String);
+          done = false;
+          var announcedReply = false;
+          MyraTaskFunctionCall? pendingTaskCall;
+          await for (final event
+              in selectedConfig
+                  .events(res.stream)
+                  .timeout(const Duration(seconds: 65))) {
+            if (generation != _generation) break;
+            if (event['type'] == 'delta') {
+              if (!announcedReply) {
+                announcedReply = true;
+                await taskTracker.update(
+                  taskId,
+                  AssistantTaskStatus.receivingReply,
+                );
+              }
+              partial += event['text'] as String;
+              notifyListeners();
+            }
+            if (event['type'] == 'function_call') {
+              if (!canOfferMyraTaskTool || taskToolRound != 0) {
+                throw ServiceException(
+                  'Gemini requested an unsupported or repeated tool call; no local tasks were read or shared.',
+                );
+              }
+              final name = event['name'];
+              final args = event['args'];
+              if (name is! String || args is! Map<String, dynamic>) {
+                throw ServiceException(
+                  'Gemini returned an invalid task-list request; no local tasks were read or shared.',
+                );
+              }
+              final call = MyraTaskFunctionCall(name: name, args: args);
+              late final MyraTaskListRequest taskRequest;
+              try {
+                taskRequest = MyraTaskListPolicy.parseCall(call);
+              } on FormatException catch (e) {
+                throw ServiceException(e.message);
+              }
+              if (!MyraTaskListPolicy.hasExplicitIntent(
+                lastPrompt,
+                taskRequest,
+              )) {
+                throw ServiceException(
+                  'The latest message did not directly ask to view those saved tasks, so no local tasks were read or shared.',
+                );
+              }
+              pendingTaskCall = call;
+            }
+            if (event['type'] == 'error') {
+              throw ServiceException(event['message'] as String);
+            }
+            if (event['type'] == 'done') {
+              done = true;
+            }
           }
-          if (event['type'] == 'done') {
-            done = true;
+          if (generation != _generation) break;
+          if (!done) {
+            throw ServiceException(
+              'The reply stopped before completion. Retry only when you choose.',
+            );
           }
+          if (pendingTaskCall == null) break;
+
+          await taskTracker.update(taskId, AssistantTaskStatus.waitingForReply);
+          final taskRequest = MyraTaskListPolicy.parseCall(pendingTaskCall);
+          final approvedExcerpt = await reviewMyraTaskList!(taskRequest);
+          if (generation != _generation) break;
+          if (approvedExcerpt == null) {
+            partial = 'Okay, I didn’t share your local tasks.';
+            break;
+          }
+          partial = '';
+          req = selectedConfig.myraTaskListResponseRequest(
+            prompt: prompt,
+            call: pendingTaskCall,
+            response: MyraTaskListPolicy.approvedResponse(approvedExcerpt),
+          );
+          taskToolRound++;
         }
         if (generation == _generation) {
           if (!done) {

@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import 'assistant_state.dart' show ServiceException, checkedEndpoint;
 import 'gemini_models.dart';
+import 'myra_task_routing.dart';
 
 /// Selectable protocol adapters, not a claim that a model is installed.
 class EngineConfig {
@@ -21,7 +22,11 @@ class EngineConfig {
     'compatible' => 'Online · OpenAI-compatible',
     _ => 'Online · private FastAPI service',
   };
-  http.Request request(String conversation, String prompt) {
+  http.Request request(
+    String conversation,
+    String prompt, {
+    bool enableMyraTaskListTool = false,
+  }) {
     if (mode == 'offline') {
       throw ServiceException(
         'Offline chat must use an explicitly opted-in on-device model. No online fallback was made.',
@@ -77,6 +82,16 @@ class EngineConfig {
             ],
           },
         ],
+        if (enableMyraTaskListTool)
+          'tools': [
+            {
+              'functionDeclarations': [MyraTaskListPolicy.functionDeclaration],
+            },
+          ],
+        if (enableMyraTaskListTool)
+          'toolConfig': {
+            'functionCallingConfig': {'mode': 'AUTO'},
+          },
       });
     } else {
       req.headers['Authorization'] = 'Bearer $token';
@@ -92,6 +107,79 @@ class EngineConfig {
             : {'conversation': conversation, 'text': prompt},
       );
     }
+    return req;
+  }
+
+  /// Builds the one allowed Gemini tool-response turn after native approval.
+  http.Request myraTaskListResponseRequest({
+    required String prompt,
+    required MyraTaskFunctionCall call,
+    required String response,
+  }) {
+    if (mode != 'gemini' || call.name != MyraTaskListPolicy.toolName) {
+      throw ServiceException('Unsupported Gemini task-list tool response.');
+    }
+    if (token.isEmpty || !GeminiModels.supports(model)) {
+      throw ServiceException(
+        'Gemini is not configured for this task-list response.',
+      );
+    }
+    try {
+      MyraTaskListPolicy.parseCall(call);
+    } on FormatException catch (e) {
+      throw ServiceException(e.message);
+    }
+    final base = Uri.parse(origin);
+    if (base.scheme != 'https' ||
+        !base.hasAuthority ||
+        base.userInfo.isNotEmpty ||
+        base.hasQuery ||
+        base.hasFragment) {
+      throw ServiceException('Gemini API requires a safe HTTPS endpoint.');
+    }
+    final uri = Uri.parse(
+      '${origin.replaceAll(RegExp(r'/$'), '')}/$model:generateContent',
+    );
+    final req = http.Request('POST', uri)..followRedirects = false;
+    req.headers['Content-Type'] = 'application/json';
+    req.headers['x-goog-api-key'] = token;
+    req.body = jsonEncode({
+      'contents': [
+        {
+          'role': 'user',
+          'parts': [
+            {'text': prompt},
+          ],
+        },
+        {
+          'role': 'model',
+          'parts': [
+            {
+              'functionCall': {'name': call.name, 'args': call.args},
+            },
+          ],
+        },
+        {
+          'role': 'user',
+          'parts': [
+            {
+              'functionResponse': {
+                'name': call.name,
+                'response': {'result': response},
+              },
+            },
+          ],
+        },
+      ],
+      'tools': [
+        {
+          'functionDeclarations': [MyraTaskListPolicy.functionDeclaration],
+        },
+      ],
+      'toolConfig': {
+        'functionCallingConfig': {'mode': 'AUTO'},
+      },
+    });
     return req;
   }
 
@@ -114,6 +202,13 @@ class EngineConfig {
           : null;
       final content = candidate == null ? null : candidate['content'];
       final parts = content is Map ? content['parts'] : null;
+      final functionCalls = parts is List
+          ? parts
+                .whereType<Map>()
+                .map((part) => part['functionCall'])
+                .whereType<Map>()
+                .toList(growable: false)
+          : const <Map>[];
       final text = parts is List
           ? parts
                 .whereType<Map>()
@@ -121,6 +216,28 @@ class EngineConfig {
                 .whereType<String>()
                 .join()
           : '';
+      if (functionCalls.isNotEmpty) {
+        if (functionCalls.length != 1 || text.isNotEmpty) {
+          throw ServiceException(
+            'Gemini returned an ambiguous tool response; no local tasks were read or shared.',
+          );
+        }
+        final functionCall = functionCalls.single;
+        final name = functionCall['name'];
+        final rawArgs = functionCall['args'];
+        if (name is! String || rawArgs is! Map) {
+          throw ServiceException(
+            'Gemini returned an invalid task-list request; no local tasks were read or shared.',
+          );
+        }
+        yield {
+          'type': 'function_call',
+          'name': name,
+          'args': Map<String, dynamic>.from(rawArgs),
+        };
+        yield {'type': 'done'};
+        return;
+      }
       if (text.isEmpty) {
         throw ServiceException(
           'Gemini returned no text. The response may have been blocked or incomplete; nothing was retried.',
