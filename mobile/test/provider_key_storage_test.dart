@@ -8,13 +8,27 @@ void main() {
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
 
   test(
-    'OpenAI, Gemini and Deepgram keys use distinct secure-storage slots',
+    'provider key slots remain separate and legacy Deepgram secrets are purged',
     () async {
+      FlutterSecureStorage.setMockInitialValues({
+        'deepgram_api_key': 'legacy-secret',
+        'speech_mode': 'deepgram',
+        'voice_conversation_mode': 'live_conversation',
+      });
       final state = AssistantState();
       await state.initialize();
+      expect(await state.storage.read(key: 'deepgram_api_key'), isNull);
+      expect(await state.storage.read(key: 'speech_mode'), 'offline');
+      expect(
+        await state.storage.read(key: 'voice_conversation_mode'),
+        'push_to_talk',
+      );
+      await expectLater(
+        state.saveCloudProviderKey('deepgram', 'replacement-secret'),
+        throwsA(isA<ServiceException>()),
+      );
       await state.saveCloudProviderKey('openai', 'openai-secret');
       await state.saveCloudProviderKey('gemini', 'gemini-secret');
-      await state.saveCloudProviderKey('deepgram', 'deepgram-secret');
       await state.saveCloudProviderKey('azure_speech', 'azure-speech-secret');
       await state.saveAzureSpeechRegion('CentralIndia');
       expect(
@@ -24,10 +38,6 @@ void main() {
       );
       expect(await state.storage.read(key: 'openai_api_key'), 'openai-secret');
       expect(await state.storage.read(key: 'gemini_api_key'), 'gemini-secret');
-      expect(
-        await state.storage.read(key: 'deepgram_api_key'),
-        'deepgram-secret',
-      );
       expect(
         await state.storage.read(key: 'azure_speech_api_key'),
         'azure-speech-secret',
@@ -43,7 +53,6 @@ void main() {
       await restored.initialize();
       expect(restored.openAiApiKey, 'openai-secret');
       expect(restored.geminiApiKey, 'gemini-secret');
-      expect(restored.deepgramApiKey, 'deepgram-secret');
       expect(restored.azureSpeechApiKey, 'azure-speech-secret');
       expect(restored.azureSpeechRegion, 'centralindia');
       expect(restored.azureSpeechEnabled, isFalse);

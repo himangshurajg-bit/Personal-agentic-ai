@@ -1019,12 +1019,6 @@ class _VoiceActionsFeatureState extends State<_VoiceActionsFeature> {
 
   Future<void> _listen() async {
     final mode = widget.state.speechMode;
-    if (mode == 'deepgram') {
-      setState(
-        () => _error = 'This command screen uses Android on-device or system speech recognition, not Deepgram. Change speech mode in Settings, or type a command.',
-      );
-      return;
-    }
     var onlineApproved = false;
     if (mode == 'online') {
       onlineApproved =
@@ -1191,7 +1185,7 @@ class _VoiceActionsFeatureState extends State<_VoiceActionsFeature> {
                     ? 'Uses Android’s verified on-device recognizer when the selected language is installed. No online fallback.'
                     : widget.state.speechMode == 'online'
                     ? 'Uses Android system recognition only after the microphone disclosure.'
-                    : 'Deepgram mode is not used by this command screen.',
+                    : 'Uses the selected Android speech-recognition mode.',
               ),
               Align(
                 alignment: Alignment.centerRight,

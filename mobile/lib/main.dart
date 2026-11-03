@@ -6,7 +6,6 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
-import 'package:record/record.dart';
 import 'package:flutter/services.dart';
 
 import 'app_update.dart';
@@ -22,21 +21,15 @@ import 'phone_screens.dart';
 import 'safe_workflows.dart';
 import 'image_generation_screen.dart';
 import 'assistant_features_screen.dart';
-import 'download_input.dart';
-import 'download_review.dart';
-import 'spoken_download_command.dart';
 import 'feature_services.dart';
 import 'ui_motion.dart';
 import 'typing_indicator.dart';
 import 'visual_theme.dart';
 import 'voice_services.dart';
-import 'voice_spectrum.dart';
-import 'live_conversation.dart';
 import 'in_app_toast_screen.dart';
 import 'clipboard_draft.dart';
 import 'task_excerpt_draft.dart';
 import 'myra_task_routing.dart';
-import 'system_clock_timer.dart';
 import 'prompt_templates.dart';
 import 'readable_math.dart';
 
@@ -3474,19 +3467,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         clientFactory: widget.state.clientFactory,
       );
   final tts = FlutterTts();
-  final _deepgramRecorder = AudioRecorder();
-  final _deepgram = DeepgramTranscriber();
-  DeepgramLiveSession? _liveDeepgram;
-  StreamSubscription<Uint8List>? _liveAudioSubscription;
-  final List<String> _liveTurnQueue = [];
-  bool _liveConversationActive = false;
-  bool _liveConversationStarting = false;
-  bool _liveTurnProcessing = false;
-  StreamSubscription<Uint8List>? _deepgramSubscription;
-  final List<Uint8List> _deepgramChunks = [];
-  Timer? _deepgramLimit;
-  int _deepgramBytes = 0;
-  bool _deepgramLimitHit = false;
   bool listening = false, speaking = false;
   bool _draftApplied = false;
   bool _reviewingTranscript = false;
@@ -3495,9 +3475,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _handsFreeOnlineApproved = false;
   bool _initialVoiceStarted = false;
   double level = 0;
-  List<double> _voiceSpectrum = List<double>.filled(9, 0);
-  bool _hasPcmSpectrum = false;
-  DateTime? _lastSpectrumUpdate;
 
   @override
   void didChangeDependencies() {
@@ -3565,10 +3542,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           level = 0;
         }
       });
-      if (kind == 'live_stop_requested') {
-        unawaited(_endLiveConversation());
-        return;
-      }
       if (kind == 'text') {
         final transcript = (event['value'] as String? ?? '').trim();
         if (transcript.isEmpty) {
@@ -3587,15 +3560,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed && _liveConversationActive) {
-      return;
-    }
     if (state != AppLifecycleState.resumed) {
       _handsFreeSessionActive = false;
       _handsFreeOnlineApproved = false;
       AssistantState.device.invokeMethod('voice_cancel');
-      unawaited(_cancelDeepgramRecording());
-      _deepgram.cancel();
       tts.stop();
       if (speaking) unawaited(stopExpressiveAudio());
       widget.state.stop();
@@ -3619,14 +3587,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> stopAll() async {
-    if (_liveConversationActive || _liveConversationStarting) {
-      await _endLiveConversation();
-    }
     _handsFreeSessionActive = false;
     _handsFreeOnlineApproved = false;
-    if (listening && widget.state.speechMode == 'deepgram') {
-      await _cancelDeepgramRecording();
-    }
     widget.state.stop();
     await AssistantState.device.invokeMethod('voice_cancel');
     await tts.stop();
@@ -3640,222 +3602,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _updateVoiceSpectrum(Uint8List pcm16le) {
-    final now = DateTime.now();
-    final last = _lastSpectrumUpdate;
-    if (last != null && now.difference(last).inMilliseconds < 40) return;
-    _lastSpectrumUpdate = now;
-    final bands = voiceSpectrumBands(pcm16le);
-    if (!mounted) return;
-    setState(() {
-      _voiceSpectrum = bands;
-      _hasPcmSpectrum = true;
-    });
-  }
-
-  void _resetVoiceSpectrum() {
-    _lastSpectrumUpdate = null;
-    _voiceSpectrum = List<double>.filled(9, 0);
-    _hasPcmSpectrum = false;
-  }
-
-  Future<void> _cancelDeepgramRecording() async {
-    _deepgramLimit?.cancel();
-    _deepgramLimit = null;
-    _deepgram.cancel();
-    try {
-      await _deepgramRecorder.stop();
-    } catch (_) {
-      // No active recording or platform service unavailable.
-    }
-    await _deepgramSubscription?.cancel();
-    _deepgramSubscription = null;
-    _deepgramChunks.clear();
-    _deepgramBytes = 0;
-    _deepgramLimitHit = false;
-    _resetVoiceSpectrum();
-    if (mounted) {
-      setState(() {
-        listening = false;
-        level = 0;
-      });
-    }
-  }
-
-  Future<void> _startDeepgramRecording() async {
-    if (widget.state.deepgramApiKey.isEmpty) {
-      notice(
-        context,
-        'Add your Deepgram API key in Settings before using Deepgram voice input.',
-      );
-      return;
-    }
-    var approved = false;
-    approved =
-        await showDialog<bool>(
-          context: context,
-          builder: (c) => AlertDialog(
-            title: const Text('Record speech for Deepgram?'),
-            content: const Text(
-              'Recording starts only after you approve and stays on while this screen is open. When you tap Stop, the audio is sent once to Deepgram for transcription; it may be processed under your Deepgram plan. The transcript is placed in the message box and is not sent to the chat until you press Send. No recording is uploaded in the background.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(c, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(c, true),
-                child: const Text('Record with Deepgram'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!approved || !mounted) return;
-    try {
-      if (!await _deepgramRecorder.hasPermission()) {
-        if (mounted) {
-          notice(
-            context,
-            'Allow microphone access in Android to record speech.',
-          );
-        }
-        return;
-      }
-      _deepgramChunks.clear();
-      _deepgramBytes = 0;
-      _deepgramLimitHit = false;
-      _resetVoiceSpectrum();
-      final stream = await _deepgramRecorder.startStream(
-        const RecordConfig(
-          encoder: AudioEncoder.pcm16bits,
-          sampleRate: 16000,
-          numChannels: 1,
-        ),
-      );
-      if (!mounted) {
-        await _deepgramRecorder.stop();
-        return;
-      }
-      _deepgramSubscription = stream.listen(
-        (chunk) {
-          if (!mounted || _deepgramLimitHit) return;
-          _updateVoiceSpectrum(chunk);
-          _deepgramBytes += chunk.length;
-          // 60 seconds of 16 kHz mono PCM16 is about 1.9 MB.
-          if (_deepgramBytes > 16000 * 2 * 60) {
-            _deepgramLimitHit = true;
-            unawaited(_cancelDeepgramRecording());
-            if (mounted) {
-              notice(
-                context,
-                'Recording limit reached; audio was discarded. Tap the microphone to start again.',
-              );
-            }
-            return;
-          }
-          _deepgramChunks.add(chunk);
-        },
-        onError: (_) {
-          unawaited(_cancelDeepgramRecording());
-          if (mounted) {
-            notice(
-              context,
-              'Microphone recording stopped. Nothing was uploaded.',
-            );
-          }
-        },
-      );
-      _deepgramLimit = Timer(const Duration(seconds: 60), () {
-        if (!mounted) return;
-        unawaited(_cancelDeepgramRecording());
-        notice(
-          context,
-          'Recording limit reached; audio was discarded. Tap the microphone to start again.',
-        );
-      });
-      setState(() {
-        listening = true;
-        level = 0;
-      });
-      if (mounted) {
-        notice(
-          context,
-          'Recording on. Tap Stop to send this clip to Deepgram.',
-        );
-      }
-    } on PlatformException catch (e) {
-      if (mounted) {
-        notice(
-          context,
-          e.message ?? 'Microphone unavailable. Nothing was uploaded.',
-        );
-      }
-    } catch (_) {
-      if (mounted) {
-        notice(
-          context,
-          'Could not start microphone recording. Nothing was uploaded.',
-        );
-      }
-    }
-  }
-
-  Future<void> _stopDeepgramRecording() async {
-    _deepgramLimit?.cancel();
-    _deepgramLimit = null;
-    try {
-      await _deepgramRecorder.stop();
-      await _deepgramSubscription?.cancel();
-      _deepgramSubscription = null;
-      if (!mounted) return;
-      final size = _deepgramBytes;
-      final audio = Uint8List(size);
-      var offset = 0;
-      for (final chunk in _deepgramChunks) {
-        audio.setRange(offset, offset + chunk.length, chunk);
-        offset += chunk.length;
-      }
-      _deepgramChunks.clear();
-      _deepgramBytes = 0;
-      _resetVoiceSpectrum();
-      setState(() {
-        listening = false;
-        level = 0;
-      });
-      notice(
-        context,
-        'Sending this recording once to Deepgram for transcription…',
-      );
-      final transcript = await _deepgram.transcribe(
-        pcm16le: audio,
-        apiKey: widget.state.deepgramApiKey,
-        locale: widget.state.language,
-      );
-      if (mounted) {
-        await _reviewVoiceTranscript(transcript);
-      }
-    } catch (e) {
-      if (mounted) notice(context, e);
-    } finally {
-      _deepgramChunks.clear();
-      _deepgramBytes = 0;
-      _deepgramLimitHit = false;
-    }
-  }
-
   Future<void> listen() async {
-    if (_liveConversationActive || _liveConversationStarting) {
-      await _endLiveConversation();
-      return;
-    }
     if (_handsFreeSessionActive) {
       await _endHandsFreeSession();
-      return;
-    }
-    if (widget.state.voiceConversationMode == 'live_conversation') {
-      await _startLiveConversation();
       return;
     }
     if (widget.state.voiceConversationMode == 'hands_free') {
@@ -3865,319 +3614,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     await _listenOnce();
   }
 
-  Future<void> _startLiveConversation() async {
-    if (_liveConversationStarting || _liveConversationActive) return;
-    if (widget.state.chatMode != 'online' || widget.state.engine != 'gemini') {
-      notice(
-        context,
-        'Live Conversation needs Online chat with Gemini selected. No provider was contacted.',
-      );
-      return;
-    }
-    if (widget.state.speechMode != 'deepgram') {
-      notice(
-        context,
-        'Choose Deepgram as speech recognition in Settings before starting Live Conversation. No provider was contacted.',
-      );
-      return;
-    }
-    if (widget.state.geminiApiKey.isEmpty ||
-        widget.state.deepgramApiKey.isEmpty) {
-      notice(
-        context,
-        'Add your Gemini and Deepgram API keys in Settings before starting. No provider was contacted.',
-      );
-      return;
-    }
-    if (!DeepgramLiveSession.supportedLocales.contains(widget.state.language)) {
-      notice(
-        context,
-        'Deepgram Live Conversation supports English, Assamese and Hindi; choose one of those languages in Settings.',
-      );
-      return;
-    }
-    if (input.text.trim().isNotEmpty) {
-      notice(
-        context,
-        'Send or clear your current draft before starting Live Conversation.',
-      );
-      return;
-    }
-
-    final consent =
-        await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('Start Live Conversation?'),
-            content: Text(
-              'The microphone will stream live audio to Deepgram for ${widget.state.language}; recognized speech will be sent to Google Gemini for replies. ${widget.state.geminiTtsEnabled ? 'Expressive cloud speech is enabled: the exact reply text will also be sent to Google Gemini TTS; usage may be charged, and Google may use content on unpaid quota to improve products. ' : 'Replies use the installed Android voice. '}The session can continue when you switch apps, until you tap Stop here or in the ongoing notification. Start only while you want the microphone active. Provider processing, limits, and any charges follow your Deepgram and Google plans. No device action is performed automatically.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Start live session'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!consent || !mounted) return;
-
-    _liveConversationStarting = true;
-    if (mounted) setState(() {});
-    var serviceStarted = false;
-    try {
-      if (!await _deepgramRecorder.hasPermission()) {
-        throw ServiceException(
-          'Allow Android microphone access before starting. No audio was sent.',
-        );
-      }
-      final notificationPermission = await AssistantState.device
-          .invokeMapMethod<String, dynamic>('request_access_permission', {
-            'permission': 'notifications',
-          });
-      if (notificationPermission?['granted'] != true) {
-        throw ServiceException(
-          'Allow notifications so the ongoing microphone session has a visible Stop control. No audio was sent.',
-        );
-      }
-      await LiveConversationService.start();
-      serviceStarted = true;
-      final session = DeepgramLiveSession(
-        apiKey: widget.state.deepgramApiKey,
-        locale: widget.state.language,
-        onUtterance: (utterance) => unawaited(_queueLiveUtterance(utterance)),
-        onError: (message) {
-          if (mounted) notice(context, message);
-          unawaited(_endLiveConversation());
-        },
-      );
-      await session.start();
-      _liveDeepgram = session;
-      _resetVoiceSpectrum();
-      final stream = await _deepgramRecorder.startStream(
-        const RecordConfig(
-          encoder: AudioEncoder.pcm16bits,
-          sampleRate: 16000,
-          numChannels: 1,
-        ),
-      );
-      if (!mounted) {
-        await _deepgramRecorder.stop();
-        await session.close();
-        _liveDeepgram = null;
-        await LiveConversationService.stop();
-        return;
-      }
-      _liveAudioSubscription = stream.listen(
-        (frame) {
-          if (_liveConversationActive) _updateVoiceSpectrum(frame);
-          if (_liveConversationActive && !speaking && !widget.state.busy) {
-            _liveDeepgram?.addAudio(frame);
-          }
-        },
-        onError: (_) {
-          if (mounted) {
-            notice(
-              context,
-              'Microphone stream stopped. Live Conversation ended.',
-            );
-          }
-          unawaited(_endLiveConversation());
-        },
-        cancelOnError: true,
-      );
-      _liveConversationActive = true;
-      _liveTurnQueue.clear();
-      setState(() {
-        listening = true;
-        level = 0;
-      });
-      notice(
-        context,
-        'Live Conversation is on. Audio streams to Deepgram until you tap Stop.',
-      );
-    } catch (error) {
-      if (serviceStarted) await LiveConversationService.stop();
-      if (mounted) notice(context, error);
-    } finally {
-      _liveConversationStarting = false;
-      if (mounted) setState(() {});
-    }
-  }
-
-  Future<void> _queueLiveUtterance(String utterance) async {
-    final text = utterance.trim();
-    if (!_liveConversationActive || text.isEmpty) return;
-    if (_liveTurnQueue.length >= 3) {
-      notice(
-        context,
-        'Live reply queue is full; pause and try again after the current reply.',
-      );
-      return;
-    }
-    _liveTurnQueue.add(text);
-    if (_liveTurnProcessing) return;
-    _liveTurnProcessing = true;
-    try {
-      while (_liveConversationActive && _liveTurnQueue.isNotEmpty) {
-        final turn = _liveTurnQueue.removeAt(0);
-        final timer = parseExplicitSpokenTimerCommand(turn);
-        if (timer != null) {
-          await _reviewAndStartLiveTimer(timer);
-          continue;
-        }
-        final download = SpokenDownloadCommand.parse(turn);
-        if (download != null) {
-          await _reviewAndStartLiveDownload(download);
-          continue;
-        }
-        await widget.state.send(
-          turn,
-          shareMemories: widget.state.shareMemories,
-          shareHistory: widget.state.shareHistory,
-          spokenConversation: true,
-        );
-        if (!mounted || !_liveConversationActive) break;
-        if (widget.state.error.isNotEmpty) {
-          notice(context, widget.state.error);
-          continue;
-        }
-        if (widget.state.messages.isNotEmpty) {
-          final last = widget.state.messages.last;
-          if (last['role'] == 'assistant' && last['state'] == 'complete') {
-            await playReplyVoice(
-              last['text'] as String,
-              forceLocal: !widget.state.geminiTtsEnabled,
-            );
-          }
-        }
-      }
-    } finally {
-      _liveTurnProcessing = false;
-    }
-  }
-
-  Future<void> _reviewAndStartLiveTimer(SystemClockTimerRequest request) async {
-    final duration = _spokenTimerDuration(request.seconds);
-    final approved =
-        await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('Review timer'),
-            content: Text(
-              'Open Android Clock with a $duration timer? It will not start until you confirm it in Clock.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Open Clock'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!approved || !mounted || !_liveConversationActive) return;
-    try {
-      await AssistantState.device.invokeMethod<void>('set_system_timer', {
-        'seconds': request.seconds,
-        'label': request.label,
-      });
-      if (mounted) {
-        notice(
-          context,
-          'Clock opened with a $duration timer. Confirm and start it in Clock; Personal AI cannot verify it is running.',
-        );
-      }
-    } on PlatformException catch (error) {
-      if (mounted) {
-        notice(context, error.message ?? 'Android could not open Clock.');
-      }
-    } catch (_) {
-      if (mounted) notice(context, 'Android could not open Clock.');
-    }
-  }
-
-  String _spokenTimerDuration(int seconds) {
-    if (seconds % 3600 == 0) {
-      final hours = seconds ~/ 3600;
-      return '$hours ${hours == 1 ? 'hour' : 'hours'}';
-    }
-    if (seconds % 60 == 0) {
-      final minutes = seconds ~/ 60;
-      return '$minutes ${minutes == 1 ? 'minute' : 'minutes'}';
-    }
-    return '$seconds ${seconds == 1 ? 'second' : 'seconds'}';
-  }
-
-  Future<void> _reviewAndStartLiveDownload(DownloadInput download) async {
-    final approved = await reviewDownload(context, download);
-    if (!approved || !mounted || !_liveConversationActive) return;
-    try {
-      final result = await AssistantState.device
-          .invokeMapMethod<String, dynamic>('enqueue_user_download', {
-            'url': download.url,
-            'file_name': download.fileName,
-          });
-      if (!mounted) return;
-      notice(
-        context,
-        result == null
-            ? 'Android did not confirm that the download started.'
-            : 'Android accepted ${result['file_name'] ?? download.fileName}. Completion is not verified.',
-      );
-    } catch (error) {
-      if (mounted) notice(context, 'Download did not start: $error');
-    }
-  }
-
-  Future<void> _endLiveConversation() async {
-    final wasActive = _liveConversationActive || _liveConversationStarting;
-    _liveConversationActive = false;
-    _liveConversationStarting = false;
-    _liveTurnQueue.clear();
-    await _liveAudioSubscription?.cancel();
-    _liveAudioSubscription = null;
-    try {
-      await _deepgramRecorder.stop();
-    } catch (_) {
-      // No active stream or the Android recorder already stopped.
-    }
-    final session = _liveDeepgram;
-    _liveDeepgram = null;
-    await session?.close();
-    await LiveConversationService.stop();
-    if (wasActive) widget.state.stop();
-    _resetVoiceSpectrum();
-    try {
-      await tts.stop();
-    } catch (_) {}
-    if (mounted) {
-      setState(() {
-        listening = false;
-        speaking = false;
-        level = 0;
-      });
-      if (wasActive) notice(context, 'Live Conversation stopped.');
-    }
-  }
-
   Future<void> _startHandsFreeSession() async {
-    if (widget.state.speechMode == 'deepgram') {
-      notice(
-        context,
-        'Hands-free sessions work with Android speech recognition. Deepgram needs you to stop each recording manually.',
-      );
-      return;
-    }
     if (input.text.trim().isNotEmpty) {
       notice(
         context,
@@ -4218,20 +3655,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<bool> _listenOnce({bool handsFreeSession = false}) async {
-    if (listening && widget.state.speechMode == 'deepgram') {
-      await _stopDeepgramRecording();
-      return true;
-    }
     if (listening) {
       await stopAll();
       return false;
     }
     if (!handsFreeSession) await stopAll();
     if (!mounted) return false;
-    if (widget.state.speechMode == 'deepgram') {
-      await _startDeepgramRecording();
-      return false;
-    }
     var approved = false;
     if (widget.state.speechMode == 'online') {
       if (handsFreeSession && _handsFreeOnlineApproved) {
@@ -4987,18 +4416,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void dispose() {
     _chatAttachmentBytes?.fillRange(0, _chatAttachmentBytes!.length, 0);
     WidgetsBinding.instance.removeObserver(this);
-    if (_liveConversationActive || _liveConversationStarting) {
-      unawaited(_endLiveConversation());
-    }
     widget.state.removeListener(_chatStateChanged);
     _assistantAudioPlaying.removeListener(_audioPlaybackChanged);
     _chatScrollController.dispose();
     voiceEvents.setMethodCallHandler(null);
     if (speaking) unawaited(stopExpressiveAudio());
-    _deepgramLimit?.cancel();
-    unawaited(_deepgramSubscription?.cancel());
-    unawaited(_deepgramRecorder.dispose());
-    _deepgram.cancel();
     AssistantState.device.invokeMethod('voice_cancel');
     tts.stop();
     widget.state.stop(notify: false);
@@ -5282,14 +4704,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             SizedBox(
                               width: 110,
                               height: 28,
-                              child: _hasPcmSpectrum
-                                  ? VoiceSpectrumBars(levels: _voiceSpectrum)
-                                  : CustomPaint(
-                                      painter: WavePainter(
-                                        level,
-                                        Theme.of(context).colorScheme.primary,
-                                      ),
-                                    ),
+                              child: CustomPaint(
+                                painter: WavePainter(
+                                  level,
+                                  Theme.of(context).colorScheme.primary,
+                                ),
+                              ),
                             ),
                           ],
                         ),
@@ -5469,17 +4889,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     ActivityHalo(
-                      active:
-                          listening ||
-                          _handsFreeSessionActive ||
-                          _liveConversationActive ||
-                          _liveConversationStarting,
+                      active: listening || _handsFreeSessionActive,
                       color: Theme.of(context).colorScheme.primary,
                       child: IconButton.filledTonal(
-                        tooltip:
-                            _liveConversationActive || _liveConversationStarting
-                            ? 'Stop Live Conversation'
-                            : _handsFreeSessionActive
+                        tooltip: _handsFreeSessionActive
                             ? 'End hands-free session'
                             : widget.state.voiceConversationMode == 'hands_free'
                             ? 'Start hands-free session'
@@ -5503,19 +4916,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 ),
                               ),
                           child: Icon(
-                            _liveConversationActive ||
-                                    _liveConversationStarting ||
-                                    _handsFreeSessionActive
+                            _handsFreeSessionActive
                                 ? Icons.stop_circle_rounded
                                 : listening
                                 ? Icons.mic_rounded
                                 : Icons.mic_none_rounded,
-                            key: ValueKey((
-                              listening,
-                              _handsFreeSessionActive,
-                              _liveConversationActive,
-                              _liveConversationStarting,
-                            )),
+                            key: ValueKey((listening, _handsFreeSessionActive)),
                           ),
                         ),
                       ),
@@ -6455,7 +5861,6 @@ class Settings extends StatefulWidget {
 
 class _SettingsState extends State<Settings> {
   static const _automaticVoiceKey = '__automatic_offline_voice__';
-  final deepgramSecret = TextEditingController();
   final azureSpeechSecret = TextEditingController();
   late final TextEditingController azureSpeechRegion = TextEditingController(
     text: widget.state.azureSpeechRegion,
@@ -6954,7 +6359,6 @@ class _SettingsState extends State<Settings> {
     _assistantAudioPlaying.removeListener(_expressiveAudioChanged);
     if (_playingExpressiveVoice) unawaited(_stopAssistantAudio());
     unawaited(_voicePreview.stop().catchError((Object _) {}));
-    deepgramSecret.dispose();
     azureSpeechSecret.dispose();
     azureSpeechRegion.dispose();
     name.dispose();
@@ -7338,10 +6742,6 @@ class _SettingsState extends State<Settings> {
                         value: 'online',
                         child: Text('Online · Android recognition provider'),
                       ),
-                      DropdownMenuItem(
-                        value: 'deepgram',
-                        child: Text('Deepgram · online speech-to-text'),
-                      ),
                     ],
                     onChanged: (v) => setState(() => speechMode = v!),
                   ),
@@ -7363,10 +6763,6 @@ class _SettingsState extends State<Settings> {
                         value: 'hands_free',
                         child: Text('Hands-free · transcript review'),
                       ),
-                      DropdownMenuItem(
-                        value: 'live_conversation',
-                        child: Text('Live Conversation · background mic'),
-                      ),
                     ],
                     onChanged: (mode) {
                       if (mode == null) return;
@@ -7374,41 +6770,8 @@ class _SettingsState extends State<Settings> {
                     },
                   ),
                   const Text(
-                    'Hands-free starts only when you tap the microphone, stays in the foreground, reviews each transcript before sending, speaks the reply, then listens for the next turn. Live Conversation is a separate opt-in: it streams Deepgram audio and Gemini text turns, uses the installed Android voice, and can continue when you switch apps. Start requires microphone and notification permissions; stop in chat or from its persistent notification. No background auto-start, action execution, or provider fallback.',
+                    'Hands-free starts only when you tap the microphone, stays in the foreground, reviews each transcript before sending, speaks the reply, then listens for the next turn. No background auto-start, action execution, or provider fallback.',
                   ),
-                  if (speechMode == 'deepgram') ...[
-                    const Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text('Deepgram speech-to-text · not an LLM'),
-                    ),
-                    Text(
-                      'API key: ${widget.state.deepgramApiKey.isEmpty ? 'Not set' : 'Saved securely on this phone'}',
-                    ),
-                    TextField(
-                      controller: deepgramSecret,
-                      obscureText: true,
-                      autocorrect: false,
-                      enableSuggestions: false,
-                      autofillHints: const [],
-                      decoration: const InputDecoration(
-                        labelText: 'Deepgram API key',
-                        hintText: 'Enter a new key or leave blank to keep the saved one',
-                      ),
-                    ),
-                    const Text(
-                      'For one-shot dictation, Deepgram audio is sent only after you tap Stop; its transcript stays in the draft. Live Conversation instead streams audio while the explicitly started session is active and supports English, Assamese and Hindi; it requires online Gemini chat and a visible Android foreground-service notification.',
-                    ),
-                    if (widget.state.deepgramApiKey.isNotEmpty)
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton.icon(
-                          onPressed: () =>
-                              widget.state.clearCloudProviderKey('deepgram'),
-                          icon: const Icon(Icons.key_off),
-                          label: const Text('Clear Deepgram key'),
-                        ),
-                      ),
-                  ],
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     value: widget.state.speakReplies,
@@ -8043,13 +7406,6 @@ class _SettingsState extends State<Settings> {
                       );
                     }
                     azureSpeechSecret.clear();
-                    if (speechMode == 'deepgram') {
-                      await widget.state.saveCloudProviderKey(
-                        'deepgram',
-                        deepgramSecret.text,
-                      );
-                    }
-                    deepgramSecret.clear();
                     await widget.state.saveEngine(
                       widget.state.engine,
                       widget.state.model,
