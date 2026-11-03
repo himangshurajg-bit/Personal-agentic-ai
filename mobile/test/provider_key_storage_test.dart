@@ -21,8 +21,9 @@ void main() {
       expect(await state.storage.read(key: 'speech_mode'), 'offline');
       expect(
         await state.storage.read(key: 'voice_conversation_mode'),
-        'push_to_talk',
+        'live_conversation',
       );
+      expect(state.voiceConversationMode, 'live_conversation');
       await expectLater(
         state.saveCloudProviderKey('deepgram', 'replacement-secret'),
         throwsA(isA<ServiceException>()),

@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 
 import 'app_update.dart';
 import 'assistant_state.dart';
+import 'live_conversation_speech.dart';
 import 'local_backup_restore.dart';
 import 'jee_question_request.dart';
 import 'assistant_task_tracker.dart';
@@ -3423,6 +3424,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final count = state.messages.length;
     final conversation = state.conversation;
     final partial = state.partial;
+    if (_liveConversationActive && state.busy && partial.isNotEmpty) {
+      _queueLiveSpeech(_liveSpeechBuffer.add(partial), _liveTurnEpoch);
+    }
     if (count == _lastObservedMessageCount &&
         conversation == _lastObservedConversation &&
         partial == _lastObservedPartial) {
@@ -3473,6 +3477,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _speakNextReply = false;
   bool _handsFreeSessionActive = false;
   bool _handsFreeOnlineApproved = false;
+  bool _liveConversationActive = false;
+  String _livePartialTranscript = '';
+  final LiveConversationSpeechBuffer _liveSpeechBuffer =
+      LiveConversationSpeechBuffer();
+  Future<void> _liveSpeechQueue = Future<void>.value();
+  int _liveTurnEpoch = 0;
   bool _initialVoiceStarted = false;
   double level = 0;
 
@@ -3541,12 +3551,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           listening = false;
           level = 0;
         }
+        if (kind == 'partial') {
+          _livePartialTranscript = event['value'] as String? ?? '';
+        }
+        if (kind == 'text' || kind == 'error') _livePartialTranscript = '';
       });
       if (kind == 'text') {
         final transcript = (event['value'] as String? ?? '').trim();
         if (transcript.isEmpty) {
           notice(context, 'No speech was recognized. Your draft is unchanged.');
           if (_handsFreeSessionActive) unawaited(_endHandsFreeSession());
+        } else if (_liveConversationActive && _handsFreeSessionActive) {
+          input.text = transcript;
+          _speakNextReply = true;
+          unawaited(send());
         } else {
           unawaited(_reviewVoiceTranscript(transcript));
         }
@@ -3562,6 +3580,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
       _handsFreeSessionActive = false;
+      _liveConversationActive = false;
+      _liveTurnEpoch++;
+      _livePartialTranscript = '';
       _handsFreeOnlineApproved = false;
       AssistantState.device.invokeMethod('voice_cancel');
       tts.stop();
@@ -3588,6 +3609,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> stopAll() async {
     _handsFreeSessionActive = false;
+    _liveConversationActive = false;
+    _liveTurnEpoch++;
+    _livePartialTranscript = '';
     _handsFreeOnlineApproved = false;
     widget.state.stop();
     await AssistantState.device.invokeMethod('voice_cancel');
@@ -3611,7 +3635,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       await _startHandsFreeSession();
       return;
     }
+    if (widget.state.voiceConversationMode == 'live_conversation') {
+      await _startLiveConversation();
+      return;
+    }
     await _listenOnce();
+  }
+
+  Future<void> _startLiveConversation() async {
+    if (input.text.trim().isNotEmpty) {
+      notice(
+        context,
+        'Send or clear your current draft before starting live conversation.',
+      );
+      return;
+    }
+    _handsFreeSessionActive = true;
+    _liveConversationActive = true;
+    _handsFreeOnlineApproved = false;
+    _livePartialTranscript = '';
+    if (mounted) setState(() {});
+    final started = await _listenOnce(handsFreeSession: true);
+    if (!started && _handsFreeSessionActive) await _endHandsFreeSession();
   }
 
   Future<void> _startHandsFreeSession() async {
@@ -3623,6 +3668,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return;
     }
     _handsFreeSessionActive = true;
+    _liveConversationActive = false;
     _handsFreeOnlineApproved = false;
     if (mounted) setState(() {});
     final started = await _listenOnce(handsFreeSession: true);
@@ -3633,6 +3679,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _endHandsFreeSession() async {
     _handsFreeSessionActive = false;
+    _liveConversationActive = false;
+    _liveTurnEpoch++;
+    _livePartialTranscript = '';
+    widget.state.stop();
     _handsFreeOnlineApproved = false;
     try {
       await AssistantState.device.invokeMethod('voice_cancel');
@@ -3673,7 +3723,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 title: const Text('Use online speech recognition?'),
                 content: Text(
                   handsFreeSession
-                      ? 'During this hands-free session, Android recognition may send microphone audio to its provider for ${widget.state.language} on each turn, until you tap Stop or leave the app. This is independent of the AI engine. No offline fallback or automatic retry.'
+                      ? 'During this foreground voice session, Android recognition may send microphone audio to its provider for ${widget.state.language} on each turn, until you tap Stop or leave the app. This is independent of the AI engine. No offline fallback or automatic retry.'
                       : 'Your Android recognition service may send microphone audio to its provider for ${widget.state.language}. This is independent of the AI engine. No offline fallback or automatic retry.',
                 ),
                 actions: [
@@ -3702,6 +3752,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         'mode': widget.state.speechMode,
         'locale': widget.state.language,
         'approved_online': approved,
+        'live_mode': _liveConversationActive,
       });
       return true;
     } on PlatformException catch (e) {
@@ -3710,6 +3761,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       return false;
     }
+  }
+
+  void _queueLiveSpeech(List<String> chunks, int epoch) {
+    if (chunks.isEmpty) return;
+    _liveSpeechQueue = _liveSpeechQueue.then((_) async {
+      for (final chunk in chunks) {
+        if (!mounted || !_liveConversationActive || epoch != _liveTurnEpoch) {
+          return;
+        }
+        final played = await playReplyVoice(chunk, forceLocal: true);
+        if (!played && _liveConversationActive && epoch == _liveTurnEpoch) {
+          await _endHandsFreeSession();
+          return;
+        }
+      }
+    });
+  }
+
+  Future<void> _finishLiveResponse(String answer, int epoch) async {
+    _queueLiveSpeech(_liveSpeechBuffer.add(answer, flush: true), epoch);
+    await _liveSpeechQueue;
   }
 
   Future<void> _reviewVoiceTranscript(String transcript) async {
@@ -4359,6 +4431,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       setState(() => listening = false);
     }
     if (!mounted) return;
+    final liveTurn = _liveConversationActive;
+    final liveEpoch = ++_liveTurnEpoch;
+    if (liveTurn) {
+      _liveSpeechBuffer.reset();
+      _liveSpeechQueue = Future<void>.value();
+      _livePartialTranscript = '';
+    }
     final priorUserMessageCount = widget.state.messages
         .where((message) => message['role'] == 'user')
         .length;
@@ -4386,6 +4465,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (currentUserMessageCount > priorUserMessageCount ||
         (retry != null && text.trim() == priorPrompt)) {
       input.clear();
+    }
+    if (liveTurn) {
+      if (widget.state.error.isEmpty &&
+          widget.state.messages.isNotEmpty &&
+          mounted &&
+          liveEpoch == _liveTurnEpoch) {
+        final last = widget.state.messages.last;
+        if (last['role'] == 'assistant' && last['state'] == 'complete') {
+          await _finishLiveResponse(last['text'] as String, liveEpoch);
+          if (_liveConversationActive && liveEpoch == _liveTurnEpoch) {
+            final started = await _listenOnce(handsFreeSession: true);
+            if (!started && _handsFreeSessionActive) {
+              await _endHandsFreeSession();
+            }
+          }
+        } else {
+          await _endHandsFreeSession();
+        }
+      } else if (_liveConversationActive) {
+        await _endHandsFreeSession();
+      }
+      return;
     }
     if (speakThisReply &&
         widget.state.error.isEmpty &&
@@ -4659,6 +4760,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     Text(
                       listening
                           ? 'Listening'
+                          : _liveConversationActive && !speaking
+                          ? (state.busy
+                                ? 'Live reply · tap Stop to interrupt'
+                                : _livePartialTranscript.isNotEmpty
+                                ? _livePartialTranscript
+                                : 'Live conversation · tap Stop to end')
                           : _handsFreeSessionActive && !state.busy && !speaking
                           ? 'Hands-free session · review each transcript'
                           : state.busy
@@ -4893,7 +5000,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       color: Theme.of(context).colorScheme.primary,
                       child: IconButton.filledTonal(
                         tooltip: _handsFreeSessionActive
-                            ? 'End hands-free session'
+                            ? (_liveConversationActive
+                                  ? 'Stop live conversation'
+                                  : 'End hands-free session')
+                            : widget.state.voiceConversationMode ==
+                                  'live_conversation'
+                            ? 'Start live conversation'
                             : widget.state.voiceConversationMode == 'hands_free'
                             ? 'Start hands-free session'
                             : listening
@@ -6763,6 +6875,10 @@ class _SettingsState extends State<Settings> {
                         value: 'hands_free',
                         child: Text('Hands-free · transcript review'),
                       ),
+                      DropdownMenuItem(
+                        value: 'live_conversation',
+                        child: Text('Live conversation · streamed voice'),
+                      ),
                     ],
                     onChanged: (mode) {
                       if (mode == null) return;
@@ -6770,7 +6886,7 @@ class _SettingsState extends State<Settings> {
                     },
                   ),
                   const Text(
-                    'Hands-free starts only when you tap the microphone, stays in the foreground, reviews each transcript before sending, speaks the reply, then listens for the next turn. No background auto-start, action execution, or provider fallback.',
+                    'Hands-free starts only when you tap the microphone, stays in the foreground, reviews each transcript before sending, speaks the reply, then listens for the next turn. Live conversation instead sends each final Android transcript automatically and speaks streamed replies using Android’s installed system voice. Tap Stop or leave the app to end; no background listening, raw-speech command execution, or provider fallback.',
                   ),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,

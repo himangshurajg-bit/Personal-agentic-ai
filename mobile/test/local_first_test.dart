@@ -73,10 +73,11 @@ void main() {
       expect(state.voiceConversationMode, 'push_to_talk');
 
       await state.saveVoiceConversationMode('hands_free');
-      await expectLater(
-        state.saveVoiceConversationMode('live_conversation'),
-        throwsA(isA<ServiceException>()),
-      );
+      await state.saveVoiceConversationMode('live_conversation');
+      final liveRestored = AssistantState();
+      await liveRestored.initialize();
+      expect(liveRestored.voiceConversationMode, 'live_conversation');
+      await liveRestored.saveVoiceConversationMode('hands_free');
       final restored = AssistantState();
       await restored.initialize();
       expect(restored.voiceConversationMode, 'hands_free');

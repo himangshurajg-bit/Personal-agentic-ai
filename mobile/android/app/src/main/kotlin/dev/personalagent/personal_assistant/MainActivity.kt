@@ -306,7 +306,17 @@ class MainActivity : FlutterFragmentActivity() {
                 override fun onPartialResults(results:Bundle?) { voiceEvent("partial",results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: "") }
                 override fun onEvent(eventType:Int,params:Bundle?) {}
             })
-            val intent=Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {putExtra(RecognizerIntent.EXTRA_LANGUAGE,locale);putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,true)}
+            val liveMode = args["live_mode"] == true
+            val intent=Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE,locale)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,true)
+                if (liveMode) {
+                    // Android treats these as hints; installed recognition services may vary.
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 650L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 300L)
+                }
+            }
             if(mode=="offline" && Build.VERSION.SDK_INT>=33) {
                 recognizer.checkRecognitionSupport(intent,mainExecutor,object:RecognitionSupportCallback {
                     override fun onSupportResult(support:RecognitionSupport) {

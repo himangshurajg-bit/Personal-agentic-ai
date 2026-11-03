@@ -402,6 +402,7 @@ class AssistantState extends ChangeNotifier {
           const {
             'push_to_talk',
             'hands_free',
+            'live_conversation',
           }.contains(savedVoiceConversationMode)
           ? savedVoiceConversationMode!
           : 'push_to_talk';
@@ -1154,7 +1155,7 @@ class AssistantState extends ChangeNotifier {
   }
 
   Future<void> saveVoiceConversationMode(String mode) async {
-    if (!['push_to_talk', 'hands_free'].contains(mode)) {
+    if (!['push_to_talk', 'hands_free', 'live_conversation'].contains(mode)) {
       throw ServiceException('Choose a supported voice conversation mode.');
     }
     await storage.write(key: 'voice_conversation_mode', value: mode);

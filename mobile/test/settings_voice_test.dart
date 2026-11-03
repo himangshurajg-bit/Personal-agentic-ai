@@ -50,6 +50,12 @@ void main() {
     await tester.tap(find.byKey(const Key('voice-conversation-mode')));
     await tester.pumpAndSettle();
     expect(find.text('Hands-free · transcript review'), findsOneWidget);
+    expect(find.text('Live conversation · streamed voice'), findsOneWidget);
+    await tester.tap(find.text('Live conversation · streamed voice').last);
+    await tester.pumpAndSettle();
+    expect(state.voiceConversationMode, 'live_conversation');
+    await tester.tap(find.byKey(const Key('voice-conversation-mode')));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Hands-free · transcript review').last);
     await tester.pumpAndSettle();
     expect(state.voiceConversationMode, 'hands_free');
