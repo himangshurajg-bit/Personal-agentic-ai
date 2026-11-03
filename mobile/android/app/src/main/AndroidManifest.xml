@@ -8,16 +8,31 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <application android:allowBackup="false" android:networkSecurityConfig="@xml/network_security_config"
         android:label="Personal AI"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <service
-            android:name=".LiveConversationService"
+            android:name=".VoiceForegroundService"
             android:exported="false"
             android:foregroundServiceType="microphone"
             android:stopWithTask="false" />
+        <service
+            android:name=".NotificationReaderService"
+            android:label="Personal AI notification reader"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
         <receiver android:name=".ReminderReceiver" android:exported="false"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter></receiver>
         <!-- OAuth callback used only by the explicit Wajo Fo Connect action. -->
         <activity

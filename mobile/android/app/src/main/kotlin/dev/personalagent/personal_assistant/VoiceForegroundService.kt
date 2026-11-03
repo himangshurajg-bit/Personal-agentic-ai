@@ -11,7 +11,7 @@ import android.os.Build
 import android.os.IBinder
 
 /** Visible, user-started lifetime guard for opt-in background mic capture. */
-class LiveConversationService : Service() {
+class VoiceForegroundService : Service() {
     companion object {
         const val ACTION_START = "dev.personalagent.personal_assistant.LIVE_START"
         const val ACTION_STOP = "dev.personalagent.personal_assistant.LIVE_STOP"
@@ -70,13 +70,20 @@ class LiveConversationService : Service() {
         val stop = PendingIntent.getService(
             this,
             NOTIFICATION_ID,
-            Intent(this, LiveConversationService::class.java).setAction(ACTION_STOP),
+            Intent(this, VoiceForegroundService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val openApp = PendingIntent.getActivity(
+            this,
+            NOTIFICATION_ID + 1,
+            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentIntent(openApp)
             .setContentTitle("Personal AI · Live Conversation")
-            .setContentText("Microphone is active. Tap Stop to end the session.")
+            .setContentText("Voice session active. Tap Stop to end it.")
             .setCategory(Notification.CATEGORY_SERVICE)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

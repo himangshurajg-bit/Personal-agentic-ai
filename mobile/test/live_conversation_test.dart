@@ -91,5 +91,64 @@ void main() {
         });
       },
     );
+    test('app launch parsing is explicit and rejects unrelated commands', () {
+      expect(SpokenAppLaunch.parse('open the calculator')?.name, 'calculator');
+      expect(SpokenAppLaunch.parse('Please launch Maps')?.name, 'Maps');
+      expect(SpokenAppLaunch.parse('send a message to Alex'), isNull);
+      expect(SpokenAppLaunch.parse('open '), isNull);
+    });
+    test('web search parser accepts only explicit bounded search requests', () {
+      expect(
+        SpokenWebSearch.parse('search the web for JEE physics')?.query,
+        'JEE physics',
+      );
+      expect(
+        SpokenWebSearch.parse('please look up weather in Guwahati')?.query,
+        'weather in Guwahati',
+      );
+      expect(SpokenWebSearch.parse('search for '), isNull);
+      expect(SpokenWebSearch.parse('what should I search for?'), isNull);
+    });
+    test(
+      'message draft parser requires explicit recipient and message body',
+      () {
+        final draft = SpokenMessageDraft.parse(
+          'message Alex saying I will be late',
+        );
+        expect(draft?.recipient, 'Alex');
+        expect(draft?.body, 'I will be late');
+        expect(
+          SpokenMessageDraft.parse('send a message to Mom: I am outside')?.body,
+          'I am outside',
+        );
+        expect(SpokenMessageDraft.parse('message Alex'), isNull);
+        expect(
+          SpokenMessageDraft.parse('search for a message to Alex'),
+          isNull,
+        );
+      },
+    );
+    test('notification read intent is explicit and bounded', () {
+      expect(isSpokenNotificationRead('read my notifications'), isTrue);
+      expect(isSpokenNotificationRead('please check notifications'), isTrue);
+      expect(isSpokenNotificationRead('read all messages from Mom'), isFalse);
+    });
+    test('torch-off voice command is exact and never activates the flash', () {
+      expect(isSpokenTorchOffCommand('turn off the flashlight'), isTrue);
+      expect(isSpokenTorchOffCommand('please switch the torch off'), isTrue);
+      expect(isSpokenTorchOffCommand('turn off my phone flashlight'), isTrue);
+      expect(isSpokenTorchOffCommand('turn on the flashlight'), isFalse);
+      expect(isSpokenTorchOffCommand('is my flashlight on?'), isFalse);
+      expect(isSpokenTorchOffCommand('turn the flashlight on'), isFalse);
+    });
+    test(
+      'playback interruption stops speech without ending the session',
+      () async {
+        var stopped = false;
+        final playback = AudioPlaybackManager(() async => stopped = true);
+        await playback.interrupt();
+        expect(stopped, isTrue);
+      },
+    );
   });
 }

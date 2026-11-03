@@ -223,6 +223,7 @@ class MainActivity : FlutterFragmentActivity() {
     private var contactPickerResult: MethodChannel.Result? = null
     private var voice: SpeechRecognizer? = null
     private var voiceChannel: MethodChannel? = null
+    private var wakeWordManager: WakeWordManager? = null
     private var featureVoiceChannel: MethodChannel? = null
     private var activeVoiceChannel: MethodChannel? = null
     private var audioChannel: MethodChannel? = null
@@ -234,7 +235,7 @@ class MainActivity : FlutterFragmentActivity() {
     private var accessPermissionKind: String? = null
     private var voiceArgs: Map<*,*>? = null
     private var liveStopReceiver: BroadcastReceiver? = null
-    private fun voiceEvent(kind:String, value:Any? = null) { activeVoiceChannel?.invokeMethod("voice_event",mapOf("kind" to kind,"value" to value)) }
+    private fun voiceEvent(kind:String, value:Any? = null) { (activeVoiceChannel ?: voiceChannel)?.invokeMethod("voice_event",mapOf("kind" to kind,"value" to value)) }
     private fun stopVoice() { voice?.cancel();voice?.destroy();voice=null;voiceEvent("stopped") }
     private fun stopAudio() {
         val pending = audioStartResult
@@ -475,13 +476,13 @@ class MainActivity : FlutterFragmentActivity() {
         super.configureFlutterEngine(engine)
         val stopReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent?.action == LiveConversationService.ACTION_STOP_REQUESTED) {
+                if (intent?.action == VoiceForegroundService.ACTION_STOP_REQUESTED) {
                     voiceEvent("live_stop_requested")
                 }
             }
         }
         liveStopReceiver = stopReceiver
-        val stopFilter = android.content.IntentFilter(LiveConversationService.ACTION_STOP_REQUESTED)
+        val stopFilter = android.content.IntentFilter(VoiceForegroundService.ACTION_STOP_REQUESTED)
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(stopReceiver, stopFilter, Context.RECEIVER_NOT_EXPORTED)
         } else {
@@ -501,7 +502,7 @@ class MainActivity : FlutterFragmentActivity() {
                             return@setMethodCallHandler
                         }
                         try {
-                            val service = Intent(this, LiveConversationService::class.java).setAction(LiveConversationService.ACTION_START)
+                            val service = Intent(this, VoiceForegroundService::class.java).setAction(VoiceForegroundService.ACTION_START)
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(service)
                             else startService(service)
                             result.success(true)
@@ -511,7 +512,7 @@ class MainActivity : FlutterFragmentActivity() {
                     }
                     "stop" -> {
                         try {
-                            stopService(Intent(this, LiveConversationService::class.java))
+                            stopService(Intent(this, VoiceForegroundService::class.java))
                             result.success(true)
                         } catch (error: Exception) {
                             result.error("service_stop_failed", error.message ?: "Android could not stop the microphone service.", null)
@@ -599,6 +600,66 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
         voiceChannel=MethodChannel(engine.dartExecutor.binaryMessenger,"personal_assistant/voice")
+        MethodChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/voice_tools")
+            .setMethodCallHandler { call, result ->
+                val permissions = PermissionManager(applicationContext)
+                val apps = AppLauncher(applicationContext)
+                val executor = TaskExecutor(permissions, apps)
+                when (call.method) {
+                    "start_wake_word" -> {
+                        if (!permissions.hasMicrophone()) {
+                            result.error("permission_required", "Microphone permission is required for local wake-word detection.", null)
+                            return@setMethodCallHandler
+                        }
+                        wakeWordManager?.stop()
+                        val manager = WakeWordManager(applicationContext, { phrase ->
+                            voiceChannel?.invokeMethod("voice_event", mapOf("kind" to "live_wake_word_detected", "value" to phrase))
+                        }, { message ->
+                            voiceChannel?.invokeMethod("voice_event", mapOf("kind" to "live_wake_word_error", "value" to message))
+                        })
+                        if (manager.start(call.argument<String>("locale") ?: "en-IN")) {
+                            wakeWordManager = manager
+                            result.success(true)
+                        } else {
+                            manager.stop()
+                            result.error("wake_word_unavailable", "Local wake-word detection could not start.", null)
+                        }
+                    }
+                    "stop_wake_word" -> { wakeWordManager?.stop(); wakeWordManager = null; result.success(true) }
+                    "voice_permission_status" -> result.success(mapOf(
+                        "microphone" to permissions.hasMicrophone(),
+                        "notifications" to permissions.hasNotificationsPermission(),
+                        "notification_access" to permissions.hasNotificationListener(),
+                        "local_wake_word_supported" to (Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)),
+                    ))
+                    "open_notification_access_settings" -> {
+                        try { permissions.openNotificationAccessSettings(); result.success(true) }
+                        catch (error: Exception) { result.error("settings_unavailable", error.message, null) }
+                    }
+                    "read_notifications" -> {
+                        val execution = executor.execute("read_notifications", null, call.argument<Boolean>("approved") == true)
+                        if (!execution.ok) result.error(execution.code, execution.message, null)
+                        else result.success(execution.data)
+                    }
+                    "list_apps" -> try {
+                        result.success(apps.list().map { mapOf("label" to it.label, "package" to it.packageName) })
+                    } catch (_: SecurityException) {
+                        result.error("app_list_unavailable", "Android could not list installed apps.", null)
+                    }
+                    "execute" -> {
+                        val outcome = executor.execute(
+                            call.argument<String>("action_id") ?: "",
+                            call.argument<String>("package_name"),
+                            call.argument<Boolean>("approved") == true,
+                            query = call.argument<String>("query"),
+                            recipient = call.argument<String>("recipient"),
+                            message = call.argument<String>("message"),
+                        )
+                        result.success(mapOf("ok" to outcome.ok, "code" to outcome.code, "message" to outcome.message, "data" to outcome.data))
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         featureVoiceChannel=MethodChannel(engine.dartExecutor.binaryMessenger,"personal_assistant/feature_voice")
         audioChannel=MethodChannel(engine.dartExecutor.binaryMessenger,"personal_assistant/audio")
         MethodChannel(engine.dartExecutor.binaryMessenger, "personal_assistant/clipboard_preview")

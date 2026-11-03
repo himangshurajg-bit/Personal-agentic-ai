@@ -3474,7 +3474,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         clientFactory: widget.state.clientFactory,
       );
   final tts = FlutterTts();
-  final _deepgramRecorder = AudioRecorder();
+  final _deepgramRecorder = AudioCaptureManager();
+  final WakeWordManager _wakeWord = WakeWordManager();
+  late final AudioPlaybackManager _livePlayback = AudioPlaybackManager(
+    () async {
+      await tts.stop();
+      await stopExpressiveAudio();
+      if (mounted) setState(() => speaking = false);
+    },
+  );
   final _deepgram = DeepgramTranscriber();
   DeepgramLiveSession? _liveDeepgram;
   StreamSubscription<Uint8List>? _liveAudioSubscription;
@@ -3566,6 +3574,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
       });
       if (kind == 'live_stop_requested') {
+        unawaited(_endLiveConversation());
+        return;
+      }
+      if (kind == 'live_wake_word_detected') {
+        unawaited(_beginLiveStreaming());
+        return;
+      }
+      if (kind == 'live_wake_word_error') {
+        notice(context, event['value'].toString());
         unawaited(_endLiveConversation());
         return;
       }
@@ -3910,7 +3927,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           builder: (dialogContext) => AlertDialog(
             title: const Text('Start Live Conversation?'),
             content: Text(
-              'The microphone will stream live audio to Deepgram for ${widget.state.language}; recognized speech will be sent to Google Gemini for replies. ${widget.state.geminiTtsEnabled ? 'Expressive cloud speech is enabled: the exact reply text will also be sent to Google Gemini TTS; usage may be charged, and Google may use content on unpaid quota to improve products. ' : 'Replies use the installed Android voice. '}The session can continue when you switch apps, until you tap Stop here or in the ongoing notification. Start only while you want the microphone active. Provider processing, limits, and any charges follow your Deepgram and Google plans. No device action is performed automatically.',
+              'After you start, on-device wake-word detection listens locally for “Hey Personal AI.” Only after it detects the phrase will microphone audio stream to Deepgram for ${widget.state.language}; recognized speech will be sent to Google Gemini for replies. ${widget.state.geminiTtsEnabled ? 'Expressive cloud speech is enabled: the exact reply text will also be sent to Google Gemini TTS; usage may be charged, and Google may use content on unpaid quota to improve products. ' : 'Replies use the installed Android voice. '}The session can continue when you switch apps, until you tap Stop here or in the ongoing notification. Start only while you want the microphone active. Provider processing, limits, and any charges follow your Deepgram and Google plans. No device action is performed automatically.',
             ),
             actions: [
               TextButton(
@@ -3947,6 +3964,36 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       await LiveConversationService.start();
       serviceStarted = true;
+      await _wakeWord.start(widget.state.language);
+      if (!mounted) {
+        await _wakeWord.stop();
+        await LiveConversationService.stop();
+        return;
+      }
+      _liveConversationActive = true;
+      _liveTurnQueue.clear();
+      setState(() {
+        listening = true;
+        level = 0;
+      });
+      notice(
+        context,
+        'Voice session is on. Wake phrase detection stays on-device; audio goes to Deepgram only after “Hey Personal AI.” Tap Stop to end.',
+      );
+    } catch (error) {
+      await _wakeWord.stop();
+      if (serviceStarted) await LiveConversationService.stop();
+      if (mounted) notice(context, error);
+    } finally {
+      _liveConversationStarting = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _beginLiveStreaming() async {
+    if (!_liveConversationActive || _liveDeepgram != null || !mounted) return;
+    try {
+      await _wakeWord.stop();
       final session = DeepgramLiveSession(
         apiKey: widget.state.deepgramApiKey,
         locale: widget.state.language,
@@ -3966,16 +4013,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           numChannels: 1,
         ),
       );
-      if (!mounted) {
+      if (!mounted || !_liveConversationActive) {
         await _deepgramRecorder.stop();
         await session.close();
         _liveDeepgram = null;
-        await LiveConversationService.stop();
         return;
       }
       _liveAudioSubscription = stream.listen(
         (frame) {
-          if (_liveConversationActive) _updateVoiceSpectrum(frame);
+          if (_liveConversationActive && _liveDeepgram != null) {
+            _updateVoiceSpectrum(frame);
+          }
           if (_liveConversationActive && !speaking && !widget.state.busy) {
             _liveDeepgram?.addAudio(frame);
           }
@@ -3991,22 +4039,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         },
         cancelOnError: true,
       );
-      _liveConversationActive = true;
-      _liveTurnQueue.clear();
-      setState(() {
-        listening = true;
-        level = 0;
-      });
-      notice(
-        context,
-        'Live Conversation is on. Audio streams to Deepgram until you tap Stop.',
-      );
+      if (mounted) {
+        notice(
+          context,
+          'Wake phrase detected. Live audio is now streaming to Deepgram until you stop the session.',
+        );
+        setState(() {
+          listening = true;
+          level = 0;
+        });
+      }
     } catch (error) {
-      if (serviceStarted) await LiveConversationService.stop();
-      if (mounted) notice(context, error);
-    } finally {
-      _liveConversationStarting = false;
-      if (mounted) setState(() {});
+      if (mounted) notice(context, 'Could not start voice streaming: $error');
+      await _endLiveConversation();
     }
   }
 
@@ -4034,6 +4079,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         final download = SpokenDownloadCommand.parse(turn);
         if (download != null) {
           await _reviewAndStartLiveDownload(download);
+          continue;
+        }
+        final launch = SpokenAppLaunch.parse(turn);
+        if (launch != null) {
+          await _reviewAndLaunchApp(launch);
+          continue;
+        }
+        final search = SpokenWebSearch.parse(turn);
+        if (search != null) {
+          await _reviewAndSearchWeb(search);
+          continue;
+        }
+        final message = SpokenMessageDraft.parse(turn);
+        if (message != null) {
+          await _reviewAndPrepareMessage(message);
+          continue;
+        }
+        if (isSpokenTorchOffCommand(turn)) {
+          await _reviewAndTurnTorchOff();
+          continue;
+        }
+        if (isSpokenNotificationRead(turn)) {
+          await _reviewAndReadNotifications();
           continue;
         }
         await widget.state.send(
@@ -4118,6 +4186,251 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return '$seconds ${seconds == 1 ? 'second' : 'seconds'}';
   }
 
+  Future<void> _reviewAndLaunchApp(SpokenAppLaunch request) async {
+    final apps = await VoiceTools.listApps();
+    final query = request.name.toLowerCase();
+    if (!mounted) return;
+    final matches = apps.where((app) {
+      final label = (app['label'] as String? ?? '').toLowerCase();
+      return label == query ||
+          label.startsWith(query) ||
+          query.startsWith(label);
+    }).toList();
+    if (matches.length != 1) {
+      if (mounted) {
+        notice(
+          context,
+          matches.isEmpty ? 'I couldn’t find that installed app.' : 'That app name matches more than one app; please say its full name.',
+        );
+      }
+      return;
+    }
+    final app = matches.single;
+    final label = app['label'] as String? ?? request.name;
+    final approved =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Open this app?'),
+            content: Text(
+              'Open $label? Nothing will happen until you approve.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Open app'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!approved || !mounted || !_liveConversationActive) return;
+    final result = await VoiceTools.executeApp(
+      app['package'] as String,
+      approved: true,
+    );
+    if (mounted) {
+      notice(
+        context,
+        result['ok'] == true ? '$label opened.' : 'Android didn’t open $label.',
+      );
+    }
+  }
+
+  Future<void> _reviewAndSearchWeb(SpokenWebSearch request) async {
+    final approved =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Review web search'),
+            content: Text(
+              'Search Android for “${request.query}”? The selected search app will receive this query.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Search'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!approved || !mounted || !_liveConversationActive) return;
+    try {
+      final result = await VoiceTools.searchWeb(request.query, approved: true);
+      if (mounted) {
+        notice(
+          context,
+          result['ok'] == true
+              ? 'Search opened in Android. I haven’t verified its results.'
+              : (result['message'] as String? ??
+                    'Android could not open web search.'),
+        );
+      }
+    } on PlatformException catch (error) {
+      if (mounted) {
+        notice(context, error.message ?? 'Android could not open web search.');
+      }
+    }
+  }
+
+  Future<void> _reviewAndPrepareMessage(SpokenMessageDraft request) async {
+    final approved =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Review message draft'),
+            content: Text(
+              'Open Android messaging with this draft?\n\nTo: ${request.recipient}\n\n${request.body}\n\nNothing will be sent by Personal AI. Choose or verify the recipient, then send it yourself in your messaging app.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Open draft'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!approved || !mounted || !_liveConversationActive) return;
+    try {
+      final result = await VoiceTools.prepareMessage(
+        recipient: request.recipient,
+        body: request.body,
+        approved: true,
+      );
+      if (mounted) {
+        notice(
+          context,
+          result['ok'] == true
+              ? 'The draft is open in Android messaging; it has not been sent.'
+              : (result['message'] as String? ??
+                    'Android could not open the message draft.'),
+        );
+      }
+    } on PlatformException catch (error) {
+      if (mounted) {
+        notice(
+          context,
+          error.message ?? 'Android could not open the message draft.',
+        );
+      }
+    }
+  }
+
+  Future<void> _reviewAndReadNotifications() async {
+    final access = await VoiceTools.permissionStatus();
+    if (!mounted || !_liveConversationActive) return;
+    if (access['notification_access'] != true) {
+      final openSettings =
+          await showDialog<bool>(
+            context: context,
+            builder: (dialogContext) => AlertDialog(
+              title: const Text('Notification access needed'),
+              content: const Text(
+                'Android requires you to enable notification access in Settings. Personal AI will read notifications only after your request and won’t send them to Gemini.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  child: const Text('Open Settings'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+      if (openSettings && mounted) {
+        await VoiceTools.openNotificationAccessSettings();
+      }
+      return;
+    }
+    final approved =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Read recent notifications?'),
+            content: const Text(
+              'I’ll read up to ten visible notifications aloud on this device. They won’t be sent to the AI service.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Read aloud'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!approved || !mounted || !_liveConversationActive) return;
+    final notifications = await VoiceTools.readNotifications(approved: true);
+    final spoken = notifications
+        .map((n) {
+          final title = (n['title'] as String? ?? '').trim();
+          final text = (n['text'] as String? ?? '').trim();
+          return [title, text].where((part) => part.isNotEmpty).join(': ');
+        })
+        .where((line) => line.isNotEmpty)
+        .take(10)
+        .join('. ');
+    if (spoken.isEmpty) {
+      if (!mounted) return;
+      notice(context, 'There are no readable notifications right now.');
+      return;
+    }
+    try {
+      setState(() => speaking = true);
+      await tts.speak(spoken);
+    } finally {
+      if (mounted) setState(() => speaking = false);
+    }
+  }
+
+  Future<void> _reviewAndTurnTorchOff() async {
+    if (!mounted || !_liveConversationActive) return;
+    try {
+      final result = await AssistantState.device
+          .invokeMapMethod<String, dynamic>('turn_torch_off');
+      if (!mounted || !_liveConversationActive || result == null) return;
+      if (result['result'] == 'confirmed_off') {
+        notice(context, 'Android confirmed the flashlight is off.');
+      }
+    } on PlatformException catch (error) {
+      if (mounted && _liveConversationActive) {
+        notice(
+          context,
+          error.message ?? 'Android could not confirm the flashlight is off.',
+        );
+      }
+    } on MissingPluginException {
+      if (mounted && _liveConversationActive) {
+        notice(
+          context,
+          'Flashlight control is available in the Android app only.',
+        );
+      }
+    }
+  }
+
   Future<void> _reviewAndStartLiveDownload(DownloadInput download) async {
     final approved = await reviewDownload(context, download);
     if (!approved || !mounted || !_liveConversationActive) return;
@@ -4144,6 +4457,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _liveConversationActive = false;
     _liveConversationStarting = false;
     _liveTurnQueue.clear();
+    await _wakeWord.stop();
     await _liveAudioSubscription?.cancel();
     _liveAudioSubscription = null;
     try {
@@ -5247,6 +5561,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         letterSpacing: .35,
                       ),
                     ),
+                    if (_liveConversationActive && speaking)
+                      TextButton.icon(
+                        onPressed: () => unawaited(_livePlayback.interrupt()),
+                        icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                        label: const Text('Interrupt speech'),
+                      ),
                   ],
                 ),
               ),

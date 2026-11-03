@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:record/record.dart';
 
 import 'assistant_state.dart' show ServiceException;
 
@@ -210,5 +211,179 @@ class LiveConversationService {
     } on MissingPluginException {
       // Other Flutter platforms have no Android foreground service.
     }
+  }
+}
+
+/// User-started local wake gate. Android's on-device recognizer handles this
+/// locally; network transcription is started only after the wake phrase.
+class WakeWordManager {
+  static const MethodChannel _channel = MethodChannel(
+    'personal_assistant/voice_tools',
+  );
+  Future<void> start(String locale) =>
+      _channel.invokeMethod<void>('start_wake_word', {'locale': locale});
+  Future<void> stop() => _channel.invokeMethod<void>('stop_wake_word');
+}
+
+/// Narrow wrapper around the microphone stream used by a live session.
+class AudioCaptureManager {
+  final AudioRecorder _recorder = AudioRecorder();
+  Future<bool> hasPermission() => _recorder.hasPermission();
+  Future<Stream<Uint8List>> startPcm16Stream() => startStream(
+    const RecordConfig(
+      encoder: AudioEncoder.pcm16bits,
+      sampleRate: 16000,
+      numChannels: 1,
+    ),
+  );
+  Future<Stream<Uint8List>> startStream(RecordConfig config) =>
+      _recorder.startStream(config);
+  Future<void> stop() async {
+    await _recorder.stop();
+  }
+
+  Future<void> dispose() => _recorder.dispose();
+}
+
+/// Interruptible playback facade; UI can stop the current speech without
+/// ending the user-started voice session.
+class AudioPlaybackManager {
+  AudioPlaybackManager(this._stopPlayback);
+  final Future<void> Function() _stopPlayback;
+  Future<void> interrupt() => _stopPlayback();
+}
+
+class VoiceTools {
+  static const MethodChannel _channel = MethodChannel(
+    'personal_assistant/voice_tools',
+  );
+  static Future<List<Map<String, dynamic>>> listApps() async =>
+      ((await _channel.invokeListMethod<Object?>('list_apps')) ?? const [])
+          .whereType<Map>()
+          .map((value) => Map<String, dynamic>.from(value))
+          .toList();
+  static Future<Map<String, dynamic>> executeApp(
+    String packageName, {
+    required bool approved,
+  }) async => Map<String, dynamic>.from(
+    await _channel.invokeMapMethod<String, dynamic>('execute', {
+          'action_id': 'launch_app',
+          'package_name': packageName,
+          'approved': approved,
+        }) ??
+        const {},
+  );
+  static Future<Map<String, dynamic>> searchWeb(
+    String query, {
+    required bool approved,
+  }) async => Map<String, dynamic>.from(
+    await _channel.invokeMapMethod<String, dynamic>('execute', {
+          'action_id': 'web_search',
+          'query': query,
+          'approved': approved,
+        }) ??
+        const {},
+  );
+  static Future<Map<String, dynamic>> prepareMessage({
+    required String recipient,
+    required String body,
+    required bool approved,
+  }) async => Map<String, dynamic>.from(
+    await _channel.invokeMapMethod<String, dynamic>('execute', {
+          'action_id': 'prepare_message',
+          'recipient': recipient,
+          'message': body,
+          'approved': approved,
+        }) ??
+        const {},
+  );
+  static Future<List<Map<String, dynamic>>> readNotifications({
+    required bool approved,
+  }) async =>
+      ((await _channel.invokeListMethod<Object?>('read_notifications', {
+                'approved': approved,
+              })) ??
+              const [])
+          .whereType<Map>()
+          .map((value) => Map<String, dynamic>.from(value))
+          .toList();
+  static Future<Map<String, dynamic>> permissionStatus() async =>
+      Map<String, dynamic>.from(
+        await _channel.invokeMapMethod<String, dynamic>(
+              'voice_permission_status',
+            ) ??
+            const {},
+      );
+  static Future<void> openNotificationAccessSettings() =>
+      _channel.invokeMethod<void>('open_notification_access_settings');
+}
+
+class SpokenAppLaunch {
+  const SpokenAppLaunch(this.name);
+  final String name;
+  static SpokenAppLaunch? parse(String text) {
+    final match = RegExp(
+      r'^\s*(?:please\s+)?(?:open|launch|start)\s+(?:the\s+)?(.+?)\s*$',
+      caseSensitive: false,
+    ).firstMatch(text);
+    final name = match?.group(1)?.trim();
+    if (name == null || name.isEmpty || name.length > 80) return null;
+    return SpokenAppLaunch(name);
+  }
+}
+
+bool isSpokenNotificationRead(String text) => RegExp(
+  r'^\s*(?:please\s+)?(?:read|check)\s+(?:my\s+)?notifications\s*[?.!]*\s*$',
+  caseSensitive: false,
+).hasMatch(text);
+
+/// A narrowly scoped, explicitly phrased request to turn the device flash off.
+/// Android presents its own confirmation and reports whether the state changed.
+bool isSpokenTorchOffCommand(String text) => RegExp(
+  r'^\s*(?:please\s+)?(?:turn|switch)\s+(?:(?:off)\s+(?:my\s+)?(?:phone\s+)?(?:the\s+)?(?:flashlight|torch)|(?:my\s+)?(?:phone\s+)?(?:the\s+)?(?:flashlight|torch)\s+off)\s*[?.!]*\s*$',
+  caseSensitive: false,
+).hasMatch(text);
+
+/// Explicit web-search commands are reviewed before Android hands the query
+/// to a search app. These do not imply that search results were inspected.
+class SpokenWebSearch {
+  const SpokenWebSearch(this.query);
+  final String query;
+
+  static SpokenWebSearch? parse(String text) {
+    final match = RegExp(
+      r'^\s*(?:please\s+)?(?:search(?:\s+the\s+web)?\s+for|look\s+up)\s+(.+?)\s*[?.!]*\s*$',
+      caseSensitive: false,
+    ).firstMatch(text);
+    final query = match?.group(1)?.trim();
+    if (query == null || query.isEmpty || query.length > 2000) return null;
+    return SpokenWebSearch(query);
+  }
+}
+
+/// Parses only explicit, bounded message-draft commands. Recipient names are
+/// not resolved against contacts; Android's messaging app lets the user choose.
+class SpokenMessageDraft {
+  const SpokenMessageDraft({required this.recipient, required this.body});
+  final String recipient;
+  final String body;
+
+  static SpokenMessageDraft? parse(String text) {
+    final match = RegExp(
+      r'^\s*(?:please\s+)?(?:text|message|send\s+(?:a\s+)?(?:text\s+)?message)\s+(?:to\s+)?(.+?)\s*(?:saying|that|:|,)\s*(.+?)\s*[?.!]*\s*$',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(text);
+    final recipient = match?.group(1)?.trim();
+    final body = match?.group(2)?.trim();
+    if (recipient == null ||
+        recipient.isEmpty ||
+        recipient.length > 80 ||
+        body == null ||
+        body.isEmpty ||
+        body.length > 4000) {
+      return null;
+    }
+    return SpokenMessageDraft(recipient: recipient, body: body);
   }
 }
