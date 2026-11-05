@@ -35,10 +35,6 @@ void main() {
       AssistantState.device,
       (_) async => true,
     );
-    messenger.setMockMethodCallHandler(
-      const MethodChannel('com.llfbandit.record/messages'),
-      (_) async => null,
-    );
   });
 
   tearDown(() {
@@ -49,10 +45,6 @@ void main() {
       null,
     );
     messenger.setMockMethodCallHandler(AssistantState.device, null);
-    messenger.setMockMethodCallHandler(
-      const MethodChannel('com.llfbandit.record/messages'),
-      null,
-    );
   });
 
   test(

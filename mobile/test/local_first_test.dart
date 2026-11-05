@@ -74,9 +74,13 @@ void main() {
 
       await state.saveVoiceConversationMode('hands_free');
       await state.saveVoiceConversationMode('live_conversation');
+      final liveRestored = AssistantState();
+      await liveRestored.initialize();
+      expect(liveRestored.voiceConversationMode, 'live_conversation');
+      await liveRestored.saveVoiceConversationMode('hands_free');
       final restored = AssistantState();
       await restored.initialize();
-      expect(restored.voiceConversationMode, 'live_conversation');
+      expect(restored.voiceConversationMode, 'hands_free');
 
       await expectLater(
         restored.saveVoiceConversationMode('always_listening'),
@@ -84,7 +88,7 @@ void main() {
       );
       final unchanged = AssistantState();
       await unchanged.initialize();
-      expect(unchanged.voiceConversationMode, 'live_conversation');
+      expect(unchanged.voiceConversationMode, 'hands_free');
     },
   );
   test(

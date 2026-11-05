@@ -210,7 +210,6 @@ class AssistantState extends ChangeNotifier {
   String compatibleApiKey = '';
   String geminiApiKey = '';
   String openAiApiKey = '';
-  String deepgramApiKey = '';
   String azureSpeechApiKey = '';
   String azureSpeechRegion = '';
   bool azureSpeechEnabled = false;
@@ -391,8 +390,9 @@ class AssistantState extends ChangeNotifier {
           : 'professional';
       studyModeEnabled = await storage.read(key: 'study_mode_enabled') == 'yes';
       speechMode = await storage.read(key: 'speech_mode') ?? 'offline';
-      if (!['offline', 'online', 'deepgram'].contains(speechMode)) {
+      if (!['offline', 'online'].contains(speechMode)) {
         speechMode = 'offline';
+        await storage.write(key: 'speech_mode', value: speechMode);
       }
       speakReplies = await storage.read(key: 'speak_replies') == 'yes';
       final savedVoiceConversationMode = await storage.read(
@@ -406,6 +406,12 @@ class AssistantState extends ChangeNotifier {
           }.contains(savedVoiceConversationMode)
           ? savedVoiceConversationMode!
           : 'push_to_talk';
+      if (savedVoiceConversationMode != voiceConversationMode) {
+        await storage.write(
+          key: 'voice_conversation_mode',
+          value: voiceConversationMode,
+        );
+      }
       shareHistory = await storage.read(key: 'online_share_history') == 'yes';
       shareMemories = await storage.read(key: 'online_share_memories') == 'yes';
       final savedSpeechRate = double.tryParse(
@@ -465,7 +471,7 @@ class AssistantState extends ChangeNotifier {
           : geminiModel;
       geminiApiKey = await storage.read(key: 'gemini_api_key') ?? '';
       openAiApiKey = await storage.read(key: 'openai_api_key') ?? '';
-      deepgramApiKey = await storage.read(key: 'deepgram_api_key') ?? '';
+      await storage.delete(key: 'deepgram_api_key');
       azureSpeechApiKey = await storage.read(key: 'azure_speech_api_key') ?? '';
       azureSpeechRegion = await storage.read(key: 'azure_speech_region') ?? '';
       azureSpeechEnabled =
@@ -791,7 +797,6 @@ class AssistantState extends ChangeNotifier {
     final storageKey = switch (provider) {
       'openai' => 'openai_api_key',
       'gemini' => 'gemini_api_key',
-      'deepgram' => 'deepgram_api_key',
       'azure_speech' => 'azure_speech_api_key',
       _ => throw ServiceException('Unsupported provider credential.'),
     };
@@ -805,9 +810,6 @@ class AssistantState extends ChangeNotifier {
       case 'gemini':
         geminiApiKey = key;
         break;
-      case 'deepgram':
-        deepgramApiKey = key;
-        break;
       case 'azure_speech':
         azureSpeechApiKey = key;
         break;
@@ -819,7 +821,6 @@ class AssistantState extends ChangeNotifier {
     final storageKey = switch (provider) {
       'openai' => 'openai_api_key',
       'gemini' => 'gemini_api_key',
-      'deepgram' => 'deepgram_api_key',
       'azure_speech' => 'azure_speech_api_key',
       _ => throw ServiceException('Unsupported provider credential.'),
     };
@@ -832,9 +833,6 @@ class AssistantState extends ChangeNotifier {
         geminiApiKey = '';
         await storage.write(key: 'gemini_tts_enabled', value: 'no');
         geminiTtsEnabled = false;
-        break;
-      case 'deepgram':
-        deepgramApiKey = '';
         break;
       case 'azure_speech':
         azureSpeechApiKey = '';
@@ -1304,7 +1302,7 @@ class AssistantState extends ChangeNotifier {
   }
 
   Future<void> saveSpeechMode(String mode) async {
-    if (!['offline', 'online', 'deepgram'].contains(mode)) {
+    if (!['offline', 'online'].contains(mode)) {
       throw ServiceException('Unsupported speech mode');
     }
     await storage.write(key: 'speech_mode', value: mode);
