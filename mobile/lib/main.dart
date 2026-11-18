@@ -461,7 +461,7 @@ class Shell extends StatelessWidget {
     final dark = theme.brightness == Brightness.dark;
     final route = ModalRoute.of(context);
     final currentRoute = route?.settings.name;
-    final canPop = route?.canPop ?? false;
+    final isHomeRoute = currentRoute == null || currentRoute == '/home';
     return Scaffold(
       extendBody: true,
       drawer: primaryNavigation
@@ -481,10 +481,10 @@ class Shell extends StatelessWidget {
         leadingWidth: 58,
         leading: !primaryNavigation
             ? null
-            : canPop
+            : !isHomeRoute
             ? IconButton(
-                tooltip: 'Back',
-                onPressed: () => Navigator.maybePop(context),
+                tooltip: 'Back to Home',
+                onPressed: () => _handleAppBack(context, currentRoute),
                 icon: const Icon(Icons.arrow_back_rounded),
               )
             : Builder(
@@ -496,7 +496,7 @@ class Shell extends StatelessWidget {
               ),
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
-          if (primaryNavigation && canPop)
+          if (primaryNavigation && !isHomeRoute)
             Builder(
               builder: (drawerContext) => IconButton(
                 tooltip: 'Open navigation menu',
@@ -511,43 +511,66 @@ class Shell extends StatelessWidget {
         scrolledUnderElevation: 0,
         titleSpacing: 8,
       ),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: dark
-                    ? const [
-                        Color(0xff101322),
-                        Color(0xff151b2b),
-                        Color(0xff101a20),
-                      ]
-                    : const [
-                        Color(0xffe8edff),
-                        Color(0xfff8f7fc),
-                        Color(0xffe6f4f1),
-                      ],
+      body: Builder(
+        builder: (bodyContext) => PopScope<Object?>(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (didPop) return;
+            final scaffold = Scaffold.maybeOf(bodyContext);
+            if (scaffold?.isDrawerOpen ?? false) {
+              scaffold!.closeDrawer();
+              return;
+            }
+            _handleAppBack(bodyContext, currentRoute);
+          },
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: dark
+                        ? const [
+                            Color(0xff101322),
+                            Color(0xff151b2b),
+                            Color(0xff101a20),
+                          ]
+                        : const [
+                            Color(0xffe8edff),
+                            Color(0xfff8f7fc),
+                            Color(0xffe6f4f1),
+                          ],
+                  ),
+                ),
               ),
-            ),
-          ),
-          const Positioned.fill(child: _AmbientGlow()),
-          SafeArea(
-            top: false,
-            child: Align(
-              alignment: Alignment.topCenter,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: contentMaxWidth),
-                child: child,
+              const Positioned.fill(child: _AmbientGlow()),
+              SafeArea(
+                top: false,
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: contentMaxWidth),
+                    child: child,
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
+}
+
+void _handleAppBack(BuildContext context, String? currentRoute) {
+  if (currentRoute == null || currentRoute == '/home') {
+    unawaited(SystemNavigator.pop());
+    return;
+  }
+  Navigator.of(context)
+      .pushNamedAndRemoveUntil<void>('/home', (route) => false);
 }
 
 class WelcomeSplash extends StatefulWidget {
