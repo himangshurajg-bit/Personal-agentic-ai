@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show Key, debugPrint;
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
@@ -154,18 +154,41 @@ void main() {
       phase('initial app frame settled');
       // Use the grouped navigation drawer for routes; the glass dock only
       // shows labels for selected destinations and reserves its center for Voice.
-      for (final label in ['Chat', 'Actions', 'Memory', 'Settings', 'Home']) {
+      const drawerList = Key('navigation-drawer-list');
+      final destinationMarkers = <String, Finder>{
+        'Chat': find.byType(ChatScreen),
+        'Actions': find.text('Prepare a reminder'),
+        'Memory': find.text('Synthetic blue preference'),
+        'Settings': find.text('Make it yours'),
+        'Home': find.text('Here when you need me'),
+      };
+      for (final label in destinationMarkers.keys) {
         await tester.tap(find.byTooltip('Open navigation menu'));
         await pumpRouteFrames(tester);
         phase('navigation tap started: $label');
-        final destination = find.text(label).last;
+        final drawer = find.byKey(drawerList);
+        final destination = find.descendant(
+          of: drawer,
+          matching: find.text(label),
+        );
+        expect(destination, findsOneWidget, reason: '$label drawer item');
         await tester.ensureVisible(destination);
         await pumpRouteFrames(tester);
+        expect(
+          tester.getRect(drawer).contains(tester.getCenter(destination)),
+          isTrue,
+          reason: '$label tap target must be inside the drawer',
+        );
         await tester.tap(destination);
         phase('navigation tap completed: $label');
         await pumpRouteFrames(tester);
         phase('navigation settled: $label');
-        expect(tester.takeException(), isNull);
+        expect(
+          destinationMarkers[label],
+          findsOneWidget,
+          reason: 'Entering $label must show its destination marker',
+        );
+        expect(tester.takeException(), isNull, reason: 'Entering $label');
       }
       phase('drawer navigation passed');
       final draft = await s.prepareAction({
