@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show Key, debugPrint;
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show Scrollable;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -171,6 +172,16 @@ void main() {
           of: drawer,
           matching: find.text(label),
         );
+        // The drawer lazily builds distant rows; scroll its own list before
+        // asserting that the requested destination exists.
+        await tester.scrollUntilVisible(
+          destination,
+          240,
+          scrollable: find
+              .descendant(of: drawer, matching: find.byType(Scrollable))
+              .first,
+        );
+        await pumpRouteFrames(tester);
         expect(destination, findsOneWidget, reason: '$label drawer item');
         await tester.ensureVisible(destination);
         await pumpRouteFrames(tester);
